@@ -1,0 +1,10 @@
+[
+ {"id": "01", "kind": "question", "text": "Hey, are you still coming over for dinner tonight, or should I save you a plate?"},
+ {"id": "02", "kind": "date", "text": "Your package should arrive on Friday, October 9th, sometime before noon.", "ref_words": "your package should arrive on friday october ninth sometime before noon"},
+ {"id": "03", "kind": "long", "text": "When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company."},
+ {"id": "04", "kind": "hard words", "text": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try physiotherapy first."},
+ {"id": "05", "kind": "conversational", "text": "Thanks so much for calling. I'll check the schedule and get back to you first thing tomorrow morning."},
+ {"id": "06", "kind": "question + hard words", "text": "Could you grab some quinoa and Worcestershire sauce on your way home?"},
+ {"id": "07", "kind": "number", "text": "It's about 23 degrees outside, so you probably won't need a jacket.", "ref_words": "its about twenty three degrees outside so you probably wont need a jacket"},
+ {"id": "08", "kind": "conversational", "text": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up."}
+]

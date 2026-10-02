@@ -1,0 +1,731 @@
+{
+ "teacher": {
+  "utmos": 4.488,
+  "utmos_se": 0.008,
+  "wer_medium": 0.0,
+  "wer_base": 0.0,
+  "total_dur_s": 48.5,
+  "per": [
+   {
+    "id": "01",
+    "dur_s": 4.99,
+    "utmos": 4.507,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Hey, are you still coming over for dinner tonight, or should I save you a plate?",
+    "asr_base": "Hey, are you still coming over for dinner tonight or should I save you a plate?"
+   },
+   {
+    "id": "02",
+    "dur_s": 5.34,
+    "utmos": 4.486,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Your package should arrive on Friday, October 9th, sometime before noon.",
+    "asr_base": "Your package should arrive on Friday, October 9th, sometime before noon."
+   },
+   {
+    "id": "03",
+    "dur_s": 9.15,
+    "utmos": 4.488,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company.",
+    "asr_base": "When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company."
+   },
+   {
+    "id": "04",
+    "dur_s": 7.35,
+    "utmos": 4.474,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try physiotherapy first.",
+    "asr_base": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try physiotherapy first."
+   },
+   {
+    "id": "05",
+    "dur_s": 6.21,
+    "utmos": 4.477,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Thanks so much for calling. I'll check the schedule and get back to you first thing tomorrow morning.",
+    "asr_base": "Thanks so much for calling. I'll check the schedule and get back to you first thing tomorrow morning."
+   },
+   {
+    "id": "06",
+    "dur_s": 3.92,
+    "utmos": 4.445,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Could you grab some quinoa and Worcestershire sauce on your way home?",
+    "asr_base": "Could you grab some quinoa and Worcestershire sauce on your way home?"
+   },
+   {
+    "id": "07",
+    "dur_s": 5.3,
+    "utmos": 4.525,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "It's about 23 degrees outside, so you probably won't need a jacket.",
+    "asr_base": "It's about 23 degrees outside, so you probably won't need a jacket."
+   },
+   {
+    "id": "08",
+    "dur_s": 6.24,
+    "utmos": 4.505,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up.",
+    "asr_base": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up."
+   }
+  ]
+ },
+ "chip256": {
+  "utmos": 4.463,
+  "utmos_se": 0.009,
+  "wer_medium": 0.0,
+  "wer_base": 0.0,
+  "total_dur_s": 50.68,
+  "per": [
+   {
+    "id": "01",
+    "dur_s": 5.22,
+    "utmos": 4.435,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Hey, are you still coming over for dinner tonight, or should I save you a plate?",
+    "asr_base": "Hey, are you still coming over for dinner tonight or should I save you a plate?"
+   },
+   {
+    "id": "02",
+    "dur_s": 5.33,
+    "utmos": 4.486,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Your package should arrive on Friday, October 9, sometime before noon.",
+    "asr_base": "Your package should arrive on Friday, October 9, sometime before noon."
+   },
+   {
+    "id": "03",
+    "dur_s": 10.46,
+    "utmos": 4.476,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company.",
+    "asr_base": "When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company."
+   },
+   {
+    "id": "04",
+    "dur_s": 7.31,
+    "utmos": 4.431,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try physiotherapy first.",
+    "asr_base": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try physiotherapy first."
+   },
+   {
+    "id": "05",
+    "dur_s": 6.15,
+    "utmos": 4.476,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Thanks so much for calling. I'll check the schedule and get back to you first thing tomorrow morning.",
+    "asr_base": "Thanks so much for calling. I'll check the schedule and get back to you first thing tomorrow morning."
+   },
+   {
+    "id": "06",
+    "dur_s": 4.24,
+    "utmos": 4.422,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Could you grab some quinoa and Worcestershire sauce on your way home?",
+    "asr_base": "Could you grab some quinoa and Worcestershire sauce on your way home?"
+   },
+   {
+    "id": "07",
+    "dur_s": 5.51,
+    "utmos": 4.487,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "It's about 23 degrees outside, so you probably won't need a jacket.",
+    "asr_base": "It's about 23 degrees outside, so you probably won't need a jacket."
+   },
+   {
+    "id": "08",
+    "dur_s": 6.46,
+    "utmos": 4.491,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up.",
+    "asr_base": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up."
+   }
+  ]
+ },
+ "chip384": {
+  "utmos": 4.476,
+  "utmos_se": 0.009,
+  "wer_medium": 0.0,
+  "wer_base": 0.0,
+  "total_dur_s": 50.75,
+  "per": [
+   {
+    "id": "01",
+    "dur_s": 5.22,
+    "utmos": 4.48,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Hey, are you still coming over for dinner tonight, or should I save you a plate?",
+    "asr_base": "Hey, are you still coming over for dinner tonight or should I save you a plate?"
+   },
+   {
+    "id": "02",
+    "dur_s": 5.36,
+    "utmos": 4.499,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Your package should arrive on Friday, October 9, sometime before noon.",
+    "asr_base": "Your package should arrive on Friday, October 9th, sometime before noon."
+   },
+   {
+    "id": "03",
+    "dur_s": 10.45,
+    "utmos": 4.476,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company.",
+    "asr_base": "When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company."
+   },
+   {
+    "id": "04",
+    "dur_s": 7.3,
+    "utmos": 4.448,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try physiotherapy first.",
+    "asr_base": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try physiotherapy first."
+   },
+   {
+    "id": "05",
+    "dur_s": 6.18,
+    "utmos": 4.471,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Thanks so much for calling. I'll check the schedule and get back to you first thing tomorrow morning.",
+    "asr_base": "Thanks so much for calling. I'll check the schedule and get back to you first thing tomorrow morning."
+   },
+   {
+    "id": "06",
+    "dur_s": 4.28,
+    "utmos": 4.428,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Could you grab some quinoa and Worcestershire sauce on your way home?",
+    "asr_base": "Could you grab some quinoa and Worcestershire sauce on your way home?"
+   },
+   {
+    "id": "07",
+    "dur_s": 5.51,
+    "utmos": 4.5,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "It's about 23 degrees outside, so you probably won't need a jacket.",
+    "asr_base": "It's about 23 degrees outside, so you probably won't need a jacket."
+   },
+   {
+    "id": "08",
+    "dur_s": 6.45,
+    "utmos": 4.508,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up.",
+    "asr_base": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up."
+   }
+  ]
+ },
+ "chip256_stream": {
+  "utmos": 4.46,
+  "utmos_se": 0.008,
+  "wer_medium": 0.0,
+  "wer_base": 0.0,
+  "total_dur_s": 49.75,
+  "per": [
+   {
+    "id": "01",
+    "dur_s": 4.98,
+    "utmos": 4.466,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Hey, are you still coming over for dinner tonight, or should I save you a plate?",
+    "asr_base": "Hey, are you still coming over for dinner tonight or should I save you a plate?"
+   },
+   {
+    "id": "02",
+    "dur_s": 5.25,
+    "utmos": 4.463,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Your package should arrive on Friday, October 9, sometime before noon.",
+    "asr_base": "Your package should arrive on Friday, October 9th sometime before noon."
+   },
+   {
+    "id": "03",
+    "dur_s": 10.55,
+    "utmos": 4.453,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company.",
+    "asr_base": "When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company."
+   },
+   {
+    "id": "04",
+    "dur_s": 6.93,
+    "utmos": 4.452,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try Physiotherapy first.",
+    "asr_base": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try physiotherapy first."
+   },
+   {
+    "id": "05",
+    "dur_s": 6.12,
+    "utmos": 4.458,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Thanks so much for calling. I'll check the schedule and get back to you first thing tomorrow morning.",
+    "asr_base": "Thanks so much for calling, I'll check the schedule and get back to you first thing tomorrow morning."
+   },
+   {
+    "id": "06",
+    "dur_s": 4.21,
+    "utmos": 4.413,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Could you grab some quinoa and Worcestershire sauce on your way home?",
+    "asr_base": "Could you grab some quinoa and Worcestershire sauce on your way home?"
+   },
+   {
+    "id": "07",
+    "dur_s": 5.37,
+    "utmos": 4.491,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "It's about 23 degrees outside, so you probably won't need a jacket.",
+    "asr_base": "It's about 23 degrees outside, so you probably won't need a jacket."
+   },
+   {
+    "id": "08",
+    "dur_s": 6.34,
+    "utmos": 4.486,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up.",
+    "asr_base": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up."
+   }
+  ]
+ },
+ "sano_amy": {
+  "utmos": 3.976,
+  "utmos_se": 0.091,
+  "wer_medium": 0.0,
+  "wer_base": 0.0104,
+  "total_dur_s": 50.34,
+  "per": [
+   {
+    "id": "01",
+    "dur_s": 5.0,
+    "utmos": 3.655,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Hey, are you still coming over for dinner tonight, or should I save you a plate?",
+    "asr_base": "Hey, are you still coming over for dinner tonight, or should I save you a plate?"
+   },
+   {
+    "id": "02",
+    "dur_s": 5.09,
+    "utmos": 4.317,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Your package should arrive on Friday, October 9, sometime before noon.",
+    "asr_base": "Your package should arrive on Friday, October 9, sometime before noon."
+   },
+   {
+    "id": "03",
+    "dur_s": 10.85,
+    "utmos": 4.302,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "When I finally got to the station, the last train had already left so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company.",
+    "asr_base": "When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company."
+   },
+   {
+    "id": "04",
+    "dur_s": 6.62,
+    "utmos": 4.125,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try physiotherapy first.",
+    "asr_base": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try physiotherapy first."
+   },
+   {
+    "id": "05",
+    "dur_s": 6.27,
+    "utmos": 3.759,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Thanks so much for calling, I'll check the schedule and get back to you first thing tomorrow morning.",
+    "asr_base": "Thanks so much for calling. I'll check the schedule and get back to you first thing tomorrow morning."
+   },
+   {
+    "id": "06",
+    "dur_s": 4.37,
+    "utmos": 3.876,
+    "wer_medium": 0.0,
+    "wer_base": 0.083,
+    "asr_medium": "Could you grab some quinoa and Worcestershire sauce on your way home?",
+    "asr_base": "Could you grab some Keenwa and Worcestershire sauce on your way home?"
+   },
+   {
+    "id": "07",
+    "dur_s": 5.43,
+    "utmos": 4.121,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "It's about 23 degrees outside, so you probably won't need a jacket.",
+    "asr_base": "It's about 23 degrees outside, so you probably won't need a jacket."
+   },
+   {
+    "id": "08",
+    "dur_s": 6.71,
+    "utmos": 3.656,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up.",
+    "asr_base": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up."
+   }
+  ]
+ },
+ "sano_heart-nano": {
+  "utmos": 2.074,
+  "utmos_se": 0.069,
+  "wer_medium": 0.0096,
+  "wer_base": 0.0096,
+  "total_dur_s": 43.01,
+  "per": [
+   {
+    "id": "01",
+    "dur_s": 4.25,
+    "utmos": 1.88,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Hey, are you still coming over for dinner tonight, or should I save you a plate?",
+    "asr_base": "Hey, are you still coming over for dinner tonight? Or should I save you a plate?"
+   },
+   {
+    "id": "02",
+    "dur_s": 4.63,
+    "utmos": 1.727,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Your package should arrive on Friday, October 9th, sometime before noon.",
+    "asr_base": "Your package should arrive on Friday, October 9th, sometime before noon."
+   },
+   {
+    "id": "03",
+    "dur_s": 9.33,
+    "utmos": 2.135,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company.",
+    "asr_base": "When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company."
+   },
+   {
+    "id": "04",
+    "dur_s": 6.14,
+    "utmos": 2.245,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try physiotherapy first.",
+    "asr_base": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try physiotherapy first."
+   },
+   {
+    "id": "05",
+    "dur_s": 5.3,
+    "utmos": 2.379,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Thanks so much for calling. I'll check the schedule and get back to you first thing tomorrow morning.",
+    "asr_base": "Thanks so much for calling. I'll check the schedule and get back to you first thing tomorrow morning."
+   },
+   {
+    "id": "06",
+    "dur_s": 3.27,
+    "utmos": 2.117,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Could you grab some quinoa and Worcestershire sauce on your way home?",
+    "asr_base": "Could you grab some quinoa and Worcestershire sauce on your way home?"
+   },
+   {
+    "id": "07",
+    "dur_s": 4.5,
+    "utmos": 1.972,
+    "wer_medium": 0.077,
+    "wer_base": 0.077,
+    "asr_medium": "It's about 23 degrees outside, so you probably would need a jacket.",
+    "asr_base": "It's about 23 degrees outside, so you probably will need a jacket."
+   },
+   {
+    "id": "08",
+    "dur_s": 5.59,
+    "utmos": 2.139,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up.",
+    "asr_base": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up."
+   }
+  ]
+ },
+ "chip_before": {
+  "utmos": 4.396,
+  "utmos_se": 0.016,
+  "wer_medium": 0.0,
+  "wer_base": 0.0,
+  "total_dur_s": 49.77,
+  "per": [
+   {
+    "id": "01",
+    "dur_s": 5.17,
+    "utmos": 4.368,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Hey, are you still coming over for dinner tonight, or should I save you a plate?",
+    "asr_base": "Hey, are you still coming over for dinner tonight or should I save you a plate?"
+   },
+   {
+    "id": "02",
+    "dur_s": 5.31,
+    "utmos": 4.425,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Your package should arrive on Friday, October 9, sometime before noon.",
+    "asr_base": "Your package should arrive on Friday, October 9th, sometime before noon."
+   },
+   {
+    "id": "03",
+    "dur_s": 9.72,
+    "utmos": 4.34,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company.",
+    "asr_base": "When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company."
+   },
+   {
+    "id": "04",
+    "dur_s": 7.24,
+    "utmos": 4.377,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try physiotherapy first.",
+    "asr_base": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try physiotherapy first."
+   },
+   {
+    "id": "05",
+    "dur_s": 6.09,
+    "utmos": 4.441,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Thanks so much for calling. I'll check the schedule and get back to you first thing tomorrow morning.",
+    "asr_base": "Thanks so much for calling, I'll check the schedule and get back to you first thing tomorrow morning."
+   },
+   {
+    "id": "06",
+    "dur_s": 4.38,
+    "utmos": 4.327,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Could you grab some quinoa and Worcestershire sauce on your way home?",
+    "asr_base": "Could you grab some quinoa and Worcestershire sauce on your way home?"
+   },
+   {
+    "id": "07",
+    "dur_s": 5.47,
+    "utmos": 4.45,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "It's about 23 degrees outside, so you probably won't need a jacket.",
+    "asr_base": "It's about 23 degrees outside, so you probably won't need a jacket."
+   },
+   {
+    "id": "08",
+    "dur_s": 6.39,
+    "utmos": 4.439,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up.",
+    "asr_base": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up."
+   }
+  ]
+ },
+ "chip_stream_v2": {
+  "utmos": 4.441,
+  "utmos_se": 0.009,
+  "wer_medium": 0.0,
+  "wer_base": 0.0,
+  "total_dur_s": 49.42,
+  "per": [
+   {
+    "id": "01",
+    "dur_s": 4.98,
+    "utmos": 4.461,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Hey, are you still coming over for dinner tonight, or should I save you a plate?",
+    "asr_base": "Hey, are you still coming over for dinner tonight or should I save you a plate?"
+   },
+   {
+    "id": "02",
+    "dur_s": 5.13,
+    "utmos": 4.461,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Your package should arrive on Friday, October 9, sometime before noon.",
+    "asr_base": "Your package should arrive on Friday, October 9th sometime before noon."
+   },
+   {
+    "id": "03",
+    "dur_s": 10.36,
+    "utmos": 4.425,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company.",
+    "asr_base": "When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company."
+   },
+   {
+    "id": "04",
+    "dur_s": 6.97,
+    "utmos": 4.425,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try physiotherapy first.",
+    "asr_base": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try physiotherapy first."
+   },
+   {
+    "id": "05",
+    "dur_s": 6.07,
+    "utmos": 4.437,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Thanks so much for calling. I'll check the schedule and get back to you first thing tomorrow morning.",
+    "asr_base": "Thanks so much for calling. I'll check the schedule and get back to you first thing tomorrow morning."
+   },
+   {
+    "id": "06",
+    "dur_s": 4.24,
+    "utmos": 4.388,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Could you grab some quinoa and Worcestershire sauce on your way home?",
+    "asr_base": "Could you grab some Quinoa and Worcestershire sauce on your way home?"
+   },
+   {
+    "id": "07",
+    "dur_s": 5.38,
+    "utmos": 4.461,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "It's about 23 degrees outside, so you probably won't need a jacket.",
+    "asr_base": "It's about 23 degrees outside, so you probably won't need a jacket."
+   },
+   {
+    "id": "08",
+    "dur_s": 6.29,
+    "utmos": 4.474,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up.",
+    "asr_base": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up."
+   }
+  ]
+ },
+ "chip_stream_v3": {
+  "utmos": 4.457,
+  "utmos_se": 0.008,
+  "wer_medium": 0.0,
+  "wer_base": 0.0,
+  "total_dur_s": 49.34,
+  "per": [
+   {
+    "id": "01",
+    "dur_s": 4.97,
+    "utmos": 4.457,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Hey, are you still coming over for dinner tonight, or should I save you a plate?",
+    "asr_base": "Hey, are you still coming over for dinner tonight or should I save you a plate?"
+   },
+   {
+    "id": "02",
+    "dur_s": 5.16,
+    "utmos": 4.476,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Your package should arrive on Friday, October 9, sometime before noon.",
+    "asr_base": "Your package should arrive on Friday, October 9th sometime before noon."
+   },
+   {
+    "id": "03",
+    "dur_s": 10.36,
+    "utmos": 4.431,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company.",
+    "asr_base": "When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company."
+   },
+   {
+    "id": "04",
+    "dur_s": 6.95,
+    "utmos": 4.441,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try physiotherapy first.",
+    "asr_base": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try physiotherapy first."
+   },
+   {
+    "id": "05",
+    "dur_s": 5.97,
+    "utmos": 4.455,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Thanks so much for calling. I'll check the schedule and get back to you first thing tomorrow morning.",
+    "asr_base": "Thanks so much for calling. I'll check the schedule and get back to you first thing tomorrow morning."
+   },
+   {
+    "id": "06",
+    "dur_s": 4.22,
+    "utmos": 4.427,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "Could you grab some quinoa and Worcestershire sauce on your way home?",
+    "asr_base": "Could you grab some Quinoa and Worcestershire sauce on your way home?"
+   },
+   {
+    "id": "07",
+    "dur_s": 5.42,
+    "utmos": 4.477,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "It's about 23 degrees outside, so you probably won't need a jacket.",
+    "asr_base": "It's about 23 degrees outside, so you probably won't need a jacket."
+   },
+   {
+    "id": "08",
+    "dur_s": 6.29,
+    "utmos": 4.489,
+    "wer_medium": 0.0,
+    "wer_base": 0.0,
+    "asr_medium": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up.",
+    "asr_base": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up."
+   }
+  ]
+ }
+}

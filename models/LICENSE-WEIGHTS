@@ -1,0 +1,28 @@
+Ito voice model weights
+Copyright (C) 2026 Hashing Works, S.L.L. (Lokutor)
+
+The Ito weight files ito_v3.pt and ito_v3_esp32s3.bin (distributed through huggingface.co/lokutor-ai/ito-tts-v3),
+and any copy of these weights embedded in another file, are licensed under the Creative Commons
+Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0):
+
+    https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+    (summary: https://creativecommons.org/licenses/by-nc-sa/4.0/)
+
+The same license applies to the Ito audio in samples/ and results/.
+
+In short: you may use, share and adapt the weights for NON-COMMERCIAL purposes, with attribution, and you must share
+adaptations under the same license.
+
+Commercial use requires a separate written license from Lokutor. This includes, among other things, use in products
+or devices, in paid services or APIs, internal business use, and generating audio for commercial content.
+
+Adapted material, under the license's own terms, includes weights that are fine-tuned, distilled, pruned, quantized,
+converted or otherwise derived from these weights. Such weights stay under CC BY-NC-SA 4.0.
+
+Lokutor's terms of use (TERMS.md) accompany the download and add to this license. They do not
+conflict with it: they cover the use of Ito's audio output, which the CC license does not address.
+
+Attribution: "Ito voice model by Lokutor (lokutor.com), CC BY-NC-SA 4.0". Third-party attributions for the data and
+the teacher model are in ../NOTICE.
+
+Commercial licenses, and no-cost licenses for collaborations: contact@lokutor.com

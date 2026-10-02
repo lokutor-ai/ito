@@ -1,0 +1,33 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+.DS_Store
+*.wav
+!samples/**/*.wav
+!results/**/*.wav
+# training data and runs
+data/
+corpus*/
+runs/
+ckpts/
+# firmware builds
+esp32/firmware/build*/
+esp32/firmware/sdkconfig
+esp32/firmware/sdkconfig.old
+esp32/firmware/managed_components/
+esp32/host/build/
+esp32/export/
+esp32/logs/
+esp32/host/ito_cli
+esp32/host/host_test_v3
+esp32/host/host_test_v3_asan
+esp32/host/gen_selftest
+esp32/host/opcount_v3
+esp32/host/*.dSYM/
+esp32/host/asan.log
+esp32/host/golden/*.wav
+site/
+# weights are downloaded from the gated Hugging Face repo (models/README.md)
+models/*.pt
+models/*.bin

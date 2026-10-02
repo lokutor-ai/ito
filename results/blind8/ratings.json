@@ -1,0 +1,91 @@
+{
+ "test": "blind #8",
+ "date": "2026-10-01",
+ "listeners": 1,
+ "listener": "one expert listener (Lokutor founder), not a panel",
+ "scale": "1-5 naturalness, 12 clips in random order, system names hidden",
+ "sentences": "4 held-out sentences",
+ "systems": {
+  "TEACHER": {
+   "description": "reference: StyleTTS 2 LibriTTS model",
+   "scores": [
+    4,
+    4,
+    4,
+    4
+   ],
+   "mean": 4.0
+  },
+  "ITO_VARIANT_A": {
+   "description": "earlier Ito version, variant A",
+   "scores": [
+    4,
+    3,
+    4,
+    2
+   ],
+   "mean": 3.25
+  },
+  "ITO_VARIANT_B": {
+   "description": "earlier Ito version, variant B",
+   "scores": [
+    3,
+    3,
+    4,
+    2
+   ],
+   "mean": 3.0
+  }
+ },
+ "clip_key": {
+  "01": [
+   "ITO_VARIANT_A",
+   0
+  ],
+  "02": [
+   "TEACHER",
+   3
+  ],
+  "03": [
+   "ITO_VARIANT_B",
+   3
+  ],
+  "04": [
+   "ITO_VARIANT_B",
+   1
+  ],
+  "05": [
+   "ITO_VARIANT_B",
+   0
+  ],
+  "06": [
+   "TEACHER",
+   0
+  ],
+  "07": [
+   "TEACHER",
+   1
+  ],
+  "08": [
+   "TEACHER",
+   2
+  ],
+  "09": [
+   "ITO_VARIANT_A",
+   3
+  ],
+  "10": [
+   "ITO_VARIANT_A",
+   1
+  ],
+  "11": [
+   "ITO_VARIANT_B",
+   2
+  ],
+  "12": [
+   "ITO_VARIANT_A",
+   2
+  ]
+ },
+ "conclusion": "variant A was kept; the weakest sentence for both variants had flattened pitch peaks, which was improved in the released model"
+}

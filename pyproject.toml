@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ito-tts"
+version = "3.0.0"
+description = "Ito: natural-sounding streaming text-to-speech small enough for an ESP32-S3"
+readme = "README.md"
+license = { text = "GPL-3.0-only (code); model weights (downloaded separately) are CC-BY-NC-SA-4.0" }
+authors = [{ name = "Lokutor (Hashing Works, S.L.L.)", email = "contact@lokutor.com" }]
+requires-python = ">=3.9"
+dependencies = [
+    "torch>=2.1",
+    "numpy",
+    "soundfile",
+    "phonemizer>=3.2",
+    "espeakng-loader",
+    "nltk",
+    "huggingface_hub>=0.20",
+]
+
+[project.optional-dependencies]
+esp32 = ["esptool", "pyserial"]
+
+[project.scripts]
+ito-tts = "ito.cli:main"
+
+[tool.setuptools]
+packages = ["ito"]

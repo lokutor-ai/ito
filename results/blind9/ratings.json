@@ -1,0 +1,223 @@
+{
+ "test": "blind #9",
+ "date": "2026-10-02",
+ "listeners": 1,
+ "listener": "one expert listener (Lokutor founder), not a panel",
+ "scale": "1-5 naturalness, 24 clips in random order, system names hidden",
+ "sentences_rated": [
+  "01",
+  "03",
+  "04",
+  "06"
+ ],
+ "note": "4 sentences per system; differences under ~0.5 are within noise for n = 4",
+ "render": "every system: streaming render path, trimmed, -20 LUFS, 24 kHz. The Ito clips are the PyTorch float model; the chip's quantised engine scores PESQ 4.52 against that float model",
+ "summary": {
+  "teacher": {
+   "description": "Teacher: StyleTTS 2 LibriTTS (public weights), reference voice LibriTTS-R 4970",
+   "mean": 4.75,
+   "scores_by_sentence": {
+    "01": 5,
+    "06": 5,
+    "03": 5,
+    "04": 4
+   }
+  },
+  "chip_stream_v3": {
+   "description": "Ito (this release): streaming front + 256-wide vocoder + per-sentence text-to-style predictor (the shipped chip uses a fixed mean style; paired metric difference -0.009)",
+   "mean": 4.0,
+   "scores_by_sentence": {
+    "04": 4,
+    "03": 4,
+    "06": 4,
+    "01": 4
+   }
+  },
+  "chip256": {
+   "description": "Ito variant: bidirectional-GRU front (not streamable for TTFA), 256 vocoder, text-to-style predictor",
+   "mean": 4.0,
+   "scores_by_sentence": {
+    "06": 4,
+    "03": 4,
+    "04": 4,
+    "01": 4
+   }
+  },
+  "chip384": {
+   "description": "Ito variant: bidirectional front, 384-wide vocoder (6.5 M parameters, over the chip budget)",
+   "mean": 3.75,
+   "scores_by_sentence": {
+    "06": 3,
+    "04": 4,
+    "03": 4,
+    "01": 4
+   }
+  },
+  "sano_amy": {
+   "description": "sanoTTS 'amy' (1.46 M parameters, released voice)",
+   "mean": 2.0,
+   "scores_by_sentence": {
+    "04": 2,
+    "01": 2,
+    "06": 1,
+    "03": 3
+   }
+  },
+  "sano_heart-nano": {
+   "description": "sanoTTS 'heart-nano' (0.29 M parameters, MCU-sized voice)",
+   "mean": 1.0,
+   "scores_by_sentence": {
+    "03": 1,
+    "06": 1,
+    "04": 1,
+    "01": 1
+   }
+  }
+ },
+ "clips": [
+  {
+   "clip": "01",
+   "system": "teacher",
+   "sentence": "01",
+   "score": 5
+  },
+  {
+   "clip": "02",
+   "system": "teacher",
+   "sentence": "06",
+   "score": 5
+  },
+  {
+   "clip": "03",
+   "system": "sano_amy",
+   "sentence": "04",
+   "score": 2
+  },
+  {
+   "clip": "04",
+   "system": "chip384",
+   "sentence": "06",
+   "score": 3
+  },
+  {
+   "clip": "05",
+   "system": "teacher",
+   "sentence": "03",
+   "score": 5
+  },
+  {
+   "clip": "06",
+   "system": "chip_stream_v3",
+   "sentence": "04",
+   "score": 4
+  },
+  {
+   "clip": "07",
+   "system": "sano_amy",
+   "sentence": "01",
+   "score": 2
+  },
+  {
+   "clip": "08",
+   "system": "chip_stream_v3",
+   "sentence": "03",
+   "score": 4
+  },
+  {
+   "clip": "09",
+   "system": "chip256",
+   "sentence": "06",
+   "score": 4
+  },
+  {
+   "clip": "10",
+   "system": "chip384",
+   "sentence": "04",
+   "score": 4
+  },
+  {
+   "clip": "11",
+   "system": "chip384",
+   "sentence": "03",
+   "score": 4
+  },
+  {
+   "clip": "12",
+   "system": "chip256",
+   "sentence": "03",
+   "score": 4
+  },
+  {
+   "clip": "13",
+   "system": "sano_heart-nano",
+   "sentence": "03",
+   "score": 1
+  },
+  {
+   "clip": "14",
+   "system": "sano_amy",
+   "sentence": "06",
+   "score": 1
+  },
+  {
+   "clip": "15",
+   "system": "sano_heart-nano",
+   "sentence": "06",
+   "score": 1
+  },
+  {
+   "clip": "16",
+   "system": "sano_amy",
+   "sentence": "03",
+   "score": 3
+  },
+  {
+   "clip": "17",
+   "system": "chip256",
+   "sentence": "04",
+   "score": 4
+  },
+  {
+   "clip": "18",
+   "system": "chip256",
+   "sentence": "01",
+   "score": 4
+  },
+  {
+   "clip": "19",
+   "system": "teacher",
+   "sentence": "04",
+   "score": 4
+  },
+  {
+   "clip": "20",
+   "system": "chip_stream_v3",
+   "sentence": "06",
+   "score": 4
+  },
+  {
+   "clip": "21",
+   "system": "chip_stream_v3",
+   "sentence": "01",
+   "score": 4
+  },
+  {
+   "clip": "22",
+   "system": "sano_heart-nano",
+   "sentence": "04",
+   "score": 1
+  },
+  {
+   "clip": "23",
+   "system": "sano_heart-nano",
+   "sentence": "01",
+   "score": 1
+  },
+  {
+   "clip": "24",
+   "system": "chip384",
+   "sentence": "01",
+   "score": 4
+  }
+ ]
+}
