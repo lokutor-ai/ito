@@ -8,7 +8,8 @@
 //   BOOT button (GPIO0): speak the demo sentences again.
 //   serial (UART0, 115200): "say 0,72,156,..."  speak token ids (tools/say.py)
 //                           "style <0-63>" | "act <8|16>" | "demo" | "demo <k>" | "test" | "stats" | "bench" |
-//                           "wmode <0|1|2>" (weight staging: direct / copy / gdma) | "help"
+//                           "wmode <0|1|2>" (weight staging: direct / copy / gdma) | "first <n>" (frames in the
+//                           low-latency first chunk, default 2 = 25 ms) | "help"
 //   I2S: BCLK GPIO15, LRCLK GPIO16, DOUT GPIO17, sample rate from the blob (24 kHz), 16-bit, mono duplicated to stereo.
 #include <stdio.h>
 #include <string.h>
@@ -39,13 +40,17 @@
 #define MAX_TOKENS 400
 #define CHUNK_TARGET 2400            // samples per chunk (100 ms at 24 kHz): chunk_frames = 2400 / hop
 #define NBUF 2                       // double buffer between synthesis and I2S
+#ifndef FIRST_FRAMES
+#define FIRST_FRAMES 2               // low-latency first chunk: 2 frames (25 ms at 80 fps), then CHUNK_TARGET chunks. The output
+                                     // is bit-identical to any other chunking; `first <n>` changes it (n >= chunk = off)
+#endif
 #ifndef ITOFS_ACT_BITS
 #define ITOFS_ACT_BITS 8             // activations of the int8-weight layers: 8 (one int8 plane, default) or 16; `act` command
 #endif
 
 static itofs_model_t s_model;
 static itofs_ctx_t s_ctx;
-static int s_hop, s_sr, s_chunk_frames, s_chunk_samples, s_style;
+static int s_hop, s_sr, s_chunk_frames, s_chunk_samples, s_style, s_first = FIRST_FRAMES;
 static const int32_t *s_st, *s_st16; // self-test records from the blob ("selftest": default 8-bit activations,
                                      // "selftest_a16": 16-bit); NULL if absent
 
@@ -53,7 +58,7 @@ typedef struct { int16_t *pcm; int n; } buf_t;      // n = samples, 0 = end of u
 static QueueHandle_t s_free_q, s_full_q, s_req_q, s_done_q;
 static volatile int s_underruns, s_playing;
 
-typedef struct { int kind; int n; int16_t tok[MAX_TOKENS]; } req_t;   // 0 say, 1 demos, 2 self-test, 3 style, 4 act bits, 5 bench, 6 wmode
+typedef struct { int kind; int n; int16_t tok[MAX_TOKENS]; } req_t;   // 0 say, 1 demos, 2 self-test, 3 style, 4 act bits, 5 bench, 6 wmode, 7 icprof, 8 first
 static req_t s_req_tmp;
 
 static double ms(int64_t us) { return us / 1000.0; }
@@ -136,6 +141,7 @@ static int speak(const int *tok, int n, int style, uint32_t seed, int play, int1
         if (play) xQueueReceive(s_free_q, &b, portMAX_DELAY);
         int16_t *dst = play ? b.pcm : out + pos;
         int room = play ? s_chunk_samples : (int)((out_max - pos) < s_chunk_samples ? (out_max - pos) : s_chunk_samples);
+        if (pos == 0 && s_first > 0 && s_first * s_hop < room) room = s_first * s_hop;     // low-latency first chunk
         int64_t a = esp_timer_get_time();
         int got = room >= s_hop ? itofs_next_chunk(&s_ctx, dst, room) : 0;
         int64_t e = esp_timer_get_time();
@@ -293,7 +299,7 @@ static void tts_bench(void)
             const int64_t t1 = esp_timer_get_time();
             if (T < 0) { printf("BENCH ERROR begin: %s\n", itofs_strerror(T)); break; }
             long pos = 0;
-            int got = itofs_next_chunk(&s_ctx, pcm, s_chunk_samples);
+            int got = itofs_next_chunk(&s_ctx, pcm, s_first > 0 && s_first < s_chunk_frames ? s_first * s_hop : s_chunk_samples);
             const int64_t t2 = esp_timer_get_time();
             const double o8f = ctx_ops(0) - o8a, off = ctx_ops(1) - ofa, gus_first = (double)s3_stats.us;
             while (got > 0) { pos += got; got = itofs_next_chunk(&s_ctx, pcm, s_chunk_samples); }
@@ -332,6 +338,135 @@ static void tts_bench(void)
     heap_caps_free(pcm);
 }
 
+#ifdef ITOFS_ICPROF
+// ------------------------------------------------------------------------------------------------------------------
+// QEMU -icount profile (build with -D ITOFS_ICPROF=1, run QEMU with -icount shift=0): exact instruction counts of the
+// demo sentences and the self-test sentence, text in -> first chunk out and the rest, on 1 core, on 2 cores with the
+// GEMM halves serialised (exact per-core split) and on 2 cores in parallel. Raw CCOUNT ticks; ICPROF_CALIB converts.
+// ------------------------------------------------------------------------------------------------------------------
+#include "esp_cpu.h"
+static void ic_calib(void)
+{
+    vTaskDelay(2);
+    const uint32_t c0 = esp_cpu_get_cycle_count();
+    const int64_t t0 = esp_timer_get_time();
+    __asm__ volatile("movi a8, 1000000\n loop a8, 1f\n nop\n nop\n nop\n nop\n1:\n" ::: "a8");
+    const uint32_t dc = esp_cpu_get_cycle_count() - c0;
+    const int64_t dt = esp_timer_get_time() - t0;
+    printf("ICPROF_CALIB 4000002 instructions: ccount %u, esp_timer %lld us\n", (unsigned)dc, (long long)dt);
+    double r[8];
+    itofs_prof_micro(r);
+    printf("ICPROF_MICRO instructions per call (x25 ticks): div %.0f gelu_series %.0f gelu_tail %.0f expf %.0f sqrtf %.0f sincosf %.0f logf %.0f muladd-loop %.0f\n",
+           r[0] * 25, r[1] * 25, r[2] * 25, r[3] * 25, r[4] * 25, r[5] * 25, r[6] * 25, r[7] * 25);
+}
+
+typedef struct { double el, single, h0, h1, hmax, dtot, wb, f32, i8; long ns, nd, np; } icsnap_t;
+static void ic_snap(icsnap_t *s, double el)
+{
+    s->el = el; s->single = s3_ic.single; s->h0 = s3_ic.h0; s->h1 = s3_ic.h1; s->hmax = s3_ic.hmax; s->dtot = s3_ic.dual_total;
+    s->ns = s3_ic.nsingle; s->nd = s3_ic.ndual; s->np = s3_ic.npar; s->wb = s3_stats.wbytes; s->f32 = ctx_ops(1); s->i8 = ctx_ops(0);
+}
+static void ic_print(const char *what, const icsnap_t *a, const icsnap_t *b)
+{
+    printf(" | %s el %.0f single %.0f h0 %.0f h1 %.0f hmax %.0f dtot %.0f ns %ld nd %ld np %ld wb %.0f f32 %.0f i8 %.0f", what, b->el - a->el,
+           b->single - a->single, b->h0 - a->h0, b->h1 - a->h1, b->hmax - a->hmax, b->dtot - a->dtot, b->ns - a->ns, b->nd - a->nd, b->np - a->np,
+           b->wb - a->wb, b->f32 - a->f32, b->i8 - a->i8);
+}
+
+static uint32_t ic_clock(void) { return esp_cpu_get_cycle_count(); }
+static const char *ic_pn[ITOFS_PROF_N] = {"PIN", "PROS", "CUR", "SRC", "HFT", "EMB", "BLK", "HEAD", "OLA", "MIN", "MEL", "MOUT",
+                                         "tENC", "tGRU", "tPROJ", "tDUR", "tDOUT", "qlin", "quant", "gemm",
+                                         "gPIN", "gPROS", "gCUR", "gSRC", "gHFT", "gEMB", "gBLK", "gHEAD", "gOLA", "gMIN", "gMEL", "gMOUT",
+                                         "gtENC", "gtGRU", "gtPROJ", "gtDUR", "gtDOUT"};
+static void ic_prof_print(const char *what, const double *a, const double *b)
+{
+    printf("ICPROF_STAGES %s", what);
+    for (int k = 0; k < ITOFS_PROF_N; k++) printf(" %s %.0f", ic_pn[k], b[k] - (a ? a[k] : 0));
+    printf("\n");
+}
+
+#define IC_MAXCH 160
+static float s_icch[IC_MAXCH][4];    // per chunk: samples, critical-path ticks (mode 1), weight bytes, f32 MACs
+static void ic_one(const char *tag, const int *tok, int n, int style, uint32_t seed, int mode, int16_t *pcm, int first)
+{
+    itofs_prof_clock = ic_clock;
+    memset(itofs_prof, 0, sizeof itofs_prof);
+    double pf[ITOFS_PROF_N];
+    s3_dual_enabled = mode != 0; s3_ic_serial = mode == 1;
+    memset(&s3_ic, 0, sizeof s3_ic); s3_stats_reset();
+    icsnap_t z, f, e;
+    ic_snap(&z, 0);
+    vTaskDelay(1);
+    const uint32_t c0 = esp_cpu_get_cycle_count();
+    int T = itofs_begin(&s_ctx, tok, n, style, seed);
+    if (T < 0) { printf("ICPROF ERROR %s\n", itofs_strerror(T)); return; }
+    int got = itofs_next_chunk(&s_ctx, pcm, first > 0 && first < s_chunk_frames ? first * s_hop : s_chunk_samples);
+    uint32_t cp = esp_cpu_get_cycle_count();
+    double el = (double)(uint32_t)(cp - c0);
+    ic_snap(&f, el);
+    icsnap_t pv = f;
+    s_icch[0][0] = got; s_icch[0][1] = (float)(el - (f.h0 + f.h1 - f.hmax)); s_icch[0][2] = (float)f.wb; s_icch[0][3] = (float)f.f32;
+    memcpy(pf, itofs_prof, sizeof pf);
+    uint32_t h = 2166136261u;
+    long pos = 0;
+    int nch = 0;
+    while (got > 0) {
+        for (int i = 0; i < got; i++) { h ^= (uint16_t)pcm[i]; h *= 16777619u; }
+        pos += got; nch++;
+        got = itofs_next_chunk(&s_ctx, pcm, s_chunk_samples);
+        const uint32_t cn = esp_cpu_get_cycle_count();
+        const double de = (double)(uint32_t)(cn - cp);
+        el += de; cp = cn;
+        icsnap_t cu; ic_snap(&cu, el);
+        if (got > 0 && nch < IC_MAXCH) {
+            s_icch[nch][0] = got;
+            s_icch[nch][1] = (float)(de - ((cu.h0 - pv.h0) + (cu.h1 - pv.h1) - (cu.hmax - pv.hmax)));
+            s_icch[nch][2] = (float)(cu.wb - pv.wb); s_icch[nch][3] = (float)(cu.f32 - pv.f32);
+        }
+        pv = cu;
+    }
+    ic_snap(&e, el);
+    printf("ICPROF %s mode %s first %d tokens %d audio %.4f chunks %d fnv %08lx", tag, mode == 0 ? "1core" : mode == 1 ? "2core-serial" : "2core-par",
+           first, n, (double)pos / s_sr, nch, (unsigned long)h);
+    ic_print("first", &z, &f);
+    ic_print("rest", &f, &e);
+    printf("\n");
+    if (mode == 0) { ic_prof_print("first", NULL, pf); ic_prof_print("rest", pf, itofs_prof); }
+    if (mode == 1) {                 // per chunk: samples / critical-path ticks / weight bytes / f32 MACs
+        printf("ICPROF_CHUNKS %s first %d:", tag, first);
+        for (int k = 0; k < nch && k < IC_MAXCH; k++) printf(" %.0f/%.0f/%.0f/%.0f", s_icch[k][0], s_icch[k][1], s_icch[k][2], s_icch[k][3]);
+        printf("\n");
+    }
+}
+
+static void icprof(void)
+{
+    ic_calib();
+    int16_t *pcm = heap_caps_malloc(sizeof(int16_t) * (size_t)s_chunk_samples, MALLOC_CAP_INTERNAL);
+    if (!pcm) { printf("ICPROF ERROR no memory\n"); return; }
+    printf("ICPROF begin: chunk %d frames, %d-bit activations, wmode %s\n", s_chunk_frames, s_ctx.act_bits, s3_wmode_name(s3_wmode));
+    // runs: (mode, first-chunk frames): 1 core; 2 cores serialised (exact per-core split) with the old 8-frame and the
+    // new 2-frame first chunk; 2 cores in parallel
+    static const int runs[][2] = { {0, 8}, {1, 8}, {1, 2}, {1, 1}, {2, 2} };
+    for (int ri = 0; ri < 5; ri++) {
+        const int mode = runs[ri][0], first = runs[ri][1];
+        if (s_st) {
+            int n = s_st[1];
+            for (int i = 0; i < n; i++) s_tok_buf[i] = s_st[7 + i];
+            ic_one("selftest", s_tok_buf, n, s_st[2], (uint32_t)s_st[3], mode, pcm, first);
+        }
+        for (int k = 0; k < s_ndemo; k++) {
+            char tg[16]; snprintf(tg, sizeof tg, "demo%d", k);
+            demo_tokens(k, s_tok_buf);
+            ic_one(tg, s_tok_buf, s_demo_len[k], s_demo_style[k], 1u + (uint32_t)k, mode, pcm, first);
+        }
+    }
+    s3_dual_enabled = 1; s3_ic_serial = 0;
+    heap_caps_free(pcm);
+    printf("ICPROF end\n");
+}
+#endif
+
 static const void *s_blob; static size_t s_blob_size;
 
 static void board_bench(void)
@@ -365,6 +500,13 @@ static void synth_task(void *arg)
             printf("OK style %d\n", s_style);
         } else if (s_req_tmp.kind == 5) {
             board_bench();
+#ifdef ITOFS_ICPROF
+        } else if (s_req_tmp.kind == 7) {
+            icprof();
+#endif
+        } else if (s_req_tmp.kind == 8) {
+            s_first = s_req_tmp.n;
+            printf("OK first chunk %d frames%s\n", s_first, s_first >= s_chunk_frames || s_first <= 0 ? " (= a full chunk)" : "");
         } else if (s_req_tmp.kind == 6) {
             if (s3_set_wmode(s_req_tmp.n)) printf("ERROR weight staging mode %d unavailable\n", s_req_tmp.n);
             else printf("OK weight staging %s\n", s3_wmode_name(s3_wmode));
@@ -421,12 +563,20 @@ static void handle_line(char *line)
     } else if (!strncmp(line, "bench", 5)) {
         s_in_req.kind = 5;
         xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
+#ifdef ITOFS_ICPROF
+    } else if (!strncmp(line, "icprof", 6)) {
+        s_in_req.kind = 7;
+        xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
+#endif
+    } else if (!strncmp(line, "first", 5)) {
+        s_in_req.kind = 8; s_in_req.n = atoi(line + 5);
+        xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
     } else if (!strncmp(line, "wmode", 5)) {
         s_in_req.kind = 6; s_in_req.n = atoi(line + 5);
         xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
     } else if (line[0]) {
         printf("commands: say <comma-separated token ids> | style <0-%d> | act <8|16> | demo [0-%d] | test | stats | bench | "
-               "wmode <0 direct|1 copy|2 gdma>\n", s_model.n_styles - 1, s_ndemo - 1);
+               "wmode <0 direct|1 copy|2 gdma> | first <frames of the first chunk>\n", s_model.n_styles - 1, s_ndemo - 1);
     }
 }
 
@@ -585,6 +735,10 @@ void app_main(void)
            (unsigned)bb, s_chunk_frames, s_chunk_samples, s_ctx.act_bits);
     s3_kernels_init();
     s_ctx.qgemm = s3_qgemm;
+    s_ctx.par = s3_par;              // row-parallel float work on both cores (bit-identical to one core)
+#ifdef ITOFS_ICPROF
+    itofs_prof_clock = ic_clock;
+#endif
     s_blob = blob; s_blob_size = bs;
     load_demos(blob, bs);
     if (s_ndemo) s_style = s_demo_style[0];

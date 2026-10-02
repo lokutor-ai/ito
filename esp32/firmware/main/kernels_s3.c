@@ -48,10 +48,18 @@ const char *s3_wmode_name(int m) { return m == 0 ? "direct" : m == 1 ? "copy" : 
 int s3_dma_ok(void) { return g_dma_ok; }
 void s3_stats_reset(void) { memset(&s3_stats, 0, sizeof s3_stats); }
 
+// main/dot_rows_s3.S: one aligned weight row against every activation row (2 instructions per 16 MACs)
+extern void itofs_s3_dot_rows(const int8_t *x, int ldx, const int8_t *w, int rows_len16, int32_t *acc, int stride_bytes);
+
 // channels [o0, o1) whose weights start at wt (row stride in)
 static inline void compute(const job_t *j, const int8_t *wt, int o0, int o1)
 {
     const int in = j->in, in16 = in >> 4, r0 = in16 << 4;
+    if ((in & 15) == 0 && ((uintptr_t)wt & 15) == 0 && j->rows < 65536) {   // every weight row aligned: fast kernel
+        for (int o = o0; o < o1; o++)
+            itofs_s3_dot_rows(j->x, j->ldx, wt + (size_t)(o - o0) * in, (j->rows << 16) | in16, j->acc + o, j->out * 4);
+        return;
+    }
     for (int t = o0; t < o1; t += TOC) {
         const int te = (t + TOC < o1) ? t + TOC : o1;
         for (int r = 0; r < j->rows; r++) {
@@ -126,13 +134,33 @@ static void gemm_range(const job_t *j, core_ctx_t *c)
 
 static TaskHandle_t s_worker, s_waiter;
 static job_t s_job;
+// work handed to core 1: a GEMM half (s_kind 0) or a part of a row-parallel engine loop (s_kind 1)
+static volatile int s_kind;
+static itofs_body_fn s_body; static void *s_barg; static int s_b0, s_b1;
+
+#ifdef ITOFS_ICPROF
+// QEMU -icount profiling build only: QEMU's virtual clock advances with the instructions of BOTH cores, so to get exact
+// per-core counts the dual-core split is serialised (core 1's half first while core 0 sleeps in WAITI, then core 0's
+// half), each half timed on its own core. Same work and same results as the parallel split; only the order differs.
+#include "esp_cpu.h"
+volatile int s3_ic_serial = 0;
+s3_ic_t s3_ic;
+static volatile uint32_t s_h1;
+#endif
 
 static void worker_task(void *arg)
 {
     (void)arg;
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        gemm_range(&s_job, &g_cc[1]);
+#ifdef ITOFS_ICPROF
+        const uint32_t c0 = esp_cpu_get_cycle_count();
+#endif
+        if (s_kind) s_body(s_barg, s_b0, s_b1, 1);
+        else gemm_range(&s_job, &g_cc[1]);
+#ifdef ITOFS_ICPROF
+        s_h1 = esp_cpu_get_cycle_count() - c0;
+#endif
         xTaskNotifyGive(s_waiter);
     }
 }
@@ -198,11 +226,33 @@ void s3_qgemm(const int8_t *x, int rows, int ldx, int in, const int8_t *w, int o
     int mode = s3_wmode;
     if (!esp_ptr_external_ram(w)) mode = 0;      // internal RAM or flash-mapped weights: in place
     job_t j = { x, rows, ldx, in, w, out, acc, 0, out, mode };
+#ifdef ITOFS_ICPROF
+    const uint32_t ic0 = esp_cpu_get_cycle_count();
+#endif
     if (!s3_dual_enabled || (long)rows * in * out < DUAL_MIN_MACS || out < 2 * TOC) {
         gemm_range(&j, &g_cc[0]);
-    } else {
+#ifdef ITOFS_ICPROF
+        s3_ic.single += esp_cpu_get_cycle_count() - ic0; s3_ic.nsingle++;
+#endif
+    }
+#ifdef ITOFS_ICPROF
+    else if (s3_ic_serial) {
         const int split = ((out / 2) + TOC - 1) / TOC * TOC;
-        s_job = j; s_job.oc0 = split;
+        s_job = j; s_job.oc0 = split; s_kind = 0;
+        j.oc1 = split;
+        s_waiter = xTaskGetCurrentTaskHandle();
+        xTaskNotifyGive(s_worker);
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        const uint32_t a = esp_cpu_get_cycle_count();
+        gemm_range(&j, &g_cc[0]);
+        const uint32_t h0 = esp_cpu_get_cycle_count() - a, h1 = s_h1;
+        s3_ic.h0 += h0; s3_ic.h1 += h1; s3_ic.hmax += h0 > h1 ? h0 : h1; s3_ic.ndual++;
+        s3_ic.dual_total += esp_cpu_get_cycle_count() - ic0;
+    }
+#endif
+    else {
+        const int split = ((out / 2) + TOC - 1) / TOC * TOC;
+        s_job = j; s_job.oc0 = split; s_kind = 0;
         j.oc1 = split;
         s_waiter = xTaskGetCurrentTaskHandle();
         xTaskNotifyGive(s_worker);
@@ -213,6 +263,33 @@ void s3_qgemm(const int8_t *x, int rows, int ldx, int in, const int8_t *w, int o
     s3_stats.macs += (double)rows * in * out;
     s3_stats.wbytes += (double)in * out;
     s3_stats.calls++;
+}
+
+// Row-parallel engine loops (itofs_ctx_t.par): rows [n/2, n) on core 1, [0, n/2) on core 0. The engine's bodies write
+// disjoint rows with per-core scratch, so the result is the same bit for bit (host test D checks every split).
+void s3_par(void *user, itofs_body_fn body, void *arg, int n)
+{
+    (void)user;
+    if (!s3_dual_enabled || n < 2) { body(arg, 0, n, 0); return; }
+    const int h = n / 2;
+    s_body = body; s_barg = arg; s_b0 = h; s_b1 = n; s_kind = 1;
+    s_waiter = xTaskGetCurrentTaskHandle();
+#ifdef ITOFS_ICPROF
+    const uint32_t ic0 = esp_cpu_get_cycle_count();
+    if (s3_ic_serial) {
+        xTaskNotifyGive(s_worker);
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        const uint32_t a = esp_cpu_get_cycle_count();
+        body(arg, 0, h, 0);
+        const uint32_t h0 = esp_cpu_get_cycle_count() - a, h1 = s_h1;
+        s3_ic.h0 += h0; s3_ic.h1 += h1; s3_ic.hmax += h0 > h1 ? h0 : h1; s3_ic.npar++;
+        s3_ic.dual_total += esp_cpu_get_cycle_count() - ic0;
+        return;
+    }
+#endif
+    xTaskNotifyGive(s_worker);
+    body(arg, 0, h, 0);
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 }
 
 // ------------------------------------------------------------------------------------------------------------------

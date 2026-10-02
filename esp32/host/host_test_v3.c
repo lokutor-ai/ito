@@ -8,7 +8,8 @@
 //   A  free-running vs the reference (same tokens / style / source noise / phase0): durations, per-stage SNR
 //   B  duration head given the reference's encoder output h
 //   C  stage-isolated: prosody given ref h + durations; mel head given ref pred; vocoder given ref mel (+ F0)
-//   D  streaming: chunks of 1, 2, 3, 5, 8, 16, 32 frames vs one whole-utterance chunk, BIT-IDENTICAL (golden and seeded noise)
+//   D  streaming: chunks of 1, 2, 3, 5, 8, 16, 32 frames vs one whole-utterance chunk, BIT-IDENTICAL (golden and seeded noise),
+//      each also with the row-parallel (dual-core) split and with a 2-frame first chunk
 //   E  (--wav) C audio, free-running and with the float model's durations
 //   F  executed operations before the first audio chunk and per second of audio
 #include "itofs.h"
@@ -86,13 +87,15 @@ static itofs_ctx_t *make_ctx_w(const itofs_model_t *m, int max_tokens, int chunk
 }
 static itofs_ctx_t *make_ctx(const itofs_model_t *m, int max_tokens, int chunk) { return make_ctx_w(m, max_tokens, chunk, 0); }
 
+static int g_first = 0;      // > 0: the first chunk has this many frames (the firmware's low-latency first chunk)
 static long synth(itofs_ctx_t *c, const int *tok, int n, int style, uint32_t seed, float *out, long cap)
 {
     int T = itofs_begin(c, tok, n, style, seed);
     if (T < 0) { fprintf(stderr, "begin: %s\n", itofs_strerror(T)); exit(1); }
     long pos = 0;
     for (;;) {
-        int got = itofs_next_chunk_f32(c, out + pos, (int)(cap - pos));
+        const long lim = (pos == 0 && g_first > 0) ? (long)g_first * c->m->hop : cap - pos;
+        int got = itofs_next_chunk_f32(c, out + pos, (int)(lim < cap - pos ? lim : cap - pos));
         if (got < 0) { fprintf(stderr, "next_chunk: %s\n", itofs_strerror(got)); exit(1); }
         if (got == 0) break;
         pos += got;
@@ -124,6 +127,15 @@ static const char *gname[ITOFS_G_N] = {"text side", "prosody net", "harmonic STF
 static void zero_macs(itofs_ctx_t *c)
 {
     memset(c->macs, 0, sizeof c->macs); memset(c->macs_f32, 0, sizeof c->macs_f32); memset(c->macs_exec, 0, sizeof c->macs_exec);
+}
+
+// row-parallel hook as the chip's would run it, but on one thread: the second core's part first, an uneven split
+static void host_par(void *user, itofs_body_fn body, void *arg, int n)
+{
+    (void)user;
+    const int h = n / 3;
+    body(arg, h, n, 1);
+    if (h > 0) body(arg, 0, h, 0);
 }
 
 int main(int argc, char **argv)
@@ -261,8 +273,15 @@ int main(int argc, char **argv)
                 cs->ext_noise = cw->ext_noise; cs->ext_phase0 = ph0; cs->use_ext_phase0 = !mode;
                 long nsx = synth(cs, tok, n, style, 12345u, y2, cap);
                 int same = nsx == nw && !memcmp(y, y2, (size_t)nw * 4);
-                printf(" %d:%s", chunks[ci], same ? "identical" : "DIFF");
-                if (!same) fails++;
+                cs->par = host_par;                  // the dual-core row split must not change a bit either
+                nsx = synth(cs, tok, n, style, 12345u, y2, cap);
+                const int same_p = nsx == nw && !memcmp(y, y2, (size_t)nw * 4);
+                g_first = 2;                         // 2-frame first chunk, then chunks[ci] (row-parallel)
+                nsx = synth(cs, tok, n, style, 12345u, y2, cap);
+                g_first = 0;
+                const int same_f = nsx == nw && !memcmp(y, y2, (size_t)nw * 4);
+                printf(" %d:%s%s%s", chunks[ci], same ? "identical" : "DIFF", same_p ? "" : "(row-parallel DIFF)", same_f ? "" : "(2-frame first chunk DIFF)");
+                if (!same || !same_p || !same_f) fails++;
             }
             printf("\n");
         }

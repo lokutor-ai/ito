@@ -14,6 +14,9 @@
                                 // int16 weights (0.9 MB) from PSRAM, so 32-token batches read them 4x less often than 8.
                                 // The output-channel tile shrinks to fit the same accumulator scratch: bit-identical results.
 #define MAX_FACTORS 32
+#define FILL_ROWS 2             // extra rows in the frame-batch scratch, so a 2-frame first chunk's pipeline fill runs every
+                                // stage in one pass over its weights (~16 KB of internal SRAM)
+#define MAX_FILL 64             // most rows a stage computes in one run (first-chunk pipeline fill; scratch permitting)
 #define TSENT (1 << 20)         // frames: T sentinel while the incremental text side has not finished (T must stay below)
 
 enum { E_OK = 0, E_BLOB = -1, E_MISSING = -2, E_SHAPE = -3, E_CONFIG = -4, E_ARENA = -5, E_ARG = -6, E_TOO_LONG = -7 };
@@ -38,6 +41,15 @@ static inline int pad16(int n) { return (n + 15) & ~15; }
 static int imax(int a, int b) { return a > b ? a : b; }
 static int floordiv(int a, int b) { int q = a / b; if ((a % b != 0) && ((a < 0) != (b < 0))) q--; return q; }
 
+// run body over rows [0, n) on both cores when the caller gave a par hook and the work is large enough to pay for the
+// cross-core hand-off (work = rough element count); bodies write disjoint rows, so the split never changes a bit
+#define PAR_MIN_WORK 1536
+static void par_for(const itofs_ctx_t *c, itofs_body_fn body, void *arg, int n, long work)
+{
+    if (c->par && !c->tap && n > 1 && work >= PAR_MIN_WORK) c->par(c->par_user, body, arg, n);
+    else if (n > 0) body(arg, 0, n, 0);
+}
+
 // ======================================================================================================================
 // deterministic math: only IEEE + - * / (and sqrt / floor, which are exact), so host and chip agree bit for bit
 // ======================================================================================================================
@@ -47,9 +59,27 @@ long long itofs_opc[ITOFS_OPC_N];
 #else
 #define OPC(k, n) ((void)0)
 #endif
+#ifdef ITOFS_PROF      // profiling build: time per stage kind / qlin part with a caller-supplied clock (itofs.h)
+uint32_t (*itofs_prof_clock)(void);
+double itofs_prof[ITOFS_PROF_N];
+#define PROF_T(v) const uint32_t v = itofs_prof_clock()
+#define PROF_ADD(k, v) (itofs_prof[k] += (double)(uint32_t)(itofs_prof_clock() - (v)))
+#else
+#define PROF_T(v) ((void)0)
+#define PROF_ADD(k, v) ((void)0)
+#endif
 
-static inline float f_from_bits(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
-static inline uint32_t bits_of(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
+// bit casts through a union (ESP-IDF builds with -fno-builtin-memcpy, so a 4-byte memcpy would be a real call)
+typedef union { float f; uint32_t u; } fbits_t;
+static inline float f_from_bits(uint32_t u) { fbits_t b; b.u = u; return b.f; }
+static inline uint32_t bits_of(float f) { fbits_t b; b.f = f; return b.u; }
+// floorf without a libm call, identical result for every input (|v| >= 2^23, inf, NaN: already integral / unchanged)
+static inline float itf_floorf(float v)
+{
+    if (!(fabsf(v) < 8388608.f) || v == 0.f) return v;
+    const float f = (float)(int)v;
+    return f > v ? f - 1.f : f;
+}
 
 static float itf_expf(float x)
 {
@@ -58,7 +88,7 @@ static float itf_expf(float x)
     if (x > 88.7f) return f_from_bits(0x7f800000u);
     if (x < -87.3f) return 0.f;
     const float ln2_hi = 0.693145751953125f, ln2_lo = 1.428606765330187e-06f;
-    float kf = floorf(x * 1.44269504088896341f + 0.5f);
+    float kf = itf_floorf(x * 1.44269504088896341f + 0.5f);
     float r = (x - kf * ln2_hi) - kf * ln2_lo;
     float p = 1.f + r * (1.f + r * (0.5f + r * (1.f / 6 + r * (1.f / 24 + r * (1.f / 120 + r * (1.f / 720 + r * (1.f / 5040)))))));
     int k = (int)kf;
@@ -126,7 +156,18 @@ static const float ERF_C[13] = {
     0.000106837606837606838f, -1.32275132275132275e-05f, 1.45038522231464454e-06f, -1.42308235157637989e-07f,
     1.25822028025231796e-08f, -1.01070949532390185e-09f, 7.42528949736183659e-11f };
 
-static float itf_erff_h(float x)
+static float __attribute__((noinline)) itf_erf_tail(float a)       // 1 < a: the erf_h / erf tail branch
+{
+    if (a < 4.f) {
+        float t = 1.f / (1.f + 0.3275911f * a);
+        float p = t * (0.254829592f + t * (-0.284496736f + t * (1.421413741f + t * (-1.453152027f + t * 1.061405429f))));
+        return 1.f - p * itf_expf(-a * a);
+    }
+    return 1.f;
+}
+
+// (the Horner loop written out: the same operations in the same order, so the same bits, in fewer instructions)
+static inline __attribute__((always_inline)) float itf_erff_h(float x)
 {
     OPC(ITOFS_OPC_ERF, 1);
     float a = fabsf(x), r;
@@ -134,14 +175,12 @@ static float itf_erff_h(float x)
         OPC(ITOFS_OPC_ERF_SERIES, 1);
         const float x2 = a * a;
         float p = ERF_C[12];
-        for (int n = 11; n >= 0; n--) p = p * x2 + ERF_C[n];
+        p = p * x2 + ERF_C[11]; p = p * x2 + ERF_C[10]; p = p * x2 + ERF_C[9]; p = p * x2 + ERF_C[8];
+        p = p * x2 + ERF_C[7]; p = p * x2 + ERF_C[6]; p = p * x2 + ERF_C[5]; p = p * x2 + ERF_C[4];
+        p = p * x2 + ERF_C[3]; p = p * x2 + ERF_C[2]; p = p * x2 + ERF_C[1]; p = p * x2 + ERF_C[0];
         r = a * p * 1.12837916709551257f;
-    } else if (a < 4.f) {
-        float t = 1.f / (1.f + 0.3275911f * a);
-        float p = t * (0.254829592f + t * (-0.284496736f + t * (1.421413741f + t * (-1.453152027f + t * 1.061405429f))));
-        r = 1.f - p * itf_expf(-a * a);
     } else {
-        r = 1.f;
+        r = itf_erf_tail(a);
     }
     return x < 0 ? -r : r;
 }
@@ -150,7 +189,7 @@ static void itf_sincosf(float x, float *s, float *c)
 {
     OPC(ITOFS_OPC_SINCOS, 1);
     const float p1 = 1.5703125f, p2 = 4.837512969970703125e-4f, p3 = 7.54978995489188216e-8f;
-    float kf = floorf(x * 0.636619772367581343f + 0.5f);
+    float kf = itf_floorf(x * 0.636619772367581343f + 0.5f);
     float r = ((x - kf * p1) - kf * p2) - kf * p3;
     float r2 = r * r;
     float sn = r * (1.f + r2 * (-1.f / 6 + r2 * (1.f / 120 + r2 * (-1.f / 5040 + r2 * (1.f / 362880 + r2 * (-1.f / 39916800))))));
@@ -621,13 +660,14 @@ struct itofs_stage {
     int np, prod[2], L[2], R[2];   // producer stages and reach (the length-regulated text features are implicit)
     int width;                     // floats per frame in this stage's ring
     int rframes;                   // ring length in frames (power of two; see stage_rings)
+    int bmax;                      // most rows one run may compute (hot scratch capacity; >= chunk_frames)
     float *ring;
     int done;                      // frames [0, done) computed
 };
 
 enum { TK_ENC, TK_GRU, TK_PROJ, TK_DUR, TK_DOUT };
 #define MAX_TSTAGES (2 * ITOFS_MAX_LAYERS + 4)
-struct itofs_tstage { int kind, idx, L, R, width, done; float *ring; };
+struct itofs_tstage { int kind, idx, L, R, width, done, bmax; float *ring; };
 
 static int build_tgraph(const itofs_model_t *m, itofs_tstage_t *t)
 {
@@ -786,27 +826,39 @@ static void layout(itofs_ctx_t *c, const itofs_model_t *m, const itofs_limits_t 
     const int gw = imax(imax(imax(imax(PD, m->dec_in), imax(DD, m->hf_dim)), imax(D, H)), imax(MD, MIN_IN));
     // y0: prosody / embed / block rows, the harmonic STFT rows and the head output (nb x (n_fft+2));
     // y1: one STFT frame, the ConvNeXt hidden (nb x inter) and one half spectrum; y2: harm_proj / pw2 outputs
-    const int y0w = imax(imax(imax(imax(N + 2, DD), PD), imax(D, 3 * H)), imax(MD, NM)), y1n = imax(nb * m->dec_inter, N + 2), y2w = imax(DD, PD);
+    const int nbf = nb + FILL_ROWS;
+    const int y0w = imax(imax(imax(imax(N + 2, DD), PD), imax(D, 3 * H)), imax(MD, NM)), y1n = imax((nb + 1) * m->dec_inter, N + 2), y2w = imax(DD, PD);
     // ---- hot scratch
-    c->s_g0 = bump(hot, (size_t)grow * gw * 4);
-    c->s_g1 = bump(hot, (size_t)grow * gw * 4);
-    c->s_y0 = bump(hot, (size_t)nb * y0w * 4);
+    c->s_g0 = bump(hot, (size_t)(grow + 1) * gw * 4);
+    // s_g1 (style predictor, once per utterance before any frame) doubles as the second core's FFT scratch
+    const size_t g1n = imax(grow * gw, 3 * N + 16 + 2 * M);
+    c->s_g1 = bump(hot, g1n * 4);
+    c->s_y0 = bump(hot, (size_t)nbf * y0w * 4);
     c->s_y1 = bump(hot, (size_t)y1n * 4);
-    c->s_y2 = bump(hot, (size_t)nb * y2w * 4);
-    c->s_qs = bump(hot, (size_t)imax(grow, growt) * 4);
+    c->s_y2 = bump(hot, (size_t)nbf * y2w * 4);
+    const int qs_rows = imax(imax(grow, growt), MAX_FILL + max_k);
+    c->s_qs = bump(hot, (size_t)qs_rows * 4);
     c->s_q8 = bump(hot, (size_t)imax(grow * PLANES * pad16(max_qin), growt * PLANES * pad16(tin)) + 64);
     c->acc_bytes = (size_t)nb * PLANES * max_qout_tile * 2 * 4;
+    c->cap_g0 = (long)(grow + 1) * gw; c->cap_y0 = (long)nbf * y0w; c->cap_y1 = y1n; c->cap_y2 = (long)nbf * y2w; c->cap_qs = qs_rows;
+    c->cap_q8 = (long)imax(grow * PLANES * pad16(max_qin), growt * PLANES * pad16(tin));
     c->s_acc = bump(hot, c->acc_bytes);   // x 2 weight planes (int16 weights)
     c->tb = tb;
     c->fbuf = bump(hot, (size_t)(N + 8) * 4);
     c->win = bump(hot, (size_t)N * 4);
     c->fft = bump(hot, sizeof(itofs_fft_t));
     cpx *tmp = bump(hot, sizeof(cpx) * (size_t)M);
+    // second core's FFT scratch (row-parallel HFT / HEAD), inside s_g1
+    c->fft_b = bump(hot, sizeof(itofs_fft_t));
+    cpx *tmp_b = c->s_g1 ? (cpx *)c->s_g1 : NULL;                      // M complex
+    c->fbuf_b = c->s_g1 ? c->s_g1 + 2 * M : NULL;                         // N + 8
+    c->x_b = c->s_g1 ? c->s_g1 + 2 * M + N + 8 : NULL;                    // N + 2
     // read-only tables (read sequentially, cache friendly): bulk, to keep the hot arena in internal SRAM
     c->win2 = bump(bulk, (size_t)N * 4);
     c->rtw = bump(bulk, (size_t)(M + 1) * 2 * 4);
     cpx *tw = bump(bulk, sizeof(cpx) * (size_t)M);
-    if (c->fft) { c->fft->tw = tw; c->fft->tmp = tmp; }
+    if (c->fft) { c->fft->tw = tw; c->fft->tmp = tmp; c->fft_b->tw = tw; c->fft_b->tmp = tmp_b; }
+    c->src_anc = bump(bulk, (size_t)2 * imax(nb, MAX_FILL) * sizeof(double));
     // ---- bulk: text side and the int16 conversion buffer
     c->s_pcm = bump(bulk, (size_t)nb * m->hop * 4);
     c->dur = bump(bulk, (size_t)Lmax * 4);
@@ -913,6 +965,8 @@ int itofs_init(itofs_ctx_t *c, const itofs_model_t *m, const itofs_limits_t *lim
     }
     c->fft->n = M;
     if (fft_factor(M, c->fft->fac)) return E_CONFIG;
+    c->fft_b->n = M;
+    memcpy(c->fft_b->fac, c->fft->fac, sizeof c->fft->fac);
     for (int k = 0; k < M; k++) {
         double s, co; itf_sincos2pi_d(k, M, &s, &co);
         c->fft->tw[k].r = (float)co; c->fft->tw[k].i = (float)-s;   // exp(-2 pi i k / M)
@@ -960,13 +1014,72 @@ static float quant_row(const float *x, int in, int ldq, int P, int8_t *q)
 // the first L->in values of each row are the input. Y: n rows, stride ldy.
 // Activations: P planes (int16-weight layers always 2, int8-weight layers c->act_planes); weights: WP planes.
 // Every (activation plane, weight plane) pair is one exact int8 GEMM; they are combined exactly in integers.
+static void qlin_run_(itofs_ctx_t *c, const itofs_qlin_t *L, const float *X, int ldx, int n, float *Y, int ldy, int grp);
 static void qlin_run(itofs_ctx_t *c, const itofs_qlin_t *L, const float *X, int ldx, int n, float *Y, int ldy, int grp)
+{
+    PROF_T(pl0);
+    qlin_run_(c, L, X, ldx, n, Y, ldy, grp);
+    PROF_ADD(ITOFS_PROF_QLIN, pl0);
+}
+typedef struct { itofs_ctx_t *c; const float *X; int ldx, in, ldq, P; } quant_arg_t;
+static void quant_body(void *a_, int r0, int r1, int core)
+{
+    const quant_arg_t *a = a_; (void)core;
+    for (int r = r0; r < r1; r++)
+        a->c->s_qs[r] = quant_row(a->X + (size_t)r * a->ldx, a->in, a->ldq, a->P, a->c->s_q8 + (size_t)r * a->P * a->ldq);
+}
+
+typedef struct { const itofs_ctx_t *c; float *Y; int ldy, o0, ot, k, WP, P, exact32; const int32_t *a0, *a1; } resc_arg_t;
+static void rescale_body(void *a_, int t0, int t1, int core)
+{
+    const resc_arg_t *A = a_; (void)core;
+    const int ot = A->ot, k = A->k;
+    for (int t = t0; t < t1; t++) {
+        const float s = A->c->s_qs[t + k];
+        if (s == 0.f) continue;
+        float *y = A->Y + (size_t)t * A->ldy + A->o0;
+        if (A->WP == 1 && A->P == 1) {
+            const int32_t *a = A->a0 + (size_t)t * ot;
+            for (int o = 0; o < ot; o++) y[o] += s * (float)a[o];
+        } else if (A->WP == 1) {
+            const int32_t *ah = A->a0 + (size_t)(2 * t) * ot, *al = ah + ot;
+            if (A->exact32) for (int o = 0; o < ot; o++) y[o] += s * (float)(128 * ah[o] + al[o]);
+            else for (int o = 0; o < ot; o++) y[o] += s * (float)((int64_t)ah[o] * 128 + al[o]);
+        } else {                // int16 weights x 15-bit activations: 4 exact products
+            const int32_t *hh = A->a0 + (size_t)(2 * t) * ot, *lh = hh + ot;     // (x hi, x lo) x w hi
+            const int32_t *hl = A->a1 + (size_t)(2 * t) * ot, *ll = hl + ot;     // (x hi, x lo) x w lo
+            for (int o = 0; o < ot; o++) {
+                const int64_t v = ((int64_t)hh[o] * 128 + lh[o]) * 256 + ((int64_t)hl[o] * 128 + ll[o]);
+                y[o] += s * (float)v;
+            }
+        }
+    }
+}
+
+typedef struct { const itofs_qlin_t *L; float *Y; int ldy, first; } bias_arg_t;
+static void bias_body(void *a_, int t0, int t1, int core)
+{
+    const bias_arg_t *A = a_; (void)core;
+    const itofs_qlin_t *L = A->L;
+    const int out = L->out;
+    for (int t = t0; t < t1; t++) {
+        float *y = A->Y + (size_t)t * A->ldy;
+        if (A->first) { memset(y, 0, (size_t)out * 4); continue; }
+        if (L->b) for (int o = 0; o < out; o++) y[o] = y[o] * L->sw[o] + L->b[o];
+        else for (int o = 0; o < out; o++) y[o] = y[o] * L->sw[o];
+    }
+}
+
+static void qlin_run_(itofs_ctx_t *c, const itofs_qlin_t *L, const float *X, int ldx, int n, float *Y, int ldy, int grp)
 {
     const int in = L->in, out = L->out, K = L->K, ldq = pad16(in);
     const int WP = L->w_lo ? 2 : 1, P = (L->w_lo || L->act16) ? 2 : c->act_planes;
     const int rows = n + K - 1;
-    for (int r = 0; r < rows; r++)
-        c->s_qs[r] = quant_row(X + (size_t)r * ldx, in, ldq, P, c->s_q8 + (size_t)r * P * ldq);
+    PROF_T(pq0);
+    quant_arg_t qa = { c, X, ldx, in, ldq, P };
+    par_for(c, quant_body, &qa, rows, (long)rows * in);
+    PROF_ADD(ITOFS_PROF_QUANT, pq0);
+    bias_arg_t ba = { L, Y, ldy, 1 };
     for (int t = 0; t < n; t++) memset(Y + (size_t)t * ldy, 0, (size_t)out * 4);
     const int exact32 = in <= 1024;     // |128*acc_hi + acc_lo| <= 16256*127*in < 2^31
     // output channels per GEMM call: as many as the accumulator scratch holds for n * P rows x WP planes (<= ACC_TILE).
@@ -979,35 +1092,16 @@ static void qlin_run(itofs_ctx_t *c, const itofs_qlin_t *L, const float *X, int 
         for (int k = 0; k < K; k++) {
             const int8_t *xq = c->s_q8 + (size_t)k * P * ldq;
             const size_t woff = ((size_t)k * out + o0) * in;
+            PROF_T(pg0);
             c->qgemm(xq, n * P, ldq, in, L->w + woff, ot, a0, c->qgemm_user);
             if (WP == 2) c->qgemm(xq, n * P, ldq, in, L->w_lo + woff, ot, a1, c->qgemm_user);
-            for (int t = 0; t < n; t++) {
-                const float s = c->s_qs[t + k];
-                if (s == 0.f) continue;
-                float *y = Y + (size_t)t * ldy + o0;
-                if (WP == 1 && P == 1) {
-                    const int32_t *a = a0 + (size_t)t * ot;
-                    for (int o = 0; o < ot; o++) y[o] += s * (float)a[o];
-                } else if (WP == 1) {
-                    const int32_t *ah = a0 + (size_t)(2 * t) * ot, *al = ah + ot;
-                    if (exact32) for (int o = 0; o < ot; o++) y[o] += s * (float)(128 * ah[o] + al[o]);
-                    else for (int o = 0; o < ot; o++) y[o] += s * (float)((int64_t)ah[o] * 128 + al[o]);
-                } else {                // int16 weights x 15-bit activations: 4 exact products
-                    const int32_t *hh = a0 + (size_t)(2 * t) * ot, *lh = hh + ot;     // (x hi, x lo) x w hi
-                    const int32_t *hl = a1 + (size_t)(2 * t) * ot, *ll = hl + ot;     // (x hi, x lo) x w lo
-                    for (int o = 0; o < ot; o++) {
-                        const int64_t v = ((int64_t)hh[o] * 128 + lh[o]) * 256 + ((int64_t)hl[o] * 128 + ll[o]);
-                        y[o] += s * (float)v;
-                    }
-                }
-            }
+            PROF_ADD(ITOFS_PROF_GEMM, pg0);
+            resc_arg_t ra = { c, Y, ldy, o0, ot, k, WP, P, exact32, a0, a1 };
+            par_for(c, rescale_body, &ra, n, (long)n * ot * P * WP);
         }
     }
-    for (int t = 0; t < n; t++) {
-        float *y = Y + (size_t)t * ldy;
-        if (L->b) for (int o = 0; o < out; o++) y[o] = y[o] * L->sw[o] + L->b[o];
-        else for (int o = 0; o < out; o++) y[o] = y[o] * L->sw[o];
-    }
+    ba.first = 0;
+    par_for(c, bias_body, &ba, n, (long)n * out);
     c->macs[grp] += (double)n * out * in * K;
     c->macs_exec[grp] += (double)n * out * in * K * P * WP;
 }
@@ -1042,18 +1136,26 @@ static void layernorm_row(const float *x, int C, const float *g, const float *b,
 }
 
 static inline float gelu_v2(float x) { return 0.5f * x * (1.0f + itf_erff(x * 0.70710678118654752f)); }
-static inline float gelu_v3(float x) { return 0.5f * x * (1.0f + itf_erff_h(x * 0.70710678118654752f)); }
+static inline __attribute__((always_inline)) float gelu_v3(float x) { return 0.5f * x * (1.0f + itf_erff_h(x * 0.70710678118654752f)); }
 #define gelu(x) (m_arch3 ? gelu_v3(x) : gelu_v2(x))
 
 // y[o] = b[o] + sum_i W[o][i] x[i]  (f32)
+typedef struct { const float *W, *b, *x; float *y; int in; } gemv_arg_t;
+static void gemv_body(void *a_, int o0, int o1, int core)
+{
+    const gemv_arg_t *A = a_; (void)core;
+    const int in = A->in;
+    for (int o = o0; o < o1; o++) {
+        const float *w = A->W + (size_t)o * in;
+        float a = 0.f;
+        for (int i = 0; i < in; i++) a += w[i] * A->x[i];
+        A->y[o] = a + (A->b ? A->b[o] : 0.f);
+    }
+}
 static void gemv_f32(itofs_ctx_t *c, const float *W, const float *b, const float *x, int out, int in, float *y, int grp)
 {
-    for (int o = 0; o < out; o++) {
-        const float *w = W + (size_t)o * in;
-        float a = 0.f;
-        for (int i = 0; i < in; i++) a += w[i] * x[i];
-        y[o] = a + (b ? b[o] : 0.f);
-    }
+    gemv_arg_t a = { W, b, x, y, in };
+    par_for(c, gemv_body, &a, out, (long)out * in / 2);
     c->macs_f32[grp] += (double)out * in;
 }
 
@@ -1241,7 +1343,64 @@ static void tgather(itofs_ctx_t *c, int s, int i0, int i1, float *dst)
     }
 }
 
+#ifdef ITOFS_PROF
+// instructions per call of the float primitives (profiling build: clock = CCOUNT)
+void itofs_prof_micro(double *res)
+{
+    volatile float sink = 0.f, in = 1.7f, in2 = 0.5f, in3 = 2.0f;
+    uint32_t t;
+    float acc = 0.f;
+    t = itofs_prof_clock(); for (int i = 0; i < 1000; i++) acc += 1.f / (in + (float)i * 1e-4f); res[0] = (double)(uint32_t)(itofs_prof_clock() - t) / 1000; sink = acc;
+    t = itofs_prof_clock(); for (int i = 0; i < 1000; i++) acc += gelu_v3(in2 + (float)i * 1e-4f); res[1] = (double)(uint32_t)(itofs_prof_clock() - t) / 1000; sink = acc;
+    t = itofs_prof_clock(); for (int i = 0; i < 1000; i++) acc += gelu_v3(in3 + (float)i * 1e-4f); res[2] = (double)(uint32_t)(itofs_prof_clock() - t) / 1000; sink = acc;
+    t = itofs_prof_clock(); for (int i = 0; i < 1000; i++) acc += itf_expf(in2 + (float)i * 1e-4f); res[3] = (double)(uint32_t)(itofs_prof_clock() - t) / 1000; sink = acc;
+    t = itofs_prof_clock(); for (int i = 0; i < 1000; i++) acc += sqrtf(in + (float)i * 1e-4f); res[4] = (double)(uint32_t)(itofs_prof_clock() - t) / 1000; sink = acc;
+    t = itofs_prof_clock(); for (int i = 0; i < 1000; i++) { float a, b; itf_sincosf(in + (float)i * 1e-4f, &a, &b); acc += a + b; } res[5] = (double)(uint32_t)(itofs_prof_clock() - t) / 1000; sink = acc;
+    t = itofs_prof_clock(); for (int i = 0; i < 1000; i++) acc += itf_logf(in + (float)i * 1e-4f); res[6] = (double)(uint32_t)(itofs_prof_clock() - t) / 1000; sink = acc;
+    t = itofs_prof_clock(); for (int i = 0; i < 1000; i++) acc += acc * in2 + in3; res[7] = (double)(uint32_t)(itofs_prof_clock() - t) / 1000; sink = acc;
+    (void)sink;
+}
+#endif
+
+// ---- row bodies of the frame / token stages (run on one or both cores, par_for) ----
+typedef struct { const itofs_ctx_t *c; const itofs_convln_t *L; float *y0; const float *g0; int W, lp; const float *g1, *bb;
+                 float *(*dst)(const itofs_ctx_t *, int, int); int s, base, frame; float eps; } cln_arg_t;
+static float *tring_dst(const itofs_ctx_t *c, int s, int i) { return tring_row(c, s, i); }
+// ConvLN tail of row t: y = LN(conv) (in y0), frame stages: out = x + gelu(y * g1 + b); token stages: FiLM optional,
+// out = x + gelu(FiLM(y)) (written to the stage ring for token stages, back into y0 for frame stages)
+static void cln_body(void *a_, int t0, int t1, int core)
+{
+    const cln_arg_t *A = a_; (void)core;
+    const int W = A->W, m_arch3 = A->c->m->arch == 3;
+    for (int t = t0; t < t1; t++) {
+        float *y = A->y0 + (size_t)t * W;
+        const float *xr = A->g0 + (size_t)(t + A->lp) * W;
+        layernorm_row(y, W, A->L->ln_g, A->L->ln_b, A->eps, y);
+        if (A->frame) {
+            for (int i = 0; i < W; i++) y[i] = xr[i] + gelu(y[i] * A->g1[i] + A->bb[i]);
+        } else {
+            float *o = A->dst(A->c, A->s, A->base + t);
+            if (A->g1) for (int i = 0; i < W; i++) y[i] = y[i] * A->g1[i] + A->bb[i];
+            for (int i = 0; i < W; i++) o[i] = xr[i] + gelu(y[i]);
+        }
+    }
+}
+
+
+static void run_tstage_(itofs_ctx_t *c, int s, int i0, int i1);
 static void run_tstage(itofs_ctx_t *c, int s, int i0, int i1)
+{
+    PROF_T(ps0);
+#ifdef ITOFS_PROF
+    const double pg = itofs_prof[ITOFS_PROF_GEMM];
+#endif
+    run_tstage_(c, s, i0, i1);
+    PROF_ADD(ITOFS_PROF_TSTAGE + c->tst[s].kind, ps0);
+#ifdef ITOFS_PROF
+    itofs_prof[ITOFS_PROF_SGEMM + 12 + c->tst[s].kind] += itofs_prof[ITOFS_PROF_GEMM] - pg;
+#endif
+}
+static void run_tstage_(itofs_ctx_t *c, int s, int i0, int i1)
 {
     const itofs_model_t *m = c->m;
     const int m_arch3 = m->arch == 3;
@@ -1253,13 +1412,9 @@ static void run_tstage(itofs_ctx_t *c, int s, int i0, int i1)
         const float *g1 = S->kind == TK_DUR ? c->dfilm_g1[S->idx] : NULL, *bb = S->kind == TK_DUR ? c->dfilm_b[S->idx] : NULL;
         tgather(c, s, i0 - S->L, i1 + S->R, c->s_g0);
         qlin_run(c, &L->conv, c->s_g0, D, n, c->s_y0, D, ITOFS_G_TEXT);
-        for (int t = 0; t < n; t++) {
-            float *y = c->s_y0 + (size_t)t * D, *o = tring_row(c, s, i0 + t);
-            const float *xr = c->s_g0 + (size_t)(t + S->L) * D;
-            layernorm_row(y, D, L->ln_g, L->ln_b, m->eps_text, y);
-            if (g1) for (int i = 0; i < D; i++) y[i] = y[i] * g1[i] + bb[i];
-            for (int i = 0; i < D; i++) o[i] = xr[i] + gelu(y[i]);
-        }
+        cln_arg_t a = { c, L, c->s_y0, c->s_g0, D, S->L, g1, bb, tring_dst, s, i0, 0, m->eps_text };
+        par_for(c, cln_body, &a, n, (long)n * D * 8);
+        (void)m_arch3;
         break;
     }
     case TK_GRU: {
@@ -1324,7 +1479,7 @@ static void text_advance_to(itofs_ctx_t *c, int target, int S)
     for (int s = 0; s < S; s++) {
         itofs_tstage_t *st = &c->tst[s];
         while (st->done < need[s]) {
-            const int i1 = imin(need[s], st->done + c->nb);
+            const int i1 = imin(need[s], st->done + st->bmax);
             run_tstage(c, s, st->done, i1);
             st->done = i1;
         }
@@ -1373,6 +1528,7 @@ static float gauss_at(uint32_t seed, int n)
 // ======================================================================================================================
 // stage runners
 // ======================================================================================================================
+typedef struct { itofs_ctx_t *c; int s, t0; } st_arg_t;
 static inline float *ring_row(const itofs_ctx_t *c, int s, int t)
 {
     return c->st[s].ring + (size_t)(t & (c->st[s].rframes - 1)) * c->st[s].width;
@@ -1395,14 +1551,13 @@ static void put_rows(itofs_ctx_t *c, int s, int t0, int n, const float *src, int
 }
 
 // one piece of the source: samples n0 .. n0+len-1 whose F0 is interpolated between a (at w=0) and b (at w=1) with
-// w_j = (j + 0.5) / hop, j = j0 .. j0+len-1 (constant: f = a). Phase anchored in double at the piece start.
-static void src_piece(itofs_ctx_t *c, int n0, int len, float a, float b, int j0, int constant, float *out)
+// w_j = (j + 0.5) / hop, j = j0 .. j0+len-1 (constant: f = a). Phase anchored in double at the piece start (P).
+static void src_piece(const itofs_ctx_t *c, double P, int n0, int len, float a, float b, int j0, int constant, float *out)
 {
     OPC(ITOFS_OPC_SRC, len);
     const itofs_model_t *m = c->m;
     const float hop = (float)m->hop, sr = (float)m->sr, half_sr = 0.5f * (float)m->sr;
     const float d = constant ? 0.f : (b - a) / hop;
-    const double P = c->src_ph;
     const float Pf = (float)(P - floor(P));
     const float f_first = constant ? a : a + d * ((float)j0 + 0.5f);
     const float amp_uv = m->src_amp / 3.0f;
@@ -1417,7 +1572,7 @@ static void src_piece(itofs_ctx_t *c, int n0, int len, float a, float b, int j0,
         }
         // phase after this sample: P + sum_{m<=J} f_m / sr (arithmetic series)
         float phi = Pf + ((float)(J + 1) * (f_first + fl) * 0.5f) / sr;
-        phi = phi - floorf(phi);
+        phi = phi - itf_floorf(phi);
         float s1, c1;
         itf_sincosf(6.28318530717958648f * phi, &s1, &c1);
         float sk = s1, ck = c1, hsum = 0.f;
@@ -1431,31 +1586,62 @@ static void src_piece(itofs_ctx_t *c, int n0, int len, float a, float b, int j0,
         const int uv = f > m->uv_hz;
         out[J] = uv ? (m->src_amp * (hsum / (float)m->n_harm) + m->src_noise * nz) : amp_uv * nz;
     }
-    // advance the double anchor by the exact sum of the piece
+}
+
+// the double phase anchor after a piece: P + the exact sum of its frequencies / sr
+static double src_advance(const itofs_ctx_t *c, double P, int len, float a, float b, int j0, int constant)
+{
+    const itofs_model_t *m = c->m;
     const double da = a, db = b, dd = constant ? 0.0 : (db - da) / (double)m->hop;
     const double f0d = constant ? da : da + dd * ((double)j0 + 0.5), f1d = constant ? da : da + dd * ((double)(j0 + len - 1) + 0.5);
-    c->src_ph = P + (double)len * (f0d + f1d) * 0.5 / (double)m->sr;
+    return P + (double)len * (f0d + f1d) * 0.5 / (double)m->sr;
 }
 
-static void src_frame(itofs_ctx_t *c, int s, int t, float *out)
+// frame t's two pieces: A = samples [t*hop, t*hop + hop/2) -> segment t-1 (constant f0[0] before the first frame
+// centre); B = [t*hop + hop/2, (t+1)*hop) -> segment t (constant f0[T-1] after the last frame centre)
+typedef struct { int n0, len, j0, constant; float a, b; } src_pc_t;
+static void src_pieces(const itofs_ctx_t *c, int s, int t, src_pc_t *pc)
 {
-    const int hop = c->m->hop, T = c->T, h2 = hop / 2;
-    const int pc = c->st[s].prod[0];
-    // piece A: samples [t*hop, t*hop + hop/2) -> segment t-1 (constant f0[0] before the first frame centre)
-    if (t == 0) src_piece(c, 0, h2, ring_row(c, pc, 0)[3], 0.f, 0, 1, out);
-    else src_piece(c, t * hop, h2, ring_row(c, pc, t - 1)[3], ring_row(c, pc, t)[3], h2, 0, out);
-    // piece B: samples [t*hop + hop/2, (t+1)*hop) -> segment t (constant f0[T-1] after the last frame centre)
-    if (t == T - 1) src_piece(c, t * hop + h2, hop - h2, ring_row(c, pc, t)[3], 0.f, 0, 1, out + h2);
-    else src_piece(c, t * hop + h2, hop - h2, ring_row(c, pc, t)[3], ring_row(c, pc, t + 1)[3], 0, 0, out + h2);
+    const int hop = c->m->hop, T = c->T, h2 = hop / 2, p = c->st[s].prod[0];
+    if (t == 0) pc[0] = (src_pc_t){ 0, h2, 0, 1, ring_row(c, p, 0)[3], 0.f };
+    else pc[0] = (src_pc_t){ t * hop, h2, h2, 0, ring_row(c, p, t - 1)[3], ring_row(c, p, t)[3] };
+    if (t == T - 1) pc[1] = (src_pc_t){ t * hop + h2, hop - h2, 0, 1, ring_row(c, p, t)[3], 0.f };
+    else pc[1] = (src_pc_t){ t * hop + h2, hop - h2, 0, 0, ring_row(c, p, t)[3], ring_row(c, p, t + 1)[3] };
 }
 
-// forward real FFT of N windowed samples -> row [re(0..M), im(0..M)]
-static void rfft_row(itofs_ctx_t *c, const float *x, float *row)
+// phase anchors of frame t's pieces (in order: advances c->src_ph)
+static void src_frame_anchors(itofs_ctx_t *c, int s, int t, double *anc)
+{
+    src_pc_t pc[2];
+    src_pieces(c, s, t, pc);
+    for (int k = 0; k < 2; k++) {
+        anc[k] = c->src_ph;
+        c->src_ph = src_advance(c, c->src_ph, pc[k].len, pc[k].a, pc[k].b, pc[k].j0, pc[k].constant);
+    }
+}
+
+static void src_body(void *a_, int i0, int i1, int core)
+{
+    const st_arg_t *A = a_; (void)core;
+    const itofs_ctx_t *c = A->c;
+    const int h2 = c->m->hop / 2;
+    for (int i = i0; i < i1; i++) {
+        const int t = A->t0 + i;
+        src_pc_t pc[2];
+        src_pieces(c, A->s, t, pc);
+        float *out = ring_row(c, A->s, t);
+        for (int k = 0; k < 2; k++)
+            src_piece(c, c->src_anc[2 * i + k], pc[k].n0, pc[k].len, pc[k].a, pc[k].b, pc[k].j0, pc[k].constant, out + (k ? h2 : 0));
+    }
+}
+
+// forward real FFT of N windowed samples -> row [re(0..M), im(0..M)] (core: whose FFT scratch)
+static void rfft_row(itofs_ctx_t *c, const float *x, float *row, int core)
 {
     const int N = c->m->n_fft, M = N / 2;
-    cpx *z = (cpx *)c->fbuf;
+    cpx *z = (cpx *)(core ? c->fbuf_b : c->fbuf);
     for (int n = 0; n < M; n++) { z[n].r = x[2 * n]; z[n].i = x[2 * n + 1]; }
-    fft_fwd(c->fft, z);
+    fft_fwd(core ? c->fft_b : c->fft, z);
     float *re = row, *im = row + M + 1;
     re[0] = z[0].r + z[0].i; im[0] = 0.f;
     re[M] = z[0].r - z[0].i; im[M] = 0.f;
@@ -1470,10 +1656,10 @@ static void rfft_row(itofs_ctx_t *c, const float *x, float *row)
 }
 
 // inverse real FFT of the half spectrum X (interleaved re, im; M+1 bins) times the window -> out[N]
-static void irfft_win(itofs_ctx_t *c, const float *X, float *out)
+static void irfft_win(itofs_ctx_t *c, const float *X, float *out, int core)
 {
     const int N = c->m->n_fft, M = N / 2;
-    cpx *buf = (cpx *)c->fbuf;
+    cpx *buf = (cpx *)(core ? c->fbuf_b : c->fbuf);
     for (int k = 0; k < M; k++) {
         float ar = X[2 * k], ai = X[2 * k + 1];
         float br = X[2 * (M - k)], bi = -X[2 * (M - k) + 1];
@@ -1484,7 +1670,7 @@ static void irfft_win(itofs_ctx_t *c, const float *X, float *out)
         buf[k].r = er - oi;
         buf[k].i = -(ei + orr);
     }
-    fft_fwd(c->fft, buf);
+    fft_fwd(core ? c->fft_b : c->fft, buf);
     const float invM = 1.0f / (float)M;
     for (int j = 0; j < M; j++) {
         out[2 * j] = buf[j].r * invM * c->win[2 * j];
@@ -1492,10 +1678,123 @@ static void irfft_win(itofs_ctx_t *c, const float *X, float *out)
     }
 }
 
+typedef struct { itofs_ctx_t *c; const itofs_block_t *bk; int W, K, DI, lp; } blk_arg_t;
+static void blk_dw_body(void *a_, int t0, int t1, int core)         // depthwise conv + LayerNorm of rows [t0, t1)
+{
+    const blk_arg_t *A = a_; (void)core;
+    const itofs_ctx_t *c = A->c;
+    const int W = A->W, K = A->K;
+    for (int t = t0; t < t1; t++) {
+        float *y = c->s_y0 + (size_t)t * W;
+        for (int ch = 0; ch < W; ch++) {
+            float a = 0.f;
+            const float *w = A->bk->dw_w + (size_t)ch * K;
+            for (int k = 0; k < K; k++) a += c->s_g0[(size_t)(t + k) * W + ch] * w[k];
+            y[ch] = a + A->bk->dw_b[ch];
+        }
+        layernorm_row(y, W, A->bk->ln_g, A->bk->ln_b, c->m->eps_dec, y);
+    }
+}
+static void blk_gelu_body(void *a_, int t0, int t1, int core)
+{
+    const blk_arg_t *A = a_; (void)core;
+    const int m_arch3 = A->c->m->arch == 3;
+    float *y1 = A->c->s_y1;
+    for (size_t j = (size_t)t0 * A->DI; j < (size_t)t1 * A->DI; j++) y1[j] = gelu(y1[j]);
+}
+static void blk_res_body(void *a_, int t0, int t1, int core)
+{
+    const blk_arg_t *A = a_; (void)core;
+    const itofs_ctx_t *c = A->c;
+    const int W = A->W;
+    for (int t = t0; t < t1; t++) {
+        float *y = c->s_y2 + (size_t)t * W;
+        const float *r = c->s_g0 + (size_t)(t + A->lp) * W;
+        for (int ch = 0; ch < W; ch++) y[ch] = r[ch] + y[ch] * A->bk->gamma[ch];
+    }
+}
+
+static void hft_body(void *a_, int i0, int i1, int core)            // reflect-padded windowed source frame -> rFFT row
+{
+    const st_arg_t *A = a_;
+    itofs_ctx_t *c = A->c;
+    const itofs_model_t *m = c->m;
+    const int hop = m->hop, N = m->n_fft, T = c->T, p = c->st[A->s].prod[0];
+    for (int i = i0; i < i1; i++) {
+        const int t = A->t0 + i;
+        float *x = core ? c->x_b : c->s_y1;     // N windowed samples
+        for (int j = 0; j < N; j++) {
+            int zi = t * hop + j - N / 2;
+            if (zi < 0) zi = -zi;       // reflect pad (center=True)
+            const int si = zi - hop / 2; // hop/2 zeros each side of the source
+            const float v = (si < 0 || si >= T * hop) ? 0.f : ring_row(c, p, si / hop)[si % hop];
+            x[j] = v * c->win[j];
+        }
+        float *row = c->s_y0 + (size_t)i * (N + 2);
+        rfft_row(c, x, row, core);
+        if (c->tap) c->tap(c->tap_user, ITOFS_TAP_HFEAT, t, row, N + 2);
+    }
+}
+static void head_body(void *a_, int i0, int i1, int core)           // log-mag / phase -> windowed iSTFT frame
+{
+    const st_arg_t *A = a_;
+    itofs_ctx_t *c = A->c;
+    const itofs_model_t *m = c->m;
+    const int N = m->n_fft, NB = N / 2 + 1;
+    for (int i = i0; i < i1; i++) {
+        const float *h = c->s_y0 + (size_t)i * (N + 2);
+        if (c->tap) c->tap(c->tap_user, ITOFS_TAP_SPEC, A->t0 + i, h, N + 2);
+        float *X = core ? c->x_b : c->s_y1;     // interleaved half spectrum
+        for (int k = 0; k < NB; k++) {
+            float mag = itf_expf(h[k]);
+            if (mag > m->mag_max) mag = m->mag_max;
+            float sn, cs;
+            itf_sincosf(h[NB + k], &sn, &cs);
+            X[2 * k] = mag * cs;
+            X[2 * k + 1] = mag * sn;
+        }
+        X[1] = 0.f; X[2 * (NB - 1) + 1] = 0.f;    // c2r ignores imag(DC), imag(Nyquist)
+        irfft_win(c, X, ring_row(c, A->s, A->t0 + i), core);
+    }
+}
+static void ola_body(void *a_, int i0, int i1, int core)
+{
+    const st_arg_t *A = a_; (void)core;
+    itofs_ctx_t *c = A->c;
+    const itofs_stage_t *S = &c->st[A->s];
+    const int hop = c->m->hop, N = c->m->n_fft, p = S->prod[0];
+    for (int t = A->t0 + i0; t < A->t0 + i1; t++) {
+        float *out = c->out_ptr + (size_t)(t - c->out_base) * hop;
+        const int f0 = imax(0, t - S->L[0]), f1 = imin(c->T - 1, t + S->R[0]);
+        for (int sx = 0; sx < hop; sx++) {
+            const int pp = t * hop + sx + c->ola_off;
+            float acc = 0.f, env = 0.f;
+            for (int f = f0; f <= f1; f++) {
+                const int k = pp - f * hop;
+                if (k < 0 || k >= N) continue;
+                acc += ring_row(c, p, f)[k];
+                env += c->win2[k];
+            }
+            out[sx] = acc / env;
+        }
+    }
+}
+static void run_stage_(itofs_ctx_t *c, int s, int t0, int t1);
 static void run_stage(itofs_ctx_t *c, int s, int t0, int t1)
 {
+    PROF_T(ps0);
+#ifdef ITOFS_PROF
+    const double pg = itofs_prof[ITOFS_PROF_GEMM];
+#endif
+    run_stage_(c, s, t0, t1);
+    PROF_ADD(ITOFS_PROF_STAGE + c->st[s].kind, ps0);
+#ifdef ITOFS_PROF
+    itofs_prof[ITOFS_PROF_SGEMM + c->st[s].kind] += itofs_prof[ITOFS_PROF_GEMM] - pg;
+#endif
+}
+static void run_stage_(itofs_ctx_t *c, int s, int t0, int t1)
+{
     const itofs_model_t *m = c->m;
-    const int m_arch3 = m->arch == 3;
     itofs_stage_t *S = &c->st[s];
     const int n = t1 - t0, W = S->width;
     switch (S->kind) {
@@ -1512,12 +1811,8 @@ static void run_stage(itofs_ctx_t *c, int s, int t0, int t1)
         gather(c, p, t0 - lp, t1 + S->R[0], 0, W, c->s_g0, W);
         qlin_run(c, &L->conv, c->s_g0, W, n, c->s_y0, W, mel ? ITOFS_G_MEL : ITOFS_G_PROS);
         const float *g1 = mel ? c->mfilm_g1[S->idx] : c->film_g1[S->idx], *bb = mel ? c->mfilm_b[S->idx] : c->film_b[S->idx];
-        for (int t = 0; t < n; t++) {
-            float *y = c->s_y0 + (size_t)t * W;
-            const float *xr = c->s_g0 + (size_t)(t + lp) * W;
-            layernorm_row(y, W, L->ln_g, L->ln_b, m->eps_text, y);
-            for (int i = 0; i < W; i++) y[i] = xr[i] + gelu(y[i] * g1[i] + bb[i]);
-        }
+        cln_arg_t a = { c, L, c->s_y0, c->s_g0, W, lp, g1, bb, NULL, s, t0, 1, m->eps_text };
+        par_for(c, cln_body, &a, n, (long)n * W * 8);
         put_rows(c, s, t0, n, c->s_y0, W);
         break;
     }
@@ -1555,28 +1850,17 @@ static void run_stage(itofs_ctx_t *c, int s, int t0, int t1)
         break;
     }
     case SK_SRC: {
-        for (int t = t0; t < t1; t++) {
-            float *r = ring_row(c, s, t);
-            src_frame(c, s, t, r);
-            if (c->tap) c->tap(c->tap_user, ITOFS_TAP_SRC, t, r, W);
-        }
+        // the phase anchors chain from frame to frame (cheap, in order); the samples are then independent per frame
+        for (int t = t0; t < t1; t++) src_frame_anchors(c, s, t, c->src_anc + 2 * (t - t0));
+        st_arg_t a = { c, s, t0 };
+        par_for(c, src_body, &a, n, (long)n * W * 16);
+        for (int t = t0; t < t1; t++) if (c->tap) c->tap(c->tap_user, ITOFS_TAP_SRC, t, ring_row(c, s, t), W);
         break;
     }
     case SK_HFT: {
-        const int hop = m->hop, N = m->n_fft, T = c->T, p = S->prod[0];
-        for (int t = t0; t < t1; t++) {
-            float *x = c->s_y1;             // N windowed samples
-            for (int j = 0; j < N; j++) {
-                int zi = t * hop + j - N / 2;
-                if (zi < 0) zi = -zi;       // reflect pad (center=True)
-                const int si = zi - hop / 2; // hop/2 zeros each side of the source
-                const float v = (si < 0 || si >= T * hop) ? 0.f : ring_row(c, p, si / hop)[si % hop];
-                x[j] = v * c->win[j];
-            }
-            float *row = c->s_y0 + (size_t)(t - t0) * (N + 2);
-            rfft_row(c, x, row);
-            if (c->tap) c->tap(c->tap_user, ITOFS_TAP_HFEAT, t, row, N + 2);
-        }
+        const int N = m->n_fft;
+        st_arg_t a = { c, s, t0 };
+        par_for(c, hft_body, &a, n, (long)n * N * 8);
         qlin_run(c, &m->harm_proj, c->s_y0, N + 2, n, c->s_y2, W, ITOFS_G_HARM);
         put_rows(c, s, t0, n, c->s_y2, W);
         break;
@@ -1632,25 +1916,13 @@ static void run_stage(itofs_ctx_t *c, int s, int t0, int t1)
         const itofs_block_t *bk = &m->blk[S->idx];
         const int K = m->dec_kernel, lp = S->L[0], DI = m->dec_inter;
         gather(c, S->prod[0], t0 - lp, t1 + S->R[0], 0, W, c->s_g0, W);
-        for (int t = 0; t < n; t++) {
-            float *y = c->s_y0 + (size_t)t * W;
-            for (int ch = 0; ch < W; ch++) {
-                float a = 0.f;
-                const float *w = bk->dw_w + (size_t)ch * K;
-                for (int k = 0; k < K; k++) a += c->s_g0[(size_t)(t + k) * W + ch] * w[k];
-                y[ch] = a + bk->dw_b[ch];
-            }
-            layernorm_row(y, W, bk->ln_g, bk->ln_b, m->eps_dec, y);
-        }
+        blk_arg_t a = { c, bk, W, K, DI, lp };
+        par_for(c, blk_dw_body, &a, n, (long)n * W * K);
         c->macs_f32[ITOFS_G_BLOCKS] += (double)n * W * K;
         qlin_run(c, &bk->pw1, c->s_y0, W, n, c->s_y1, DI, ITOFS_G_BLOCKS);
-        for (size_t j = 0; j < (size_t)n * DI; j++) c->s_y1[j] = gelu(c->s_y1[j]);
+        par_for(c, blk_gelu_body, &a, n, (long)n * DI * 8);
         qlin_run(c, &bk->pw2, c->s_y1, DI, n, c->s_y2, W, ITOFS_G_BLOCKS);
-        for (int t = 0; t < n; t++) {
-            float *y = c->s_y2 + (size_t)t * W;
-            const float *r = c->s_g0 + (size_t)(t + lp) * W;
-            for (int ch = 0; ch < W; ch++) y[ch] = r[ch] + y[ch] * bk->gamma[ch];
-        }
+        par_for(c, blk_res_body, &a, n, (long)n * W);
         put_rows(c, s, t0, n, c->s_y2, W);
         break;
     }
@@ -1659,42 +1931,78 @@ static void run_stage(itofs_ctx_t *c, int s, int t0, int t1)
         gather(c, S->prod[0], t0, t1, 0, D, c->s_g0, D);
         for (int t = 0; t < n; t++) layernorm_row(c->s_g0 + (size_t)t * D, D, m->n1_g, m->n1_b, m->eps_dec, c->s_g0 + (size_t)t * D);
         qlin_run(c, &m->dec_out, c->s_g0, D, n, c->s_y0, N + 2, ITOFS_G_HEAD);
-        for (int t = 0; t < n; t++) {
-            const float *h = c->s_y0 + (size_t)t * (N + 2);
-            if (c->tap) c->tap(c->tap_user, ITOFS_TAP_SPEC, t0 + t, h, N + 2);
-            float *X = c->s_y1;              // interleaved half spectrum
-            for (int k = 0; k < NB; k++) {
-                float mag = itf_expf(h[k]);
-                if (mag > m->mag_max) mag = m->mag_max;
-                float sn, cs;
-                itf_sincosf(h[NB + k], &sn, &cs);
-                X[2 * k] = mag * cs;
-                X[2 * k + 1] = mag * sn;
-            }
-            X[1] = 0.f; X[2 * (NB - 1) + 1] = 0.f;    // c2r ignores imag(DC), imag(Nyquist)
-            irfft_win(c, X, ring_row(c, s, t0 + t));
-        }
+        st_arg_t a = { c, s, t0 };
+        par_for(c, head_body, &a, n, (long)n * NB * 8);
         break;
     }
     case SK_OLA: {
-        const int hop = m->hop, N = m->n_fft, p = S->prod[0];
-        for (int t = t0; t < t1; t++) {
-            float *out = c->out_ptr + (size_t)(t - c->out_base) * hop;
-            const int f0 = imax(0, t - S->L[0]), f1 = imin(c->T - 1, t + S->R[0]);
-            for (int sx = 0; sx < hop; sx++) {
-                const int pp = t * hop + sx + c->ola_off;
-                float acc = 0.f, env = 0.f;
-                for (int f = f0; f <= f1; f++) {
-                    const int k = pp - f * hop;
-                    if (k < 0 || k >= N) continue;
-                    acc += ring_row(c, p, f)[k];
-                    env += c->win2[k];
-                }
-                out[sx] = acc / env;
-            }
-        }
+        st_arg_t a = { c, s, t0 };
+        par_for(c, ola_body, &a, n, (long)n * m->hop * 4);
         break;
     }
+    }
+}
+
+// Largest batch (rows) that stage / token stage can run with the hot scratch as allocated: every buffer the stage uses
+// must hold n (+ conv halo) rows. At least nb (the layout guarantees it), at most MAX_FILL.
+static int fits(const itofs_ctx_t *c, int n, int halo, long g0w, long y0w, long y1w, long y2w, int qin, int P, int WP)
+{
+    const int r = n + halo;
+    return (long)r * g0w <= c->cap_g0 && (long)n * y0w <= c->cap_y0 && (long)n * y1w <= c->cap_y1 && (long)n * y2w <= c->cap_y2 &&
+           r <= c->cap_qs && (long)r * P * pad16(qin) <= c->cap_q8 && (size_t)n * P * WP * 4 * 8 <= c->acc_bytes;
+}
+static int qP(const itofs_ctx_t *c, const itofs_qlin_t *q) { return (q->w_lo || q->act16) ? 2 : c->act_planes; }
+static int qWP(const itofs_qlin_t *q) { return q->w_lo ? 2 : 1; }
+static int stage_fits(const itofs_ctx_t *c, const itofs_stage_t *S, int n)
+{
+    const itofs_model_t *m = c->m;
+    const int W = S->width, N = m->n_fft;
+    switch (S->kind) {
+    case SK_PIN: return fits(c, n, 0, m->hf_dim, W, 0, 0, m->hf_dim, qP(c, &m->pros_in), qWP(&m->pros_in));
+    case SK_PROS: case SK_MEL: {
+        const itofs_qlin_t *q = S->kind == SK_MEL ? &m->mel[S->idx].conv : &m->pros[S->idx].conv;
+        return fits(c, n, q->K - 1, W, W, 0, 0, W, qP(c, q), qWP(q));
+    }
+    case SK_CUR: return fits(c, n, 0, m->pros_dim, 0, 0, 0, 0, 1, 1);
+    case SK_SRC: return n <= imax(c->nb, MAX_FILL);
+    case SK_HFT: return fits(c, n, 0, 0, N + 2, 0, W, N + 2, qP(c, &m->harm_proj), qWP(&m->harm_proj));
+    case SK_MIN: return fits(c, n, 0, m->hf_dim + 3, W, 0, 0, m->hf_dim + 3, qP(c, &m->mel_in), qWP(&m->mel_in));
+    case SK_MOUT: return fits(c, n, 0, m->mel_dim, m->n_mels, 0, 0, m->mel_dim, qP(c, &m->mel_out), qWP(&m->mel_out));
+    case SK_EMB: return fits(c, n, m->embed_kernel - 1, m->dec_in, W, 0, 0, m->dec_in, qP(c, &m->dec_embed), qWP(&m->dec_embed));
+    case SK_BLK: {
+        const itofs_block_t *bk = &m->blk[S->idx];
+        return fits(c, n, m->dec_kernel - 1, W, W, m->dec_inter, W, m->dec_inter, imax(qP(c, &bk->pw1), qP(c, &bk->pw2)), 1) &&
+               fits(c, n, 0, 0, 0, 0, 0, W, qP(c, &bk->pw1), 1);
+    }
+    case SK_HEAD: return fits(c, n, 0, m->dec_dim, N + 2, 0, 0, m->dec_dim, qP(c, &m->dec_out), qWP(&m->dec_out));
+    default: return 1;      // OLA: writes the caller's rows only
+    }
+}
+static int tstage_fits(const itofs_ctx_t *c, const itofs_tstage_t *S, int n)
+{
+    const itofs_model_t *m = c->m;
+    const int D = m->text_dim, H = m->rnn_hidden;
+    switch (S->kind) {
+    case TK_ENC: case TK_DUR: {
+        const itofs_qlin_t *q = S->kind == TK_ENC ? &m->enc[S->idx].conv : &m->dur[S->idx].conv;
+        return fits(c, n, S->L + S->R, D, D, 0, 0, D, qP(c, q), qWP(q));
+    }
+    case TK_GRU: return fits(c, n, 0, D, 3 * H, 0, 0, D, qP(c, &m->rnn_ih[0]), qWP(&m->rnn_ih[0]));
+    case TK_PROJ: return !H || fits(c, n, 0, H, D, 0, 0, H, qP(c, &m->rnn_proj), qWP(&m->rnn_proj));
+    default: return 1;
+    }
+}
+static void set_bmax(itofs_ctx_t *c)
+{
+    for (int s = 0; s < c->n_stages; s++) {
+        int b = c->nb;
+        while (b < MAX_FILL && stage_fits(c, &c->st[s], b + 1)) b++;
+        c->st[s].bmax = b;
+    }
+    for (int s = 0; s < c->n_tst; s++) {
+        int b = c->nb;
+        while (b < MAX_FILL && tstage_fits(c, &c->tst[s], b + 1)) b++;
+        c->tst[s].bmax = b;
     }
 }
 
@@ -1721,7 +2029,7 @@ static void advance(itofs_ctx_t *c, int F)
     for (int s = 0; s < S; s++) {
         itofs_stage_t *st = &c->st[s];
         while (st->done < need[s]) {
-            const int t1 = imin(need[s], st->done + c->nb);
+            const int t1 = imin(need[s], st->done + st->bmax);
             run_stage(c, s, st->done, t1);
             st->done = t1;
         }
@@ -1739,6 +2047,7 @@ int itofs_begin(itofs_ctx_t *c, const int *tokens, int n, int style_idx, uint32_
     for (int i = 0; i < n; i++) if (tokens[i] < 0 || tokens[i] >= m->n_vocab) return E_ARG;
     if (c->act_bits != 8 && c->act_bits != 16) return E_ARG;
     c->act_planes = c->act_bits == 16 ? 2 : 1;
+    set_bmax(c);
     c->n_tok = n;
     memcpy(c->tok, tokens, (size_t)n * sizeof(int));
     if (!m->has_sp) style_setup(c, style_idx);      // with the style predictor: after the text encoder (below)

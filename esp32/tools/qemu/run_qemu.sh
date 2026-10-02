@@ -32,7 +32,7 @@ python -m esptool --chip esp32s3 merge_bin --fill-flash-size 16MB -o "$FW/build_
   0x0 "$FW/build_qemu/bootloader/bootloader.bin" 0x8000 "$FW/build_qemu/partition_table/partition-table.bin" \
   0x10000 "$FW/build_qemu/itofs.bin" 0x200000 "$W" > /dev/null
 PORT=$((5500 + RANDOM % 400))
-"$Q" -M esp32s3 -m 8M -nographic -monitor none -nic none \
+"$Q" -M esp32s3 -m 8M $QEMU_EXTRA -nographic -monitor none -nic none \
   -drive file="$FW/build_qemu/run/flash_$TAG.bin",if=mtd,format=raw \
   -drive file="$FW/build_qemu/run/qemu_efuse.bin",if=none,format=raw,id=efuse -global driver=nvram.esp32s3.efuse,property=drive,value=efuse \
   -global driver=timer.esp32s3.timg,property=wdt_disable,value=true \

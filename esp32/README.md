@@ -69,27 +69,51 @@ and per second of audio.
 | Weights | 4.89 MB blob: 3.42 M int8 + 0.54 M int16 + 0.08 M f32 parameters (the style FiLM is precomputed into a table) |
 | Flash | app 296 KB in a 2 MB slot at 0x10000; weights in a 14 MB slot at 0x200000 |
 | PSRAM | **peak 5.9 of 8 MB** (weights copied to PSRAM + stage ring buffers + text buffers for 400 tokens; QEMU) |
-| Internal SRAM | **peak 327 of 383 KB** (hot scratch + 4 weight-staging tiles + stacks; QEMU) |
+| Internal SRAM | **peak 348 of 383 KB** (hot scratch + 4 weight-staging tiles + stacks; QEMU) |
 | Work before the first 100 ms of audio | **83.6 M int8 MACs, for any sentence length** (forward GRU, fixed style: the text side runs incrementally) |
 | Work per second of audio | 346 M int8 MACs + 1.2 M f32 MACs + ~56 M cycles of other float work (LayerNorm, GELU, FFT, source; 0.23 of a core) |
 | Weight traffic | 39 MB of weights read from PSRAM per second of audio (8-frame batches) |
 
 ## 4. Estimated time to first audio and real-time factor
 
-**These are estimates, not measurements.** The model: time = int8 MACs / G + other float cycles / 240 MHz. G is the
-*effective* int8 GEMM throughput on the board, including PSRAM effects. The float cycle costs are assumptions
-(`host/opcount_v3.c`). Full table: [`results/chip/estimates.md`](../results/chip/estimates.md).
+**Estimated from exact QEMU instruction counts. Not measured on silicon.** QEMU runs the real firmware with `-icount shift=0`
+(one instruction = one virtual nanosecond), so the instruction counts are exact: per core from text-in to the first chunk,
+per second of audio, and on the dual-core critical path (`tools/qemu/icount_profile.sh`, then
+`python3 esp32/tools/icount_estimate.py esp32/logs/qemu_icprof.log`). So are the bytes of weights the GEMM staging reads from PSRAM.
+Only the conversion to time is an estimate:
+- CPU time = critical-path instructions x CPI / 240 MHz, with CPI 1.3 / 1.45 / 1.6 (the range we use for our ASR sister project, Oido);
+- PSRAM time = bytes read / effective bandwidth of 80 / 60 / 40 MB/s. The octal PSRAM at 80 MHz DDR is 160 MB/s on paper. Forum measurements
+  on the ESP32-S3 (N16R8 and similar) are about 40 MB/s up to about 84 MB/s for reads
+  ([1](https://esp32.com/viewtopic.php?p=103811), [2](https://esp32.com/viewtopic.php?p=112434)), 27-52 MB/s for `memcpy` involving PSRAM, and a
+  public PIE benchmark shows 10-60 MB/s on other boards ([ESP32-TOPS-BenchMark](https://github.com/nnn112358/ESP32-TOPS-BenchMark)).
+  (We read these from search summaries; we could not re-open every forum page.)
+- total = max(CPU + (1 - hidden) x PSRAM, PSRAM), where `hidden` is the share of PSRAM time overlapped with compute (GDMA staging):
+  1.0 / 0.5 / 0.0 for optimistic / central / pessimistic.
 
-| | G = 0.3 GOPS | 0.5 | 1.0 | 2.0 | G needed |
-|---|---|---|---|---|---|
-| Time to first audio (first 100 ms chunk ready) | 323 ms | 212 ms | 128 ms | 86 ms | **0.54 GOPS for < 200 ms** |
-| Real-time factor | 1.39 | 0.92 | 0.58 | 0.40 | **0.45 GOPS for real time** |
+| Exact counts | before the first chunk | per second of audio (critical path) |
+|---|---|---|
+| first release engine, 100 ms first chunk | 62.5 M instructions, 10.2 MB of weights from PSRAM | 251-271 M instructions, 38 MB |
+| **this engine, 25 ms first chunk** | **22.9-23.4 M instructions, 4.5 MB** (one pass over the weights) | **133-144 M instructions**, 38 MB (+ about 4.5 MB of activation rings) |
+
+The counts are the same for short (25 tokens), median (108) and long (175 tokens) sentences. The output is bit-identical between the two engines and to the host build.
+
+| Estimated | optimistic | central | pessimistic |
+|---|---|---|---|
+| Time to first audio, first release engine | 338 ms | 463 ms | 672 ms |
+| **Time to first audio, this engine (25 ms first chunk)** | **124-127 ms** | **176-179 ms** | **266-269 ms** |
+| Real-time factor, first release engine | 1.4-1.5 | 1.9-2.0 | 2.7-2.9 |
+| **Real-time factor, this engine** | **0.72-0.78** | **1.15-1.23** (CPU alone 0.81-0.87) | **1.93-2.04** |
 
 Then I2S adds at most one 20 ms DMA buffer.
 
-What we do not know yet is G. The S3's vector unit peaks far above 0.5 GOPS on SRAM-resident data, but the weights
-stream from PSRAM. At 8.8 MACs per weight byte, G ≤ 8.8 × (effective PSRAM MB/s), so 40 MB/s gives 0.35 and 80 MB/s
-gives 0.70. The `gdma` weight-staging mode overlaps the copy with compute. Only the board can say which mode wins.
+Reading this honestly:
+- The earlier estimate (212 ms at 0.5 GOPS, RTF 0.92) counted only int8 MACs. Counting every instruction and the PSRAM traffic, the first release engine
+  would have been near 460 ms and RTF 2. The changes in this version (aligned PIE dot kernel, row-parallel loops on both cores, a 25 ms first chunk whose
+  pipeline fill reads each weight matrix once) bring the central time to first audio under 200 ms. The pessimistic case, 40 MB/s with no overlap and CPI 1.6, is above 250 ms.
+- **Real time is not established.** The CPU fits, but the weight traffic (about 43 MB/s) needs the copy to overlap compute: with CPI 1.45, RTF < 1
+  needs about 60 MB/s and at least 80 % of the PSRAM time hidden. The `gdma` staging mode is meant for that. Only the board can say.
+  What would fix it otherwise: a leaner scratch layout that allows 16-frame chunks (half the weight traffic), fewer float instructions
+  (they are about 60 % of the single-core instructions), or int4 weights in the vocoder blocks.
 
 **What the board prints** (please send the whole log from reset to `READY`):
 

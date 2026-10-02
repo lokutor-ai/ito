@@ -134,6 +134,12 @@ typedef struct {
                                // (incremental-capable models; lets c->force_whole_text compare both paths, ~1.2 MB)
 } itofs_limits_t;
 
+// Optional dual-core row parallelism (the chip's second core): par(user, body, arg, n) must call body(arg, i0, i1, core)
+// over a partition of [0, n) -- each part exactly once, core 0 or 1 -- and return when all parts are done. Every body
+// writes disjoint rows with per-core scratch, so the result does not depend on the partition (bit-identical).
+typedef void (*itofs_body_fn)(void *arg, int i0, int i1, int core);
+typedef void (*itofs_par_fn)(void *user, itofs_body_fn body, void *arg, int n);
+
 typedef struct itofs_stage itofs_stage_t;
 typedef struct itofs_tstage itofs_tstage_t;
 typedef struct itofs_fft itofs_fft_t;
@@ -143,6 +149,7 @@ typedef struct {
     itofs_limits_t lim;
     itofs_qgemm_fn qgemm; void *qgemm_user;
     itofs_tap_fn tap; void *tap_user;
+    itofs_par_fn par; void *par_user;              // NULL: everything on the calling core (taps disable it)
     // ---- test hooks (NULL / 0 in normal use) ----
     const float *force_h;      // [n][text_dim]: replaces the text encoder output (after the GRU)
     const int *force_dur;      // [n]: replaces the predicted durations
@@ -185,7 +192,13 @@ typedef struct {
     float *s_g0, *s_g1, *s_y0, *s_y1, *s_y2, *s_qs, *s_pcm;  // per-step scratch
     int8_t *s_q8; int32_t *s_acc;
     float *win, *win2, *fbuf, *rtw;
+    float *fbuf_b, *x_b;       // second core's FFT buffer and STFT frame / half spectrum (row-parallel HFT and HEAD)
+    itofs_fft_t *fft_b;        // second core's FFT plan (shares the twiddles, own scratch)
+    double *src_anc;           // source phase anchors of a batch (2 per frame)
     int acc_tile, tb;          // tb: whole-sentence text-side batch (tokens per GEMM call)
+    long cap_g0, cap_y0, cap_y1, cap_y2, cap_q8, cap_qs;   // hot scratch capacities (floats; bytes for q8; rows for qs):
+                               // a stage may run more than chunk_frames rows at once when they fit (the first chunk's
+                               // pipeline fill then reads each weight matrix once instead of once per chunk_frames)
     size_t acc_bytes;
     size_t hot_used, bulk_used;
 } itofs_ctx_t;
@@ -210,6 +223,16 @@ const char *itofs_strerror(int err);
 enum { ITOFS_OPC_EXP, ITOFS_OPC_LOG, ITOFS_OPC_SINCOS, ITOFS_OPC_ERF, ITOFS_OPC_ERF_SERIES, ITOFS_OPC_QUANT, ITOFS_OPC_LN,
        ITOFS_OPC_FFT, ITOFS_OPC_GAUSS, ITOFS_OPC_SRC, ITOFS_OPC_N };
 extern long long itofs_opc[ITOFS_OPC_N];
+#endif
+
+#ifdef ITOFS_PROF      // profiling build: time per frame-stage kind (PIN PROS CUR SRC HFT EMB BLK HEAD OLA MIN MEL MOUT),
+                      // token-stage kind (ENC GRU PROJ DUR DOUT), and inside the dense layers: all, quantise, GEMM calls
+enum { ITOFS_PROF_STAGE = 0, ITOFS_PROF_TSTAGE = 12, ITOFS_PROF_QLIN = 17, ITOFS_PROF_QUANT, ITOFS_PROF_GEMM,
+       ITOFS_PROF_SGEMM = 20,           // GEMM-call time inside each frame-stage kind (12) and token-stage kind (5)
+       ITOFS_PROF_N = 37 };
+extern uint32_t (*itofs_prof_clock)(void);
+extern double itofs_prof[ITOFS_PROF_N];
+void itofs_prof_micro(double *res);   // CCOUNT ticks per call: div, GELU (|x|<=1), GELU (tail), expf, sqrtf, sincosf, logf, mul+add
 #endif
 
 #ifdef __cplusplus
