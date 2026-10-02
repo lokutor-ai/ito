@@ -267,7 +267,7 @@ int main(int argc, char **argv)
             cw->ext_noise = mode ? NULL : noise; cw->ext_phase0 = ph0; cw->use_ext_phase0 = !mode;
             long nw = synth(cw, tok, n, style, 12345u, y, cap);
             printf("D streaming vs whole (%s): whole %ld samples;", mode ? "seeded noise, seed 12345" : "golden noise", nw);
-            const int chunks[] = {1, 2, 3, 5, 8, 16, 32};
+            const int chunks[] = {1, 2, 3, 5, 8, 16, 24, 32};
             for (int ci = 0; ci < 7; ci++) {
                 itofs_ctx_t *cs = make_ctx(&m, 400, chunks[ci]);
                 cs->ext_noise = cw->ext_noise; cs->ext_phase0 = ph0; cs->use_ext_phase0 = !mode;

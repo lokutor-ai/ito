@@ -13,8 +13,9 @@ same chip).
 > **Status (2 October 2026).** The on-chip engine is verified on a laptop and in Espressif's QEMU emulator: the
 > firmware's audio is bit-identical to the host build of the engine, and every sample in [`samples/`](samples) is that
 > engine's exact output. **Nothing has run on a physical board yet.** Time to first audio and real-time factor are
-> **estimated** from exact instruction counts (QEMU) and an assumed PSRAM bandwidth. **Real-time playback is not established:**
-> in the central estimate the board is slightly slower than real time. An earlier version of this page claimed 130–210 ms and
+> **estimated** from exact instruction counts (QEMU) and an assumed PSRAM bandwidth. **Real-time playback is not established on silicon:**
+> the optimistic and central estimates are faster than real time (RTF 0.53–0.55 and 0.77–0.79) and the pessimistic one is still slower
+> (1.18–1.22). An earlier version of this page claimed 130–210 ms and
 > real time at 0.5–1 GOPS; that was too optimistic (see [`esp32/README.md`](esp32/README.md) §4). The firmware measures the real numbers at boot;
 > we will publish them here after we run it on boards.
 
@@ -98,16 +99,19 @@ UTMOS cannot hear intonation, so treat it as a check, not a verdict. On 60 held-
 | Parameters | 4.40 M: acoustic front 1.62 M + vocoder 2.79 M |
 | Chip weights | **4.89 MB** (`ito_female_esp32s3.bin`): int8 mel head and vocoder; int16 pitch path |
 | Flash | 296 KB app + 4.89 MB weights; about 9 MB of the 14 MB weights partition stays free |
-| PSRAM / SRAM | peak 5.9 of 8 MB PSRAM, 327 of 383 KB internal SRAM (measured in QEMU) |
-| Work before the first audio (25 ms first chunk) | **23 M instructions and 4.5 MB of weights read from PSRAM, for any sentence length** (exact counts from QEMU) |
-| Work per second of audio | 133–144 M instructions on the dual-core critical path, 38 MB of weights read from PSRAM (exact counts; the conversion to time is an estimate) |
-| Time to first audio | **estimated, not measured:** 124–127 ms optimistic, **176–179 ms central**, 266–269 ms pessimistic (the first public version of the engine: 338 / 463 / 672 ms) |
-| Real-time factor | **estimated, not measured:** 0.72–0.78 optimistic, **1.15–1.23 central**, 1.9–2.0 pessimistic. Below 1 is real time, so **real time is not established**; the CPU alone is 0.8–0.9, and reading the weights from PSRAM is the bottleneck |
+| PSRAM / SRAM | peak 6.5 of 8 MB PSRAM, 346 of 383 KB internal SRAM (QEMU; about 358 KB on the chip with the I2S buffers) |
+| Work before the first audio (25 ms first chunk) | **17.4–17.9 M instructions and 4.8 MB of weights read from PSRAM, for any sentence length** (exact counts from QEMU) |
+| Work per second of audio | about 99 M instructions on the dual-core critical path, 17 MB of weights read from PSRAM (24-frame chunks; exact counts; the conversion to time is an estimate) |
+| Time to first audio | **estimated, not measured:** 94–97 ms optimistic, **145–148 ms central**, 237–240 ms pessimistic (the first public version of the engine: 338 / 463 / 672 ms) |
+| Real-time factor | **estimated, not measured:** 0.53–0.55 optimistic, **0.77–0.79 central**, 1.18–1.22 pessimistic. Below 1 is faster than real time, so the pessimistic case (40 MB/s PSRAM, nothing overlapped, CPI 1.6) is **still slower than real time** |
+| Start delay for gapless speech | **estimated:** about 220 ms optimistic, **about 340 ms central** (342–346), 850 ms or more pessimistic. "Time to first audio" is when the first 25 ms of sound can start; the next chunk is 300 ms of audio and takes longer to compute, so to play without a gap you must wait about this long before starting the DAC |
 | On a laptop | RTF ≈ 0.01 on an Apple M4 Max CPU, for both the PyTorch model (whole utterance) and the C engine |
 
-The open question is the effective PSRAM bandwidth and how much of it overlaps compute (GDMA). The identified fixes if it is too slow
-are working GDMA overlap, a leaner scratch so 16-frame chunks fit (half the weight traffic), and fewer float operations. The firmware's boot benchmark measures the real numbers
-and prints `BOARD_SUMMARY`. The estimate model and full tables are in [`esp32/README.md`](esp32/README.md).
+All of this is **estimated from exact instruction counts, not measured on silicon.** The open question is the effective PSRAM
+bandwidth and how much of it overlaps compute (GDMA); the pessimistic column is decided by those two assumptions. A weight pass now
+serves 24-frame (300 ms) chunks after a 2-frame (25 ms) first chunk, which halves the weight traffic (38 to 17 MB per second of audio)
+with output bit-identical to the previous engine. The firmware's boot benchmark measures the real numbers and prints `BOARD_SUMMARY`.
+The estimate model and full tables are in [`esp32/README.md`](esp32/README.md).
 
 ## How it works
 

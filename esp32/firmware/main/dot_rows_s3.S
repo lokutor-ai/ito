@@ -34,3 +34,20 @@ itofs_s3_dot_rows:
 .Ldr_done:
     retw.n
     .size   itofs_s3_dot_rows, . - itofs_s3_dot_rows
+
+// itofs_s3_pack_row: copy nv16 * 16 bytes starting at ANY address into a 16-byte aligned buffer (PIE funnel shift: 3 instructions per 16
+// bytes). Reads up to 16 bytes past src + nv16 * 16 - 1 (one extra aligned block when src is misaligned).
+//   a2 dst (16-byte aligned), a3 src, a4 nv16 (>= 1)
+    .align  4
+    .global itofs_s3_pack_row
+    .type   itofs_s3_pack_row, @function
+itofs_s3_pack_row:
+    entry   a1, 32
+    ee.ld.128.usar.ip   q0, a3, 16      // prime: aligned block holding src[0]; sets SAR_BYTE = src & 15
+    loopgtz a4, .Lpr_end
+    ee.ld.128.usar.ip   q2, a3, 16
+    ee.src.q.qup        q4, q0, q2      // q4 = bytes [src&15, src&15 + 16) of the block pair; q0 <- q2
+    ee.vst.128.ip       q4, a2, 16
+.Lpr_end:
+    retw.n
+    .size   itofs_s3_pack_row, . - itofs_s3_pack_row

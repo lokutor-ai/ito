@@ -30,7 +30,7 @@
 
 #define TOC 8
 #define DUAL_MIN_MACS 32768
-#define TILE_BYTES 12288        // per staging buffer (2 per core): 48 KB of internal SRAM in total
+#define TILE_BYTES 10240        // per staging buffer (2 per core): 40 KB of internal SRAM in total (>= 8 rows of the 1202-wide GEMM input)
 #define TILE_SLACK 128          // GDMA moves 64-byte aligned supersets of the tile
 
 volatile int s3_dual_enabled = 1;
@@ -38,7 +38,8 @@ volatile int s3_wmode = 0;
 volatile int s3_dma_errors = 0;
 s3_stats_t s3_stats;
 
-typedef struct { int8_t *buf[2]; async_memcpy_handle_t dma; SemaphoreHandle_t sem; } core_ctx_t;
+#define PACK_BYTES 1280          // one packed weight row: the widest GEMM input is 1202 (80 vectors of 16 B)
+typedef struct { int8_t *buf[2]; async_memcpy_handle_t dma; SemaphoreHandle_t sem; int8_t *pk; } core_ctx_t;
 static core_ctx_t g_cc[2];
 static int g_dma_ok, g_tiles_ok;
 
@@ -50,14 +51,27 @@ void s3_stats_reset(void) { memset(&s3_stats, 0, sizeof s3_stats); }
 
 // main/dot_rows_s3.S: one aligned weight row against every activation row (2 instructions per 16 MACs)
 extern void itofs_s3_dot_rows(const int8_t *x, int ldx, const int8_t *w, int rows_len16, int32_t *acc, int stride_bytes);
+// copy nv16 x 16 bytes from any address into a 16-byte aligned buffer (reads up to 16 bytes past the end)
+extern void itofs_s3_pack_row(int8_t *dst, const int8_t *src, int nv16);
 
 // channels [o0, o1) whose weights start at wt (row stride in)
-static inline void compute(const job_t *j, const int8_t *wt, int o0, int o1)
+static inline void compute(const job_t *j, const int8_t *wt, int o0, int o1, int8_t *pk)
 {
     const int in = j->in, in16 = in >> 4, r0 = in16 << 4;
     if ((in & 15) == 0 && ((uintptr_t)wt & 15) == 0 && j->rows < 65536) {   // every weight row aligned: fast kernel
         for (int o = o0; o < o1; o++)
             itofs_s3_dot_rows(j->x, j->ldx, wt + (size_t)(o - o0) * in, (j->rows << 16) | in16, j->acc + o, j->out * 4);
+        return;
+    }
+    if (pk && j->rows < 65536 && in <= PACK_BYTES - 32) {
+        // input width not a multiple of 16 (or unaligned weights): the engine zero-pads every activation row up to ldx, so one more
+        // vector of zeros adds nothing. Each weight row is first shifted into an aligned buffer (3 instructions per 16 bytes, once for
+        // all rows of the chunk), then the aligned kernel runs over every row (2 instructions per 16 bytes instead of 4 plus a scalar tail).
+        const int nv = (in + 15) >> 4;
+        for (int o = o0; o < o1; o++) {
+            itofs_s3_pack_row(pk, wt + (size_t)(o - o0) * in, nv);
+            itofs_s3_dot_rows(j->x, j->ldx, pk, (j->rows << 16) | nv, j->acc + o, j->out * 4);
+        }
         return;
     }
     for (int t = o0; t < o1; t += TOC) {
@@ -104,14 +118,14 @@ static void gemm_range(const job_t *j, core_ctx_t *c)
 {
     if (j->oc1 <= j->oc0) return;
     const int in = j->in;
-    if (j->mode == 0) { compute(j, j->w + (size_t)j->oc0 * in, j->oc0, j->oc1); return; }
-    int toc = (TILE_BYTES / in) & ~(TOC - 1);
-    if (toc < TOC) toc = TOC;                     // in <= 1536 always (the engine's widest GEMM input is 1202)
+    if (j->mode == 0) { compute(j, j->w + (size_t)j->oc0 * in, j->oc0, j->oc1, c->pk); return; }
+    int toc = TILE_BYTES / in;                    // output channels per tile (any count: the aligned kernels take one weight row at a time)
+    if (toc < 1) toc = 1;                         // in <= 1536 always (the engine's widest GEMM input is 1202)
     if (j->mode == 1) {
         for (int t0 = j->oc0; t0 < j->oc1; t0 += toc) {
             const int t1 = (t0 + toc < j->oc1) ? t0 + toc : j->oc1;
             memcpy(c->buf[0], j->w + (size_t)t0 * in, (size_t)(t1 - t0) * in);
-            compute(j, c->buf[0], t0, t1);
+            compute(j, c->buf[0], t0, t1, c->pk);
         }
         return;
     }
@@ -127,7 +141,7 @@ static void gemm_range(const job_t *j, core_ctx_t *c)
             const int n1 = (t1 + toc < j->oc1) ? t1 + toc : j->oc1;
             nxt = dma_issue(c, (i + 1) & 1, j->w + (size_t)t1 * in, (size_t)(n1 - t1) * in);
         }
-        compute(j, cur, t0, t1);
+        compute(j, cur, t0, t1, c->pk);
         cur = nxt;
     }
 }
@@ -193,6 +207,7 @@ void s3_kernels_init(void)
             if (!c->buf[i]) g_tiles_ok = 0;
         }
         c->sem = xSemaphoreCreateBinary();
+        c->pk = heap_caps_aligned_alloc(16, PACK_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);     // packed weight row (see compute())
     }
     g_dma_ok = g_tiles_ok;
     for (int k = 0; k < 2 && g_dma_ok; k++) {
@@ -352,10 +367,11 @@ void s3_bench(const void *wbase_v, size_t wbytes)
         printf("BENCH_BW psram read through the data cache (1 byte per 64-byte line): %.1f MB/s\n", (double)nb / (dt + 1));
         (void)sink;
     }
-    // the engine's GEMM calls at chunk 8: (in, out per call, rows = frames x activation planes)
+    // the engine's GEMM shapes: (in, out per call, rows = frames x activation planes). The engine runs 24-frame chunks (the wide 1202-input layer
+    // 8 frames); 16 rows is as many as the benchmark's scratch (the little free internal SRAM at boot) allows, and is enough to see the weight reuse
     static const struct { const char *name; int in, out, rows; } sh[] = {
-        {"vocoder pw1 256->256(x3)", 256, 256, 8}, {"vocoder pw2 768->256", 768, 256, 8}, {"harm_proj 1202->256", 1202, 256, 8},
-        {"head 256->256(x5)", 256, 256, 8}, {"mel conv 176->176(x5 taps)", 176, 176, 8},
+        {"vocoder pw1 256->256(x3)", 256, 256, 16}, {"vocoder pw2 768->256", 768, 256, 16}, {"harm_proj 1202->256", 1202, 256, 8},
+        {"head 256->256(x5)", 256, 256, 16}, {"mel conv 176->176(x5 taps)", 176, 176, 16},
         {"prosody conv w16a16 96->96", 96, 96, 16}, {"text conv w16a16 128->128", 128, 128, 16},
     };
     for (size_t s = 0; s < sizeof sh / sizeof sh[0]; s++) {

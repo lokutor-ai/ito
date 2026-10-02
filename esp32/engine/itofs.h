@@ -109,8 +109,9 @@ int itofs_model_init(itofs_model_t *m, const void *blob, size_t size);
 int itofs_blob_find(const void *blob, size_t size, const char *name, const void **data, size_t *nbytes, int *dtype);
 
 // ---- kernels the host can override --------------------------------------------------------------------------------
-// acc[r][o] = sum_{i<in} x[r][i] * w[o][i]  (x rows stride ldx, a multiple of 16 with 16-byte aligned rows; w rows
-// stride `in`, any alignment; acc rows stride `out`), exact int32.
+// acc[r][o] = sum_{i<in} x[r][i] * w[o][i]  (x rows stride ldx, a multiple of 16 with 16-byte aligned rows, and the bytes of
+// every row between `in` and ldx are ZERO, so a kernel may run whole 16-byte vectors over them; w rows stride `in`, any
+// alignment; acc rows stride `out`), exact int32.
 typedef void (*itofs_qgemm_fn)(const int8_t *x, int rows, int ldx, int in, const int8_t *w, int out, int32_t *acc, void *user);
 void itofs_qgemm_ref(const int8_t *x, int rows, int ldx, int in, const int8_t *w, int out, int32_t *acc, void *user);
 
@@ -189,14 +190,15 @@ typedef struct {
     int ola_L, ola_R, ola_off;
     float *out_ptr; int out_base;
     float *t_x, *t_y, *t_g, *t_o, *t_pad, *t_film;           // text-side buffers
-    float *s_g0, *s_g1, *s_y0, *s_y1, *s_y2, *s_qs, *s_pcm;  // per-step scratch
+    float *s_g0, *s_g1, *s_y0, *s_y1, *s_qs, *s_pcm;  // per-step scratch
     int8_t *s_q8; int32_t *s_acc;
     float *win, *win2, *fbuf, *rtw;
     float *fbuf_b, *x_b;       // second core's FFT buffer and STFT frame / half spectrum (row-parallel HFT and HEAD)
     itofs_fft_t *fft_b;        // second core's FFT plan (shares the twiddles, own scratch)
     double *src_anc;           // source phase anchors of a batch (2 per frame)
+    float *src_w;              // [hop]: (j + 0.5) / hop, the source's linear-interpolation weights
     int acc_tile, tb;          // tb: whole-sentence text-side batch (tokens per GEMM call)
-    long cap_g0, cap_y0, cap_y1, cap_y2, cap_q8, cap_qs;   // hot scratch capacities (floats; bytes for q8; rows for qs):
+    long cap_g0, cap_y0, cap_y1, cap_q8, cap_qs;   // hot scratch capacities (floats; bytes for q8; rows for qs):
                                // a stage may run more than chunk_frames rows at once when they fit (the first chunk's
                                // pipeline fill then reads each weight matrix once instead of once per chunk_frames)
     size_t acc_bytes;
@@ -229,7 +231,9 @@ extern long long itofs_opc[ITOFS_OPC_N];
                       // token-stage kind (ENC GRU PROJ DUR DOUT), and inside the dense layers: all, quantise, GEMM calls
 enum { ITOFS_PROF_STAGE = 0, ITOFS_PROF_TSTAGE = 12, ITOFS_PROF_QLIN = 17, ITOFS_PROF_QUANT, ITOFS_PROF_GEMM,
        ITOFS_PROF_SGEMM = 20,           // GEMM-call time inside each frame-stage kind (12) and token-stage kind (5)
-       ITOFS_PROF_N = 37 };
+       ITOFS_PROF_P0 = 37,              // inside the stages: block depthwise+LN, block GELU, block residual, rescale (all qlin), bias (all qlin),
+                                        // gather/put_rows, row LayerNorms (EMB, HEAD), head_body, hft_body, src_body+anchors, ola_body, cln_body, fused rescale (8-bit path)
+       ITOFS_PROF_N = 37 + 13 };
 extern uint32_t (*itofs_prof_clock)(void);
 extern double itofs_prof[ITOFS_PROF_N];
 void itofs_prof_micro(double *res);   // CCOUNT ticks per call: div, GELU (|x|<=1), GELU (tail), expf, sqrtf, sincosf, logf, mul+add

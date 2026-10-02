@@ -1,0 +1,91 @@
+[     0.0s] ESP-ROM:esp32s3-20210327
+[     0.0s] Build:Mar 27 2021
+[     0.0s] rst:0x1 (POWERON),boot:0x4 (SPI_FLASH_BOOT)
+[     0.1s] SPIWP:0xee
+[     0.1s] mode:DIO, clock div:1
+[     0.1s] load:0x3fce2820,len:0xd64
+[     0.1s] load:0x403c8700,len:0xb14
+[     0.1s] load:0x403cb700,len:0x2cac
+[     0.1s] entry 0x403c8894
+[     0.2s] W (181) rtcinit: o_code calibration fail
+[     0.2s] 
+[     0.2s] I (94) esp_psram: Found 8MB PSRAM device
+[     0.2s] I (94) esp_psram: Speed: 80MHz
+[     0.2s] I (95) cpu_start: Multicore app
+[     0.2s] I (105) cpu_start: Pro cpu start user code
+[     0.2s] I (105) cpu_start: cpu freq: 240000000 Hz
+[     0.2s] I (105) app_init: Application information:
+[     0.2s] I (105) app_init: Project name:     itofs
+[     0.2s] I (105) app_init: App version:      ito-3.0.0
+[     0.2s] I (105) app_init: Compile time:     Oct  2 2026 19:10:12
+[     0.2s] I (105) app_init: ELF file SHA256:  8f4dd3309...
+[     0.2s] I (105) app_init: ESP-IDF:          v5.5.1
+[     0.2s] I (105) efuse_init: Min chip rev:     v0.0
+[     0.2s] I (105) efuse_init: Max chip rev:     v0.99 
+[     0.2s] I (105) efuse_init: Chip rev:         v0.3
+[     0.2s] I (105) heap_init: Initializing. RAM available for dynamic allocation:
+[     0.2s] I (105) heap_init: At 3FC99188 len 00050588 (321 KiB): RAM
+[     0.2s] I (105) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+[     0.2s] I (105) heap_init: At 600FE000 len 00001FE8 (7 KiB): RTCRAM
+[     0.2s] I (106) esp_psram: Adding pool of 8192K of PSRAM memory to heap allocator
+[     0.3s] I (107) spi_flash: detected chip: issi
+[     0.3s] I (107) spi_flash: flash io: dio
+[     0.3s] I (107) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+[     0.3s] I (107) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+[     0.3s] I (108) main_task: Started on CPU0
+[     0.3s] I (113) esp_psram: Reserving pool of 32K of internal memory for DMA/internal allocations
+[     0.3s] I (113) main_task: Calling app_main()
+[     0.3s] 
+[     0.3s] ==== ItoFS TTS on ESP32-S3 ====
+[     0.8s] weights: 4892708 bytes copied flash -> PSRAM in 466 ms
+[     0.8s] model: arch 3 (ItoFS v3: mel front + mel vocoder), 3424816 int8 + 543936 int16 + 90726 f32 params, text 128, GRU 96 forward (incremental text side), prosody 96, mel head 176 x4 -> 100, decoder 256/768 x5, n_fft 1200, hop 300 (80 fps), 24000 Hz, 1 styles, style table
+[     0.8s] QEMU build: I2S disabled (audio is generated and discarded)
+[     0.8s] internal SRAM before the hot arena: largest free block 264 KB, free 329 KB
+[     0.8s] arena: hot 224428 bytes in internal SRAM, bulk 1394448 bytes in PSRAM; chunk 24 frames = 7200 samples; 8-bit activations
+[     1.0s] kernels: PIE int8 dot (esp-nn), dual core; staging tiles ok (10240 B x 2 per core in internal SRAM); GDMA PSRAM->SRAM unavailable (self-test failed or no channel)
+[     1.0s] demos: 3 sentences from the weight blob
+[     1.0s] MEM boot: peak PSRAM used 6183 / 8192 KB, peak internal SRAM used 323 / 383 KB
+[     1.1s] I (895) main_task: Returned from app_main()
+[     2.7s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 137400 samples (host 137400), fnv32 6526d0a0 (host 6526d0a0) -> PASS
+[     2.7s] TIMING selftest(no playback): 84 tokens, style 0, 5.72 s audio | first chunk 76.8 ms (begin 2.1 ms; incremental text side, 8 tokens final at first chunk) | compute 1661.7 ms, RTF 0.290 | underruns 0
+[     2.7s] MEM selftest(no playback): peak PSRAM used 6472 / 8192 KB, peak internal SRAM used 346 / 383 KB
+[     6.3s] PCMEND 137400
+PCM COMPARE vs host C engine: firmware 137400 samples (reported 137400), host 137400, differing samples 0 -> BIT-IDENTICAL
+[     6.3s] SAY demo 0: "LJ009-0076: wiː kˈʌm tə ðə sˈɜːmən ."
+[     6.9s] TIMING demo: 25 tokens, style 0, 2.15 s audio | first chunk 56.3 ms (begin 1.8 ms; incremental text side, 8 tokens final at first chunk) | compute 631.0 ms, RTF 0.293 | underruns 9
+[     6.9s] MEM demo: peak PSRAM used 6472 / 8192 KB, peak internal SRAM used 346 / 383 KB
+[     6.9s] SAY demo 1: "LJ018-0098: ænd ɹˈɛkəɡnˌaɪzd æz wˈʌn ʌvðə fɹˈiːkwɛntɚz ʌvðə bˈoʊɡəs lˈɔː stˈeɪʃənɚz . hɪz ɚɹˈɛst lˈɛd tə ðæt ʌv ˈʌðɚz ."
+[     9.0s] TIMING demo: 108 tokens, style 0, 7.26 s audio | first chunk 54.4 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 2077.1 ms, RTF 0.286 | underruns 25
+[     9.0s] MEM demo: peak PSRAM used 6472 / 8192 KB, peak internal SRAM used 346 / 383 KB
+[     9.0s] SAY demo 2: "LJ004-0152: ɔːlðˈoʊ æt mˈɪstɚ . bˈʌkstənz vˈɪzɪt ɐ nˈuː dʒˈeɪl wʌz ɪn pɹˈɑːsɛs ʌv ɪɹˈɛkʃən , ðə fˈɜːst stˈɛp təwˈɔːɹdz ɹᵻfˈɔːɹm sˈɪns hˈaʊɚdz vˌɪzɪtˈeɪʃən ɪn sˈɛvəntˌiːn sˈɛvənti fˈoːɹ ."
+[    11.9s] TIMING demo: 175 tokens, style 0, 10.21 s audio | first chunk 54.7 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 2939.3 ms, RTF 0.288 | underruns 34
+[    11.9s] MEM demo: peak PSRAM used 6472 / 8192 KB, peak internal SRAM used 346 / 383 KB
+[    12.0s] READY (BOOT button = demos, serial: say <ids> | style <k> | demo [k] | test | stats | help)
+>>> say say 0,50,83,54,156,57,135,16,5,16,81,102,61,16,102,68,16
+[    12.0s] OK 56 tokens queued
+[    13.2s] TIMING say: 56 tokens, style 0, 4.28 s audio | first chunk 55.3 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1213.8 ms, RTF 0.284 | underruns 15
+[    13.2s] MEM say: peak PSRAM used 6472 / 8192 KB, peak internal SRAM used 346 / 383 KB
+[    13.2s] READY
+>>> act 16
+[    13.2s] OK 16-bit activations for the int8-weight layers
+[    13.2s] READY
+>>> say say 0,50,83,54,156,57,135,16,5,16,81,102,61,16,102,68,16
+[    13.3s] OK 56 tokens queued
+[    15.0s] TIMING say: 56 tokens, style 0, 4.28 s audio | first chunk 66.8 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1774.3 ms, RTF 0.415 | underruns 15
+[    15.0s] MEM say: peak PSRAM used 6472 / 8192 KB, peak internal SRAM used 346 / 383 KB
+[    15.0s] READY
+>>> act 8
+[    15.1s] OK 8-bit activations for the int8-weight layers
+[    15.1s] READY
+>>> test
+[    16.7s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 137400 samples (host 137400), fnv32 6526d0a0 (host 6526d0a0) -> PASS
+[    16.7s] TIMING selftest(no playback): 84 tokens, style 0, 5.72 s audio | first chunk 54.6 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1636.8 ms, RTF 0.286 | underruns 0
+[    16.7s] MEM selftest(no playback): peak PSRAM used 6472 / 8192 KB, peak internal SRAM used 346 / 383 KB
+[    20.3s] PCMEND 137400
+PCM COMPARE vs host C engine: firmware 137400 samples (reported 137400), host 137400, differing samples 0 -> BIT-IDENTICAL
+[    22.8s] SELFTEST single-core, 8-bit activations: golden sentence 0 vs host C engine: 137400 samples (host 137400), fnv32 6526d0a0 (host 6526d0a0) -> PASS
+[    25.1s] SELFTEST dual-core, 16-bit activations: golden sentence 0 vs host C engine: 137400 samples (host 137400), fnv32 cd1641d1 (host cd1641d1) -> PASS
+[    25.1s] TIMING selftest(no playback): 84 tokens, style 0, 5.72 s audio | first chunk 65.6 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 2372.7 ms, RTF 0.414 | underruns 0
+[    25.1s] MEM selftest(no playback): peak PSRAM used 6472 / 8192 KB, peak internal SRAM used 346 / 383 KB
+[    25.1s] READY
+CLIENT DONE

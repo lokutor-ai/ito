@@ -1,5 +1,5 @@
 """Drive the QEMU firmware over its TCP serial port: log everything, wait for the boot self-test and demos (READY),
-send `say <ids>` (a sentence phonemised by esp32/tools/say.py --dry), `style 5`, `say`, `act 16`, `say`, `act 8` and
+send `say <ids>` (a sentence phonemised by esp32/tools/say.py --dry), `act 16`, `say`, `act 8` and
 `test` (dual- and single-core self-test at 8-bit activations, plus the 16-bit record), or the ';'-separated commands in
 $QEMU_SCRIPT (the word SAY expands to that say command); compare every PCM the firmware dumps with the host C engine's PCM.
     python3 esp32/tools/qemu/qemu_client.py <host> <port> <log> <host selftest .pcm>   (run_qemu.sh calls it)"""
@@ -20,7 +20,7 @@ def main():
     log = open(logp, "w")
     buf = b""
     import os
-    script = ["say " + SAY, "style 5", "say " + SAY, "act 16", "say " + SAY, "act 8", "test"]
+    script = ["say " + SAY, "act 16", "say " + SAY, "act 8", "test"]   # (no `style k`: the shipped blobs have one style and reject it without printing READY)
     if os.environ.get("QEMU_SCRIPT"):             # ';'-separated commands sent one per READY
         script = [c.strip().replace("SAY", "say " + SAY) for c in os.environ["QEMU_SCRIPT"].split(";") if c.strip()]
     step, pcm, t0 = 0, {}, time.time()
