@@ -1,7 +1,7 @@
 # Ito model: terms of use
 
-These terms come with the Ito voice model weights (`ito_v3.pt`, `ito_v3_esp32s3.bin`), distributed through
-[huggingface.co/lokutor-ai/ito-tts-v3](https://huggingface.co/lokutor-ai/ito-tts-v3). By downloading or
+These terms come with the Ito voice model weights (`ito_female.pt`, `ito_female_esp32s3.bin`), distributed through
+[huggingface.co/lokutor-ai/ito](https://huggingface.co/lokutor-ai/ito). By downloading or
 using the weights you agree to them. They add to the weights' license,
 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode), and do not replace it. Where the two
 overlap, both apply. Nothing here restricts the GPLv3 source code of the engine, firmware and inference package.

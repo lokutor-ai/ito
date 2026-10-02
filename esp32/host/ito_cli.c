@@ -1,7 +1,7 @@
 // Host build of the on-chip engine: token ids in, 24 kHz WAV out, with the chip's exact arithmetic (the PCM is
 // bit-identical to the firmware's for the same ids, style and seed; see README "What was verified").
 //
-//   make && ../tools/fetch_weights.sh && ./ito_cli ../../models/ito_v3_esp32s3.bin "0,50,51,158,..." out.wav [--seed N] [--act 8|16] [--chunk F]
+//   make && ../tools/fetch_weights.sh && ./ito_cli ../../models/ito_female_esp32s3.bin "0,50,51,158,..." out.wav [--seed N] [--act 8|16] [--chunk F]
 //   python3 ../tools/say.py "Any English text." --dry     # prints the ids for a sentence (no board needed)
 //
 // Prints the work done before the first audio chunk and per second of audio (executed int8 MACs), which is what the

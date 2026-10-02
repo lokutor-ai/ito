@@ -2,16 +2,16 @@
 #   make            ito_cli, host_test_v3, gen_selftest, opcount_v3
 #   make test       host test of the chip weights against golden/ (8- and 16-bit activations, ASan/UBSan); the weights
 #                   are fetched into models/ first (../tools/fetch_weights.sh: gated Hugging Face repo, or $ITO_WEIGHTS_DIR)
-#   make test VOICE=g   the same for voice G (male): ito_v3_G_esp32s3.bin against golden/g/
+#   make test VOICE=male   the same for the male voice (VOICE=g also works): ito_male_esp32s3.bin against golden/g/
 CC ?= cc
 CFLAGS = -std=c99 -O2 -ffp-contract=off -Wall -Wno-unused-function -I../engine
 ENGINE = ../engine/itofs.c ../engine/itofs.h
-VOICE ?= d
-ifeq ($(filter g G,$(VOICE)),)
-BLOB = ../../models/ito_v3_esp32s3.bin
+VOICE ?= female
+ifeq ($(filter g G m M male,$(VOICE)),)
+BLOB = ../../models/ito_female_esp32s3.bin
 GOLDEN = golden
 else
-BLOB = ../../models/ito_v3_G_esp32s3.bin
+BLOB = ../../models/ito_male_esp32s3.bin
 GOLDEN = golden/g
 endif
 

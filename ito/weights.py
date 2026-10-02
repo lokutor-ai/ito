@@ -1,9 +1,9 @@
 """Where Ito's weights come from.
 
-The voice model is distributed only through the gated Hugging Face repository lokutor-ai/ito-tts-v3, under
+The voice model is distributed only through the gated Hugging Face repository lokutor-ai/ito, under
 CC BY-NC-SA 4.0 and Lokutor's terms of use (models/LICENSE-WEIGHTS, models/TERMS.md). To get access:
 
-  1. open https://huggingface.co/lokutor-ai/ito-tts-v3 and accept the terms;
+  1. open https://huggingface.co/lokutor-ai/ito and accept the terms;
   2. log in once on this machine:  huggingface-cli login   (or: hf auth login, or set HF_TOKEN).
 
 Lookup order for a file:
@@ -11,25 +11,28 @@ Lookup order for a file:
   2. <repo>/models/<file>                  (esp32/tools/fetch_weights.sh puts them there)
   3. the Hugging Face cache, downloading it on first use
 
-    python -m ito.weights                  # download voice D's two files into models/
-    python -m ito.weights --voice g        # voice G (male)
+    python -m ito.weights                  # download the female voice's two files into models/
+    python -m ito.weights --voice male     # the male voice
 """
 import os
 import shutil
 import sys
 
-REPO_ID = "lokutor-ai/ito-tts-v3"
-PT = "ito_v3.pt"                      # voice D (female, default)
-CHIP = "ito_v3_esp32s3.bin"
-# voice -> (PyTorch file, chip file). D: LibriTTS-R speaker 4970 (female); G: speaker 5105 (male).
-VOICES = {"d": (PT, CHIP), "g": ("ito_v3_G.pt", "ito_v3_G_esp32s3.bin")}
+REPO_ID = "lokutor-ai/ito"
+PT = "ito_female.pt"                      # female voice (default)
+CHIP = "ito_female_esp32s3.bin"
+# voice -> (PyTorch file, chip file). female: LibriTTS-R speaker 4970; male: speaker 5105.
+VOICES = {"female": (PT, CHIP), "male": ("ito_male.pt", "ito_male_esp32s3.bin")}
+ALIASES = {"d": "female", "f": "female", "g": "male", "m": "male"}   # "d" and "g" are the original short names
+VOICE_NAMES = ("female", "male", "d", "g")
 
 
-def voice_files(voice="d"):
-    """(PyTorch file, chip file) for a voice: 'd' (female, default) or 'g' (male)."""
-    v = (voice or "d").lower()
+def voice_files(voice="female"):
+    """(PyTorch file, chip file) for a voice: 'female' (default, alias 'd') or 'male' (alias 'g')."""
+    v = (voice or "female").lower()
+    v = ALIASES.get(v, v)
     if v not in VOICES:
-        raise ValueError(f"unknown voice {voice!r}: choose from {', '.join(VOICES)}")
+        raise ValueError(f"unknown voice {voice!r}: choose from {', '.join(VOICE_NAMES)}")
     return VOICES[v]
 MODELS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models")
 
@@ -92,7 +95,7 @@ def fetch(dest=MODELS_DIR, files=(PT, CHIP)):
 
 if __name__ == "__main__":
     args = sys.argv[1:]
-    voice = "d"
+    voice = "female"
     if "--voice" in args:
         i = args.index("--voice"); voice = args[i + 1]; del args[i:i + 2]
     files = [a for a in args if not a.startswith("--")] or list(voice_files(voice))

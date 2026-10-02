@@ -2,7 +2,7 @@
 
     from ito import Ito
     tts = Ito.load()                          # fetched from Hugging Face on first use (ito/weights.py)
-    tts = Ito.load(voice="g")                 # the male voice (default "d", female)
+    tts = Ito.load(voice="male")                 # the male voice (default "female")
     wav = tts.synthesize("Hello there!")      # float32 numpy array at tts.sr (24 kHz)
     for chunk in tts.stream("Hello there!"):  # 100 ms chunks, computed with bounded lookahead, as on the chip
         ...
@@ -149,8 +149,8 @@ class Ito:
         self.device = style.device
 
     @classmethod
-    def load(cls, path=None, device="cpu", voice="d"):
-        """voice: 'd' (female, LibriTTS-R 4970; default) or 'g' (male, LibriTTS-R 5105). path overrides voice."""
+    def load(cls, path=None, device="cpu", voice="female"):
+        """voice: 'female' (LibriTTS-R 4970; default; alias 'd') or 'male' (LibriTTS-R 5105; alias 'g'). path overrides voice."""
         if path is None:
             from .weights import weights_path, voice_files
             path = weights_path(voice_files(voice)[0])

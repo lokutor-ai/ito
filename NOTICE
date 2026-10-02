@@ -5,8 +5,8 @@ Two licenses
 ------------
 - Source code (ito/, esp32/, eval/): GNU General Public License v3 (LICENSE). Commercial licenses are available
   (COMMERCIAL.md).
-- Voice model weights (voice D: ito_v3.pt, ito_v3_esp32s3.bin; voice G: ito_v3_G.pt, ito_v3_G_esp32s3.bin; not in this repository, distributed through the gated
-  Hugging Face repository lokutor-ai/ito-tts-v3, see models/README.md) and the Ito audio in samples/ and results/:
+- Voice model weights (female voice: ito_female.pt, ito_female_esp32s3.bin; male voice: ito_male.pt, ito_male_esp32s3.bin; not in this repository, distributed through the gated
+  Hugging Face repository lokutor-ai/ito, see models/README.md) and the Ito audio in samples/ and results/:
   Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (models/LICENSE-WEIGHTS,
   https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode), together with Lokutor's terms of use
   (models/TERMS.md). Commercial use of the weights or their output needs a written license from Lokutor.
@@ -25,8 +25,8 @@ third-party weights are included in it.
   same request on: please disclose that Ito's output is synthetic speech.
 - Voices: for each Ito voice the teacher was conditioned on recordings of one speaker of LibriTTS-R (Yuma Koizumi et
   al., 2023; https://www.openslr.org/141/), licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/):
-    voice D (female, the default): LibriTTS-R speaker 4970;
-    voice G (male):                LibriTTS-R speaker 5105.
+    female voice (the default): LibriTTS-R speaker 4970;
+    male voice:                   LibriTTS-R speaker 5105.
   LibriTTS-R derives from LibriTTS (Heiga Zen et al., 2019), which derives from LibriVox public-domain recordings.
   Each Ito voice imitates the voice of its LibriTTS-R speaker, a LibriVox volunteer reader. Ito is not affiliated with
   or endorsed by those speakers, LibriVox, or Google. No recordings are redistributed here.

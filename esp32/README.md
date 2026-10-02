@@ -18,10 +18,10 @@ Wiring for an I2S DAC or amplifier:
 
 ```bash
 pip install esptool pyserial phonemizer espeakng-loader nltk huggingface_hub
-huggingface-cli login                                  # once, after accepting the terms at huggingface.co/lokutor-ai/ito-tts-v3
-esp32/tools/fetch_weights.sh                           # -> models/ito_v3_esp32s3.bin (flash.sh runs it if needed)
-esp32/tools/flash.sh /dev/ttyUSB0                     # prebuilt app at 0x0 + the voice model at 0x200000 (voice D)
-VOICE=g esp32/tools/flash.sh /dev/ttyUSB0             # or voice G (male): ito_v3_G_esp32s3.bin at 0x200000
+huggingface-cli login                                  # once, after accepting the terms at huggingface.co/lokutor-ai/ito
+esp32/tools/fetch_weights.sh                           # -> models/ito_female_esp32s3.bin (flash.sh runs it if needed)
+esp32/tools/flash.sh /dev/ttyUSB0                     # prebuilt app at 0x0 + the voice model at 0x200000 (female voice)
+VOICE=male esp32/tools/flash.sh /dev/ttyUSB0           # or the male voice: ito_male_esp32s3.bin at 0x200000
 python -m serial.tools.miniterm /dev/ttyUSB0 115200   # press RST and wait for READY (the boot benchmark takes 1-2 min)
 python esp32/tools/say.py "Good morning! The coffee is ready." --port /dev/ttyUSB0
 ```
@@ -32,8 +32,8 @@ and try again.
 | file | what |
 |---|---|
 | `prebuilt/ito_app_merged.bin` (368 KB) | bootloader + partition table + app (ESP-IDF 5.5.1, octal PSRAM, QIO flash, I2S on). Flash at 0x0. |
-| `ito_v3_esp32s3.bin` (4.89 MB, from [Hugging Face](https://huggingface.co/lokutor-ai/ito-tts-v3), see [`models/README.md`](../models/README.md)) | voice D (female), with a self-test record and three demo sentences. Flash at 0x200000. **CC BY-NC-SA 4.0 + [`models/TERMS.md`](../models/TERMS.md): non-commercial.** |
-| `ito_v3_G_esp32s3.bin` (4.89 MB, same place and license) | voice G (male), same format and size. Flash it at 0x200000 **instead of** voice D (`VOICE=g esp32/tools/flash.sh PORT`, or `flash.sh PORT models/ito_v3_G_esp32s3.bin`). The app is the same for both voices. |
+| `ito_female_esp32s3.bin` (4.89 MB, from [Hugging Face](https://huggingface.co/lokutor-ai/ito), see [`models/README.md`](../models/README.md)) | female voice, with a self-test record and three demo sentences. Flash at 0x200000. **CC BY-NC-SA 4.0 + [`models/TERMS.md`](../models/TERMS.md): non-commercial.** |
+| `ito_male_esp32s3.bin` (4.89 MB, same place and license) | male voice, same format and size. Flash it at 0x200000 **instead of** the female voice (`VOICE=male esp32/tools/flash.sh PORT`, or `flash.sh PORT models/ito_male_esp32s3.bin`). The app is the same for both voices. |
 
 At boot the board does four things, in order:
 1. It copies the weights to PSRAM and runs the **self-test**: it synthesizes a golden sentence and compares the hash of
@@ -56,8 +56,8 @@ python3 esp32/tools/chip_wav.py "Any English text." out.wav    # text -> WAV wit
 esp32/tools/build_fw.sh && esp32/tools/qemu/run_qemu.sh       # the real firmware in Espressif QEMU (>= 9.2.2)
 ```
 
-`make test` checks the C engine against an engine-numerics PyTorch reference stored in `host/golden/` (voice G:
-`make test VOICE=g`, references in `host/golden/g/`; `VOICE=g esp32/tools/qemu/run_qemu.sh` runs voice G in QEMU). It checks
+`make test` checks the C engine against an engine-numerics PyTorch reference stored in `host/golden/` (male voice:
+`make test VOICE=male`, references in `host/golden/g/`; `VOICE=male esp32/tools/qemu/run_qemu.sh` runs the male voice in QEMU). It checks
 durations, the SNR of every stage, and that streaming output is bit-identical to whole-utterance output. It runs for
 8- and 16-bit activations, and again under ASan/UBSan. `ito_cli` prints the work done before the first audio chunk
 and per second of audio.

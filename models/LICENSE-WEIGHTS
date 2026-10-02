@@ -1,7 +1,7 @@
 Ito voice model weights
 Copyright (C) 2026 Hashing Works, S.L.L. (Lokutor)
 
-The Ito weight files ito_v3.pt and ito_v3_esp32s3.bin (distributed through huggingface.co/lokutor-ai/ito-tts-v3),
+The Ito weight files ito_female.pt and ito_female_esp32s3.bin (distributed through huggingface.co/lokutor-ai/ito),
 and any copy of these weights embedded in another file, are licensed under the Creative Commons
 Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0):
 

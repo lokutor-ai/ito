@@ -1,5 +1,9 @@
 # Ito: natural-sounding streaming text-to-speech for a $5 chip
 
+[![Ito demo: click to watch the video with sound](docs/demo.gif)](https://lokutor-ai.github.io/ito/)
+
+*Click the animation to watch the 50-second video **with sound** (the GIF is silent). Every voice in it is Ito's own output from the chip engine.*
+
 Ito is English text-to-speech that runs entirely on an **ESP32-S3** (240 MHz dual-core Xtensa LX7, 8 MB PSRAM, 16 MB
 flash), with no cloud and no neural accelerator. It streams: audio starts after a short first chunk (25 ms) is ready, and the work
 before it does not grow with the sentence length. The voice is distilled from a large open TTS model into 4.4 M parameters. Built by
@@ -19,8 +23,8 @@ same chip).
 > or if you are a small team that wants to build with it, [talk to us](#license): we like collaborating.
 
 **Hear it:** [samples next to sanoTTS and the teacher, with a blind mode](https://lokutor-ai.github.io/ito/) ·
-**Type your own:** [Hugging Face Space](https://huggingface.co/spaces/lokutor-ai/ito-tts) (runs the chip engine,
-bit-exact, on a CPU) · **Weights:** [lokutor-ai/ito-tts-v3](https://huggingface.co/lokutor-ai/ito-tts-v3)
+**Watch:** [the 50 s video, with sound](https://lokutor-ai.github.io/ito/) ·
+**Weights:** [lokutor-ai/ito](https://huggingface.co/lokutor-ai/ito)
 
 [![Ito: natural speech from a $5 chip](https://lokutor-ai.github.io/ito/og.png)](https://lokutor-ai.github.io/ito/)
 
@@ -92,7 +96,7 @@ UTMOS cannot hear intonation, so treat it as a check, not a verdict. On 60 held-
 | | |
 |---|---|
 | Parameters | 4.40 M: acoustic front 1.62 M + vocoder 2.79 M |
-| Chip weights | **4.89 MB** (`ito_v3_esp32s3.bin`): int8 mel head and vocoder; int16 pitch path |
+| Chip weights | **4.89 MB** (`ito_female_esp32s3.bin`): int8 mel head and vocoder; int16 pitch path |
 | Flash | 296 KB app + 4.89 MB weights; about 9 MB of the 14 MB weights partition stays free |
 | PSRAM / SRAM | peak 5.9 of 8 MB PSRAM, 327 of 383 KB internal SRAM (measured in QEMU) |
 | Work before the first audio (25 ms first chunk) | **23 M instructions and 4.5 MB of weights read from PSRAM, for any sentence length** (exact counts from QEMU) |
@@ -136,7 +140,7 @@ Training code and recipe are not public; contact us for research collaborations 
 ## Quickstart
 
 **Get access to the voice model (once).** The weights are distributed through the gated Hugging Face repository
-[lokutor-ai/ito-tts-v3](https://huggingface.co/lokutor-ai/ito-tts-v3). Open it, accept the
+[lokutor-ai/ito](https://huggingface.co/lokutor-ai/ito). Open it, accept the
 [terms](models/TERMS.md) (free for research, education and personal projects), then log in on your machine:
 
 ```bash
@@ -149,43 +153,43 @@ Everything below downloads the weights it needs on first use. Details and offlin
 **Python (CPU is fine).** Needs Python ≥ 3.9.
 
 ```bash
-ito-tts "Good morning! The coffee is ready." -o hello.wav              # voice D (female, default)
-ito-tts --voice g "Good morning! The coffee is ready." -o hello_g.wav  # voice G (male)
+ito-tts "Good morning! The coffee is ready." -o hello.wav              # female voice (default)
+ito-tts --voice male "Good morning! The coffee is ready." -o hello_male.wav  # male voice
 ```
 
-Two voices: **D** (female, LibriTTS-R speaker 4970; `ito_v3.pt` / `ito_v3_esp32s3.bin`) and **G** (male, LibriTTS-R
-speaker 5105; `ito_v3_G.pt` / `ito_v3_G_esp32s3.bin`). Each chip file holds one voice.
+Two voices: **female** (LibriTTS-R speaker 4970; `ito_female.pt` / `ito_female_esp32s3.bin`) and **male** (LibriTTS-R
+speaker 5105; `ito_male.pt` / `ito_male_esp32s3.bin`). Each chip file holds one voice.
 
 ```python
 from ito import Ito
-tts = Ito.load()                                   # voice D; downloads ito_v3.pt on first use
-tts_g = Ito.load(voice="g")                        # voice G (male): ito_v3_G.pt
+tts = Ito.load()                                   # female voice; downloads ito_female.pt on first use
+tts_g = Ito.load(voice="male")                     # male voice: ito_male.pt
 wav = tts.synthesize("Could you grab some quinoa on your way home?")   # float32 numpy, 24 kHz
 for chunk in tts.stream("A sentence of any length."):                  # 100 ms chunks, as on the chip
     ...
 ```
 
-`--style predicted` uses the optional text-to-style predictor, as in the blind test (voice D only). `--stream` uses the
+`--style predicted` uses the optional text-to-style predictor, as in the blind test (female voice only). `--stream` uses the
 chunked path.
 
 **On a laptop, with the chip's exact arithmetic** (no board):
 
 ```bash
-cd esp32/host && make && make test && cd ../..      # make test fetches ito_v3_esp32s3.bin into models/
+cd esp32/host && make && make test && cd ../..      # make test fetches ito_female_esp32s3.bin into models/
 python esp32/tools/chip_wav.py "Good morning! The coffee is ready." hello_chip.wav
-python esp32/tools/chip_wav.py --voice g "Good morning! The coffee is ready." hello_chip_g.wav   # voice G
+python esp32/tools/chip_wav.py --voice male "Good morning! The coffee is ready." hello_chip_male.wav   # male voice
 ```
 
-`make test VOICE=g` runs the same host test on voice G's chip file.
+`make test VOICE=male` runs the same host test on the male voice's chip file.
 
 **On a board.** You need an ESP32-S3-DevKitC-1 **N16R8** and an I2S DAC or amplifier: BCLK→GPIO15, LRCK→GPIO16,
 DIN→GPIO17 (PCM5102A or MAX98357A).
 
 ```bash
 pip install esptool pyserial
-esp32/tools/fetch_weights.sh                       # ito_v3_esp32s3.bin from Hugging Face into models/ (flash.sh also does it)
-esp32/tools/flash.sh /dev/ttyUSB0                  # prebuilt app + voice D (ito_v3_esp32s3.bin)
-VOICE=g esp32/tools/flash.sh /dev/ttyUSB0          # ... or voice G (male): flashes ito_v3_G_esp32s3.bin at 0x200000
+esp32/tools/fetch_weights.sh                       # ito_female_esp32s3.bin from Hugging Face into models/ (flash.sh also does it)
+esp32/tools/flash.sh /dev/ttyUSB0                  # prebuilt app + female voice (ito_female_esp32s3.bin)
+VOICE=male esp32/tools/flash.sh /dev/ttyUSB0       # ... or the male voice: flashes ito_male_esp32s3.bin at 0x200000
 python -m serial.tools.miniterm /dev/ttyUSB0 115200   # press RST: self-test, benchmark, 3 demo sentences, READY
 python esp32/tools/say.py "Hello from a five dollar chip." --port /dev/ttyUSB0
 ```
@@ -232,8 +236,8 @@ Ito has two parts, under two licenses:
 - **Code** (`ito/`, `esp32/`, `eval/`): **GNU GPL v3** ([`LICENSE`](LICENSE)). The GPL allows commercial use *of the
   code*. For products that cannot meet GPLv3 terms (for example, devices that do not let users install modified
   firmware), Lokutor offers commercial licenses: see [`COMMERCIAL.md`](COMMERCIAL.md).
-- **The voice models** (voice D: `ito_v3.pt`, `ito_v3_esp32s3.bin`; voice G: `ito_v3_G.pt`, `ito_v3_G_esp32s3.bin`; distributed only through
-  [Hugging Face](https://huggingface.co/lokutor-ai/ito-tts-v3), and the Ito audio in `samples/` and
+- **The voice models** (female voice: `ito_female.pt`, `ito_female_esp32s3.bin`; male voice: `ito_male.pt`, `ito_male_esp32s3.bin`; distributed only through
+  [Hugging Face](https://huggingface.co/lokutor-ai/ito), and the Ito audio in `samples/` and
   `results/`): **CC BY-NC-SA 4.0** ([`models/LICENSE-WEIGHTS`](models/LICENSE-WEIGHTS),
   [legal code](https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode)), plus Lokutor's
   [terms of use](models/TERMS.md). The GPL on the code does **not** cover the model. **Any commercial use of the

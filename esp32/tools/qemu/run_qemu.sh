@@ -4,14 +4,14 @@
 # commands), compare every PCM the firmware dumps with the host C engine's, then stop QEMU.
 #
 #   esp32/tools/qemu/run_qemu.sh [weights.bin] [tag]          (log in esp32/logs/qemu_<tag>.log)
-#   VOICE=g esp32/tools/qemu/run_qemu.sh                      voice G (male) blob from models/
+#   VOICE=male esp32/tools/qemu/run_qemu.sh                male-voice blob from models/
 #
 # Needs ESP-IDF 5.5 (IDF_PATH, default ~/esp/esp-idf) and Espressif's QEMU >= 9.2.2 for esp32s3 (QEMU_BIN; older
 # builds find no PSRAM). Timings printed under QEMU are emulator wall-clock times, NOT chip times.
 set -e
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 [ -n "$1" ] || "$ROOT/esp32/tools/fetch_weights.sh"
-case "${VOICE:-d}" in g|G) WDEF=ito_v3_G_esp32s3.bin ;; *) WDEF=ito_v3_esp32s3.bin ;; esac
+case "${VOICE:-female}" in g|G|m|M|male) WDEF=ito_male_esp32s3.bin ;; *) WDEF=ito_female_esp32s3.bin ;; esac
 W=${1:-$ROOT/models/$WDEF}; TAG=${2:-v3}
 FW=$ROOT/esp32/firmware; HOST=$ROOT/esp32/host; LOGS=$ROOT/esp32/logs
 IDF=${IDF_PATH:-$HOME/esp/esp-idf}
@@ -21,7 +21,7 @@ Q=${QEMU_BIN:-$(command -v qemu-system-xtensa || echo "$HOME/esp/qemu/bin/qemu-s
 mkdir -p "$FW/build_qemu/run" "$LOGS"
 # the host C engine's PCM for the blob's self-test sentence (the firmware dumps its own; they must be identical)
 make -s -C "$HOST" gen_selftest
-case "${VOICE:-d}" in g|G) GREF="$HOST/golden/g/ref0_w8a8.bin" ;; *) GREF="$HOST/golden/ref0_w8a8.bin" ;; esac
+case "${VOICE:-female}" in g|G|m|M|male) GREF="$HOST/golden/g/ref0_w8a8.bin" ;; *) GREF="$HOST/golden/ref0_w8a8.bin" ;; esac
 "$HOST/gen_selftest" "$W" "$GREF" "$FW/build_qemu/run/selftest_$TAG" 1 8
 python3 - <<PY
 import sys; sys.path.insert(0, "$IDF/tools")

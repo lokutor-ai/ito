@@ -1,7 +1,7 @@
 """Command line: text -> WAV on the CPU (or a GPU).
 
     ito-tts "Good morning! The coffee is ready." -o out.wav
-    ito-tts --voice g "Good morning! The coffee is ready." -o out.wav     # male voice
+    ito-tts --voice male "Good morning! The coffee is ready." -o out.wav     # male voice
     ito-tts --phonemes "ɡʊd mˈɔːɹnɪŋ !" -o out.wav
     python -m ito "Long text. Several sentences are synthesized one by one." -o out.wav
 """
@@ -16,9 +16,9 @@ def main(argv=None):
     ap.add_argument("text", nargs="?", help="English text")
     ap.add_argument("-o", "--out", default="ito.wav")
     ap.add_argument("--phonemes", default=None, help="StyleTTS 2-style phoneme string instead of text")
-    ap.add_argument("--voice", default="d", type=str.lower, choices=("d", "g"),
-                    help="d: female (LibriTTS-R 4970, default); g: male (LibriTTS-R 5105)")
-    ap.add_argument("--model", default=None, help="checkpoint path, overrides --voice (default: ito_v3.pt or ito_v3_G.pt "
+    ap.add_argument("--voice", default="female", type=str.lower, choices=("female", "male", "d", "g"),
+                    help="female (default; also d) or male (also g)")
+    ap.add_argument("--model", default=None, help="checkpoint path, overrides --voice (default: ito_female.pt or ito_male.pt "
                                                   "from $ITO_WEIGHTS_DIR, models/, or Hugging Face)")
     ap.add_argument("--seed", type=int, default=0, help="source-noise seed")
     ap.add_argument("--chunk", type=int, default=8, help="frames per streamed chunk (8 = 100 ms)")

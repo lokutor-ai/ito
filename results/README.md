@@ -27,7 +27,7 @@ There was one listener and four sentences per system, so differences under about
 Two earlier Ito variants against the reference (teacher) model; one listener, four held-out sentences. Reference
 4.00, variant A 3.25, variant B 3.00.
 
-## chip/: the on-chip engine (`ito_v3_esp32s3.bin`)
+## chip/: the on-chip engine (`ito_female_esp32s3.bin`)
 
 - `quality.json`, `quality_c.log`: quantised engine numerics against the float PyTorch model on 20 held-out sentences
   (PESQ-wb 4.52; durations identical on 20/20), and the C engine's audio against both.

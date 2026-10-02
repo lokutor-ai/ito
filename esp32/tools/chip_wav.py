@@ -3,7 +3,7 @@
 
     cd esp32/host && make ito_cli && cd ../..
     python3 esp32/tools/chip_wav.py "Good morning! The coffee is ready." out.wav
-    python3 esp32/tools/chip_wav.py --voice g "Good morning! The coffee is ready." out_g.wav   # male voice
+    python3 esp32/tools/chip_wav.py --voice male "Good morning! The coffee is ready." out_male.wav   # male voice
 
 Phonemises like tools/say.py, then runs esp32/host/ito_cli (the firmware's C engine built for the host; its PCM is
 bit-identical to the firmware's for the same ids and seed). Sentences are synthesized one by one and joined with a
@@ -20,7 +20,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("text")
     ap.add_argument("out")
-    ap.add_argument("--voice", default="d", type=str.lower, choices=("d", "g"), help="d: female (default); g: male")
+    ap.add_argument("--voice", default="female", type=str.lower, choices=("female", "male", "d", "g"), help="female (default; also d) or male (also g)")
     ap.add_argument("--blob", default=None, help="chip weights (default: $ITO_WEIGHTS_DIR, models/, or Hugging Face)")
     ap.add_argument("--cli", default=os.path.join(ROOT, "esp32", "host", "ito_cli"))
     ap.add_argument("--seed", type=int, default=1)
