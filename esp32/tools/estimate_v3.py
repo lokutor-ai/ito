@@ -1,4 +1,5 @@
-"""TTFA / RTF estimates for the v3 engine on the ESP32-S3 from the host op profile (engine/opcount_v3.c logs).
+"""SUPERSEDED by icount_estimate.py (this MAC-count model was too optimistic: it ignores PSRAM traffic and non-MAC instructions).
+TTFA / RTF estimates for the v3 engine on the ESP32-S3 from the host op profile (engine/opcount_v3.c logs).
 
     python3 esp32/tools/estimate_v3.py results/opcount.log        (written by esp32/host/opcount_v3)
 

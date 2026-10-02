@@ -37,7 +37,7 @@ Two earlier Ito variants against the reference (teacher) model; one listener, fo
   bit-identical to the host build (1 and 2 cores, 8- and 16-bit activations, two weight-staging modes). Its timing
   lines are emulator wall-clock times, not chip times.
 - `opcount.log`, `estimates.md`: exact operation counts and the **estimated** time to first audio and real-time factor
-  as a function of the board's effective int8 throughput. These are not silicon measurements.
+  as a function of the board's effective int8 throughput. These are not silicon measurements, and `estimates.md` is superseded by the instruction-count estimates in `esp32/README.md` section 4 (it was too optimistic).
 
 ## License of the audio
 

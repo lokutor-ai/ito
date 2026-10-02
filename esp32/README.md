@@ -6,7 +6,7 @@ the host that sends the text (`tools/say.py`). The board receives token ids and 
 
 > **Status (2 October 2026).** The engine and firmware are verified on the host and in Espressif's QEMU: the firmware's
 > PCM is bit-identical to the host build. **Nothing has run on silicon yet.** Every timing here is an **estimate**
-> from counted operations and an assumed GEMM throughput. At boot the firmware measures the real numbers itself and
+> from exact QEMU instruction counts and an assumed CPI and PSRAM bandwidth. **Real-time playback is not established** (§4). At boot the firmware measures the real numbers itself and
 > prints them (`BOARD_SUMMARY`). We will publish board measurements as soon as we have them.
 
 ## 1. Flash and talk
@@ -31,7 +31,7 @@ and try again.
 
 | file | what |
 |---|---|
-| `prebuilt/ito_app_merged.bin` (362 KB) | bootloader + partition table + app (ESP-IDF 5.5.1, octal PSRAM, QIO flash, I2S on). Flash at 0x0. |
+| `prebuilt/ito_app_merged.bin` (368 KB) | bootloader + partition table + app (ESP-IDF 5.5.1, octal PSRAM, QIO flash, I2S on). Flash at 0x0. |
 | `ito_v3_esp32s3.bin` (4.89 MB, from [Hugging Face](https://huggingface.co/lokutor-ai/ito-tts-v3), see [`models/README.md`](../models/README.md)) | voice D (female), with a self-test record and three demo sentences. Flash at 0x200000. **CC BY-NC-SA 4.0 + [`models/TERMS.md`](../models/TERMS.md): non-commercial.** |
 | `ito_v3_G_esp32s3.bin` (4.89 MB, same place and license) | voice G (male), same format and size. Flash it at 0x200000 **instead of** voice D (`VOICE=g esp32/tools/flash.sh PORT`, or `flash.sh PORT models/ito_v3_G_esp32s3.bin`). The app is the same for both voices. |
 
@@ -70,7 +70,7 @@ and per second of audio.
 | Flash | app 296 KB in a 2 MB slot at 0x10000; weights in a 14 MB slot at 0x200000 |
 | PSRAM | **peak 5.9 of 8 MB** (weights copied to PSRAM + stage ring buffers + text buffers for 400 tokens; QEMU) |
 | Internal SRAM | **peak 348 of 383 KB** (hot scratch + 4 weight-staging tiles + stacks; QEMU) |
-| Work before the first 100 ms of audio | **83.6 M int8 MACs, for any sentence length** (forward GRU, fixed style: the text side runs incrementally) |
+| Work before the first audio (25 ms first chunk) | **22.9-23.4 M instructions and 4.5 MB of weights from PSRAM, for any sentence length** (forward GRU, fixed style: the text side runs incrementally) |
 | Work per second of audio | 346 M int8 MACs + 1.2 M f32 MACs + ~56 M cycles of other float work (LayerNorm, GELU, FFT, source; 0.23 of a core) |
 | Weight traffic | 39 MB of weights read from PSRAM per second of audio (8-frame batches) |
 
@@ -107,10 +107,11 @@ The counts are the same for short (25 tokens), median (108) and long (175 tokens
 Then I2S adds at most one 20 ms DMA buffer.
 
 Reading this honestly:
-- The earlier estimate (212 ms at 0.5 GOPS, RTF 0.92) counted only int8 MACs. Counting every instruction and the PSRAM traffic, the first release engine
-  would have been near 460 ms and RTF 2. The changes in this version (aligned PIE dot kernel, row-parallel loops on both cores, a 25 ms first chunk whose
-  pipeline fill reads each weight matrix once) bring the central time to first audio under 200 ms. The pessimistic case, 40 MB/s with no overlap and CPI 1.6, is above 250 ms.
-- **Real time is not established.** The CPU fits, but the weight traffic (about 43 MB/s) needs the copy to overlap compute: with CPI 1.45, RTF < 1
+- **Correction.** Our first public README said 130-210 ms to first audio and RTF 0.58-0.92. Those numbers counted only int8 MACs at an assumed 0.5-1 GOPS, and were too optimistic.
+  Counting every instruction and the PSRAM traffic, the first release engine (the code in the first public commit and its prebuilt binary) comes to 338 / 463 / 672 ms and RTF about 2.
+  The changes in this version (aligned PIE dot kernel, row-parallel loops on both cores, a 25 ms first chunk whose
+  pipeline fill reads each weight matrix once) bring the central time to first audio to about 180 ms (176-179 ms). The pessimistic case, 40 MB/s with no overlap and CPI 1.6, is 266-269 ms.
+- **Real time is not established.** In the central case the board is slightly slower than real time (RTF 1.15-1.23). The CPU alone is 0.8-0.9, so the weight traffic from PSRAM is the bottleneck. The weight traffic (about 43 MB/s) needs the copy to overlap compute: with CPI 1.45, RTF < 1
   needs about 60 MB/s and at least 80 % of the PSRAM time hidden. The `gdma` staging mode is meant for that. Only the board can say.
   What would fix it otherwise: a leaner scratch layout that allows 16-frame chunks (half the weight traffic), fewer float instructions
   (they are about 60 % of the single-core instructions), or int4 weights in the vocoder blocks.

@@ -1,16 +1,18 @@
 # Ito: natural-sounding streaming text-to-speech for a $5 chip
 
 Ito is English text-to-speech that runs entirely on an **ESP32-S3** (240 MHz dual-core Xtensa LX7, 8 MB PSRAM, 16 MB
-flash), with no cloud and no neural accelerator. It streams: audio starts after the first 100 ms chunk is ready, for a
-sentence of any length. The voice is distilled from a large open TTS model into 4.4 M parameters. Built by
+flash), with no cloud and no neural accelerator. It streams: audio starts after a short first chunk (25 ms) is ready, and the work
+before it does not grow with the sentence length. The voice is distilled from a large open TTS model into 4.4 M parameters. Built by
 [Lokutor](https://lokutor.com), the makers of [Oído](https://github.com/lokutor-ai/oido) (speech recognition on the
 same chip).
 
 > **Status (2 October 2026).** The on-chip engine is verified on a laptop and in Espressif's QEMU emulator: the
 > firmware's audio is bit-identical to the host build of the engine, and every sample in [`samples/`](samples) is that
 > engine's exact output. **Nothing has run on a physical board yet.** Time to first audio and real-time factor are
-> **estimated** from exact operation counts and an assumed throughput. The firmware measures the real numbers at boot;
-> we will publish them here after we run it on boards in the coming days.
+> **estimated** from exact instruction counts (QEMU) and an assumed PSRAM bandwidth. **Real-time playback is not established:**
+> in the central estimate the board is slightly slower than real time. An earlier version of this page claimed 130–210 ms and
+> real time at 0.5–1 GOPS; that was too optimistic (see [`esp32/README.md`](esp32/README.md) §4). The firmware measures the real numbers at boot;
+> we will publish them here after we run it on boards.
 
 > **Licensing in one line.** The code is GPLv3; the voice model that makes it talk is **non-commercial**
 > (CC BY-NC-SA 4.0 + [terms](models/TERMS.md)). Hobby, research and education use is welcome. For anything commercial,
@@ -93,13 +95,14 @@ UTMOS cannot hear intonation, so treat it as a check, not a verdict. On 60 held-
 | Chip weights | **4.89 MB** (`ito_v3_esp32s3.bin`): int8 mel head and vocoder; int16 pitch path |
 | Flash | 296 KB app + 4.89 MB weights; about 9 MB of the 14 MB weights partition stays free |
 | PSRAM / SRAM | peak 5.9 of 8 MB PSRAM, 327 of 383 KB internal SRAM (measured in QEMU) |
-| Work before the first audio | **83.6 M int8 MACs for any sentence length** (exact count) |
-| Work per second of audio | 346 M int8 MACs + ~0.23 of a core of float work (exact count; the float cycle cost is an estimate) |
-| Time to first audio | **estimated 130–210 ms** if the board sustains 0.5–1 GOPS of int8 GEMM from PSRAM (323 ms at 0.3 GOPS) |
-| Real-time factor | **estimated 0.58–0.92** at 1–0.5 GOPS. Real time needs ≥ 0.45 GOPS. **Not yet measured on silicon** |
+| Work before the first audio (25 ms first chunk) | **23 M instructions and 4.5 MB of weights read from PSRAM, for any sentence length** (exact counts from QEMU) |
+| Work per second of audio | 133–144 M instructions on the dual-core critical path, 38 MB of weights read from PSRAM (exact counts; the conversion to time is an estimate) |
+| Time to first audio | **estimated, not measured:** 124–127 ms optimistic, **176–179 ms central**, 266–269 ms pessimistic (the first public version of the engine: 338 / 463 / 672 ms) |
+| Real-time factor | **estimated, not measured:** 0.72–0.78 optimistic, **1.15–1.23 central**, 1.9–2.0 pessimistic. Below 1 is real time, so **real time is not established**; the CPU alone is 0.8–0.9, and reading the weights from PSRAM is the bottleneck |
 | On a laptop | RTF ≈ 0.01 on an Apple M4 Max CPU, for both the PyTorch model (whole utterance) and the C engine |
 
-The open question is the effective int8 throughput with weights in PSRAM. The firmware's boot benchmark measures it
+The open question is the effective PSRAM bandwidth and how much of it overlaps compute (GDMA). The identified fixes if it is too slow
+are working GDMA overlap, a leaner scratch so 16-frame chunks fit (half the weight traffic), and fewer float operations. The firmware's boot benchmark measures the real numbers
 and prints `BOARD_SUMMARY`. The estimate model and full tables are in [`esp32/README.md`](esp32/README.md).
 
 ## How it works
