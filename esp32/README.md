@@ -4,9 +4,9 @@ The whole text-to-speech chain runs on an **ESP32-S3-DevKitC-1 N16R8** (16 MB fl
 encoder, duration head, prosody net, mel head, harmonic F0 source, ConvNeXt vocoder and iSTFT. Phonemisation runs on
 the host that sends the text (`tools/say.py`). The board receives token ids and plays 24 kHz audio over I2S.
 
-> **Status (2 October 2026).** The engine and firmware are verified on the host and in Espressif's QEMU: the firmware's
+> **Status (3 October 2026).** The engine and firmware are verified on the host and in Espressif's QEMU: the firmware's
 > PCM is bit-identical to the host build. **Nothing has run on silicon yet.** Every timing here is an **estimate**
-> from exact QEMU instruction counts and an assumed CPI and PSRAM bandwidth. **Real-time playback is estimated at 0.77-0.79 centrally, but not established** (§4). At boot the firmware measures the real numbers itself and
+> from exact QEMU instruction counts and an assumed CPI and PSRAM bandwidth. **Real-time playback is estimated at 0.76-0.80 centrally, but not established** (§4). At boot the firmware measures the real numbers itself and
 > prints them (`BOARD_SUMMARY`). We will publish board measurements as soon as we have them.
 
 ## 1. Flash and talk
@@ -31,7 +31,7 @@ and try again.
 
 | file | what |
 |---|---|
-| `prebuilt/ito_app_merged.bin` (414 KB) | bootloader + partition table + app (ESP-IDF 5.5.1, octal PSRAM, QIO flash, I2S on). Flash at 0x0. |
+| `prebuilt/ito_app_merged.bin` (420 KB) | bootloader + partition table + app (ESP-IDF 5.5.1, octal PSRAM, QIO flash, I2S on). Flash at 0x0. |
 | `ito_female_esp32s3.bin` (4.89 MB, from [Hugging Face](https://huggingface.co/lokutor-ai/ito), see [`models/README.md`](../models/README.md)) | female voice, with a self-test record and three demo sentences. Flash at 0x200000. **CC BY-NC-SA 4.0 + [`models/TERMS.md`](../models/TERMS.md): non-commercial.** |
 | `ito_male_esp32s3.bin` (4.89 MB, same place and license) | male voice, same format and size. Flash it at 0x200000 **instead of** the female voice (`VOICE=male esp32/tools/flash.sh PORT`, or `flash.sh PORT models/ito_male_esp32s3.bin`). The app is the same for both voices. |
 
@@ -42,8 +42,10 @@ At boot the board does four things, in order:
 3. It speaks three demo sentences.
 4. It prints `READY`.
 
-Serial commands (115200 baud): `say <ids>`, `demo [k]`, `test`, `bench`, `act 8|16`, `wmode 0|1|2`, `stats`, `help`.
-The BOOT button repeats the demos.
+Serial commands (115200 baud): `say <ids>`, `demo [k]`, `test`, `bench`, `act 8|16`, `wmode 0|1|2|3` (direct, copy, gdma, gdma + prefetch),
+`first <frames>` (frames of the first chunk), `delay <ms>` (hold playback until this long after the text arrived), `stats`, `help`.
+The BOOT button repeats the demos. Every `say`/`demo` prints a `TIMING` line with the time to the first chunk, the RTF, the number of **underruns**
+(gaps in the speech) and how many GEMM calls had their weights announced ahead (mode 3).
 
 **Rebuild the app** with ESP-IDF 5.5: `esp32/tools/build_fw.sh` writes `prebuilt/ito_app_merged.bin`. The app contains no
 model weights (it is GPLv3 code only); the voice model is the separate, non-commercial weights file.
@@ -69,10 +71,10 @@ and per second of audio.
 | Weights | 4.89 MB blob: 3.42 M int8 + 0.54 M int16 + 0.08 M f32 parameters (the style FiLM is precomputed into a table) |
 | Flash | app 340 KB in a 2 MB slot at 0x10000; weights in a 14 MB slot at 0x200000 |
 | PSRAM | **peak 6.5 of 8 MB** (weights copied to PSRAM + stage ring buffers + PCM chunk buffers + text buffers for 400 tokens; QEMU) |
-| Internal SRAM | **peak 346 of 383 KB in QEMU, about 358 KB on the chip with the I2S DMA buffers** (219 KB hot scratch for 24-frame chunks + 4 weight-staging tiles + stacks) |
-| Work before the first audio (25 ms first chunk) | **17.4-17.9 M instructions and 4.8 MB of weights from PSRAM, for any sentence length** (forward GRU, fixed style: the text side runs incrementally) |
-| Work per second of audio | 346 M int8 MACs + 1.2 M f32 MACs + other float work; about 99 M instructions on the dual-core critical path (177 M on both cores together) |
-| Weight traffic | 17 MB of weights read from PSRAM per second of audio (one weight pass serves a 24-frame, 300 ms chunk; 38 MB with the previous 8-frame chunks) |
+| Internal SRAM | **peak 340 of 384 KB in QEMU, about 353 KB on the chip with the I2S DMA buffers** (238 KB hot scratch for 24-frame chunks, 12-row wide layers + 4 weight-staging tiles of 4 KB + stacks; was 346 of 383 KB with a 219 KB scratch and 40 KB of tiles). The firmware checks at boot that the scratch fits in one block with room left over and falls back to PSRAM (slow) if not: look for `internal SRAM before the hot arena` in the boot log |
+| Work before the first audio | **25.3-26.3 M instructions and 5.1 MB of weights from PSRAM for the shipped 10-frame (125 ms) first chunk; 17.2-17.8 M and 4.5 MB for a 2-frame one (`first 2`). The same for any sentence length** (forward GRU, fixed style: the text side runs incrementally) |
+| Work per second of audio | 346 M int8 MACs + 1.2 M f32 MACs + other float work; about 98 M instructions on the dual-core critical path (177 M on both cores together) |
+| Weight traffic | 15 MB of weights read from PSRAM per second of audio (one weight pass serves a 24-frame, 300 ms chunk, the two 1202-wide layers two passes; 17 MB before, 38 MB with 8-frame chunks) |
 
 ## 4. Estimated time to first audio and real-time factor
 
@@ -94,30 +96,61 @@ Only the conversion to time is an estimate:
 |---|---|---|
 | first release engine, 100 ms first chunk | 62.5 M instructions, 10.2 MB of weights from PSRAM | 251-271 M instructions, 38 MB |
 | previous engine, 25 ms first chunk, 8-frame chunks | 22.9-23.4 M instructions, 4.5 MB | 133-144 M instructions, 38 MB (+ about 4.5 MB of activation rings) |
-| **this engine, 2-frame (25 ms) first chunk, then 24-frame (300 ms) chunks** | **17.4-17.9 M instructions, 4.8 MB** (one pass over the weights) | **about 99 M instructions, 17 MB** (+ about 4.5 MB of activation rings) |
+| previous version of this engine, 2-frame (25 ms) first chunk, then 24-frame (300 ms) chunks | 17.4-17.9 M instructions, 4.8 MB (one pass over the weights) | about 99-101 M instructions, 17 MB (+ about 4.5 MB of activation rings) |
+| **this engine, shipped start-up ramp (10, 11, 12, 14, 18, then 24 frames)** | **25.3-26.3 M instructions, 5.1 MB** | **about 98 M instructions, 15 MB** (+ about 4.5 MB of activation rings) |
 
 The counts are the same for short (25 tokens), median (108) and long (175 tokens) sentences. The output is bit-identical between the engines and to the host build.
 
 | Estimated (not measured) | optimistic | central | pessimistic |
 |---|---|---|---|
 | Time to first audio, first release engine | 338 ms | 463 ms | 672 ms |
-| Time to first audio, previous engine | 124-127 ms | 176-179 ms | 266-269 ms |
-| **Time to first audio, this engine (25 ms first chunk)** | **94-97 ms** | **145-148 ms** | **237-240 ms** |
+| Time to first audio, previous engine (8-frame chunks) | 124-127 ms | 176-179 ms | 266-269 ms |
+| Time to first audio, version of 2 October (25 ms first chunk, **gap after it**) | 94-97 ms | 145-148 ms | 237-240 ms |
+| Time to first audio, this engine with `first 2` (same idea, **gap after it**) | 93-96 ms | 142-146 ms | 230-234 ms |
+| **Time to first audio, this engine, shipped start-up ramp (no gap after it)** | **137-143 ms** | **200-207 ms** | **311-318 ms** |
 | Real-time factor, previous engine | 0.72-0.78 | 1.15-1.23 | 1.93-2.04 |
-| **Real-time factor, this engine** (long-sentence limit) | **0.53-0.55** | **0.77-0.79** | **1.18-1.22** |
-| **Start delay for gapless playback** | **about 220 ms** | **342-346 ms** | **850-2700 ms** (grows with sentence length, because RTF > 1) |
+| Real-time factor, version of 2 October (long-sentence limit) | 0.53-0.55 | 0.77-0.79 | 1.18-1.22 |
+| **Real-time factor, this engine** (long-sentence limit) | **0.53** | **0.76** | **1.14** |
+| Real-time factor, this engine, whole sentences including the start-up ramp | 0.53-0.54 | 0.77-0.80 | 1.18-1.27 |
+| Start delay for gapless playback, version of 2 October | about 220 ms | 342-346 ms | 850-2700 ms |
+| **Start delay for gapless playback, this engine, shipped ramp** | **137-143 ms (= time to first audio)** | **215-240 ms** | **880-2200 ms** (grows with sentence length, because RTF > 1) |
+| Start delay for gapless playback, this engine with `first 2` | 215-221 ms | 328-335 ms | 710-2000 ms |
+
+(ranges: the self-test sentence and the three demo sentences, 25 / 84 / 108 / 175 tokens, both voices.)
 
 Then I2S adds at most one 20 ms DMA buffer.
 
 Reading this honestly:
-- **Time to first audio is not the same as gapless speech.** The first chunk is only 25 ms of audio. The next chunk is 300 ms of audio and takes
-  much longer to compute than 25 ms, so if the DAC starts as soon as the first chunk is ready, there is a silence before the second chunk.
-  To play without an underrun, playback has to start about 340 ms after the text arrives (central; about 220 ms optimistic). Because the central
-  real-time factor is below 1, this delay does not grow with sentence length. In the pessimistic case (RTF above 1) the speech cannot be
-  gapless at all without a delay that grows with the sentence (0.85 s for the short demo sentence, up to 2.7 s for the longest). The firmware
-  still starts playback at the first chunk; a pre-buffer option in `play_task` is the next step.
-- **The pessimistic case is still slower than real time.** At 40 MB/s of PSRAM bandwidth with no overlap and CPI 1.6 the estimate is RTF 1.18-1.22.
-  The CPU alone is now 0.54 / 0.60 / 0.67 of real time (optimistic / central / pessimistic); the PSRAM bandwidth assumption decides the rest.
+- **Time to first audio is not the same as gapless speech, so the engine now starts with a ramp.** Every chunk costs one pass over the weights plus about
+  6.5 ms (central) per frame; one frame is 12.5 ms of audio. A first chunk of 2 frames is out after about 145 ms, but it holds only 25 ms of audio and the
+  24-frame chunk behind it needs about 230 ms more: the speech has a gap of 200 ms or more (the version of 2 October needed a 340 ms start delay
+  against it). The shipped schedule instead makes the first chunk 10 frames (125 ms of audio), then 11, 12, 14, 18 and 24, with the text side advancing in 8-token
+  steps meanwhile (one 24-token step would make a single chunk 65 ms slower than its neighbours): each chunk is then ready before the audio of
+  the chunks before it has played out, so playback can start with the first chunk. The cost is a later first sound (200-207 ms central instead of 145-148). In the
+  central case the speech is gapless from 215-240 ms after the text arrived (the first chunk plus 10-40 ms, spent on the chunks that carry a text step);
+  `delay <ms>` holds playback for that long. In the optimistic case the first chunk is already gapless. In the pessimistic case (RTF above 1) no start-up
+  schedule can avoid gaps: the delay grows with the sentence (0.9 s for the short demo sentence, 2.2 s for the longest).
+  `first 2` restores the old lowest-latency start (first sound at 142-146 ms central, with the gap). The audio is bit-identical for every schedule (host test G, QEMU).
+- **The pessimistic case is still slower than real time.** At 40 MB/s of PSRAM bandwidth with no overlap and CPI 1.6 the estimate is RTF 1.14 (long sentences).
+  The CPU alone is 0.53 / 0.59 / 0.66 of real time (optimistic / central / pessimistic); the PSRAM bandwidth assumption decides the rest. This column is defined as
+  "nothing overlapped", so no change to the staging can improve it; only fewer weight bytes or fewer instructions can.
+- **What the central column assumes, and a structural check.** The central estimate hides half of the PSRAM time behind compute. To see what the firmware's
+  staging can actually do, `tools/trace_sim.py` replays the exact per-call trace of a chunk (every GEMM call and every row-parallel float loop, with its exact
+  instruction count per core and weight bytes) through a model of the weight DMA: both cores share one PSRAM bus, each has two staging buffers. Still an estimate, but without the hidden-share knob:
+
+  | long-sentence RTF (24-frame chunks) | optimistic (CPI 1.3, 80 MB/s) | central (1.45, 60) | pessimistic (1.6, 40) |
+  |---|---|---|---|
+  | nothing overlapped | 0.78 | 0.92 | 1.14 |
+  | GDMA double buffer inside each GEMM call (`wmode 2`, the staging of the version of 2 October) | 0.67 | 0.80 | 1.01 |
+  | **plus cross-call prefetch (`wmode 3`)**: the engine announces the next call's weights, which are fetched during the float work in between | **0.63** | **0.74** | **0.91** |
+
+  So the central column's assumption (half hidden) is about what `wmode 3` reaches (0.55 hidden, RTF 0.74 against the column's 0.76); `wmode 2` hides about 0.4 (RTF 0.80). With the prefetch the gapless
+  start delay is 213-236 ms central and the time to first audio 193-199 ms (same model; 164-169 ms for both, optimistic). The same model says the bus, not the CPU, limits the GEMM calls (the two cores together ask
+  for about 110 MB/s while computing a tile), and that 4 KB tiles lose about 2 % of the central chunk time (and about 12 ms of start delay) against 10 KB ones. If the DMA does not behave like this on the chip, the board benchmark
+  chooses another mode; it also compares the audio of every mode with the direct one and drops a mode that differs.
+- **What changed on 3 October.** Cross-call weight prefetch (`wmode 3`), the start-up ramp with small text steps, 12-row passes for the two 1202-wide layers
+  (their weights are read twice per chunk instead of three times: -12 % traffic, paid for by 4 KB instead of 10 KB staging tiles), a 4-channel depthwise kernel
+  (-3 % instructions): all bit-identical. What it did not change: the pessimistic column is still above 1.
 - **Correction history.** Our first public README said 130-210 ms to first audio and RTF 0.58-0.92. Those numbers counted only int8 MACs at an assumed
   0.5-1 GOPS and were too optimistic. Counting every instruction and the PSRAM traffic, the first release engine came to 338 / 463 / 672 ms and RTF about 2,
   and the second version to 176-179 ms and RTF 1.15-1.23 (not real time). This version halves the weight traffic with 24-frame chunks (a leaner scratch
@@ -157,16 +190,19 @@ These lines give the effective G, the real float-work time, the PSRAM bandwidth 
 | C engine vs reference, stage by stage | durations exact; text side 90–91 dB, durations 96–98 dB, F0 95 dB; mel head 57–66 dB (8-bit) / 87 dB (16-bit); vocoder spectrum 45–47 dB (8-bit) / 81 dB (16-bit) |
 | why the 8-bit SNRs are lower | the reference against **itself** with 1e-7 relative noise gives the same range: an 8-bit quantiser flips a whole step when its input crosses a rounding boundary. The C engine sits inside the reference's own rounding noise |
 | C engine audio, PESQ | against float 4.50–4.60, against the reference 4.59–4.62 |
-| streaming == whole utterance | **bit-identical** for chunks of 1, 2, 3, 5, 8, 16, 24 and 32 frames; incremental and whole-sentence text side bit-identical |
+| streaming == whole utterance | **bit-identical** for chunks of 1, 2, 3, 5, 8, 16, 24 and 32 frames, for the shipped start-up ramp and for text steps of 1, 3, 8, 13, 24 and 40 tokens (host test G); incremental and whole-sentence text side bit-identical |
+| weight-prefetch hints | host test H: the engine announces the weights of the next GEMM call before the current one, for every call of every test sentence (0 unannounced, 0 mismatched, chunks of 2, 8, 24 frames) and the audio does not change |
 | ASan / UBSan | clean |
-| **QEMU** (Espressif 9.2.2, quad PSRAM, I2S compiled out) | self-test PASS; full PCM bit-identical to the host (female 134100/134100 samples, male 137400/137400); self-test PASS on 1 and 2 cores, 8- and 16-bit activations, both voices ([`female`](../results/chip/qemu_rtf_female.log), [`male`](../results/chip/qemu_rtf_male.log); the earlier direct/copy staging runs are in [`qemu_v3.log`](../results/chip/qemu_v3.log)) |
+| **QEMU** (Espressif 9.2.2, quad PSRAM, I2S compiled out) | self-test PASS; full PCM bit-identical to the host (female 134100/134100 samples, male 137400/137400) in all four weight-staging modes (direct, copy, gdma, gdma + prefetch; QEMU has no GDMA, so the two GDMA modes run the same control flow with a software copy that is only done when the tile is waited for and poisons the buffer until then); self-test PASS on 1 and 2 cores, 8- and 16-bit activations, both voices ([`female`](../results/chip/qemu_rtf_female.log), [`male`](../results/chip/qemu_rtf_male.log); the earlier direct/copy staging runs are in [`qemu_v3.log`](../results/chip/qemu_v3.log)) |
 
 Timings printed under QEMU are emulator wall-clock times and say nothing about the chip.
 
 ## 6. Not verified yet
 
 - **Anything on silicon:** all timings, the octal PSRAM bandwidth, the dual-core speed-up, GDMA staging (QEMU has no
-  GDMA, so it reports "unavailable"), I2S output, the BOOT button, and `say.py` over real USB.
+  GDMA: the control flow of `wmode 2` and `wmode 3` is tested there with a software copy, but the real `esp_async_memcpy` branch, its interrupts and the
+  two cores sharing the bus are not), I2S output, the BOOT button, and `say.py` over real USB. The boot benchmark runs all four staging modes,
+  compares each one's audio with the direct mode's and keeps the fastest that matches.
 - **The hardware build itself** (octal PSRAM, QIO, I2S) was built but never run. QEMU runs the quad-PSRAM, no-I2S build
   of the same sources.
 - The float-work cycle costs behind the estimates are assumptions.
@@ -179,6 +215,6 @@ Timings printed under QEMU are emulator wall-clock times and say nothing about t
 engine/      itofs.c / itofs.h: portable C99 engine (also reads the older arch-2 blob format)
 firmware/    ESP-IDF app: main.c (I2S, serial commands, self-test, board benchmark), kernels_s3.c (PIE int8 GEMM via esp-nn)
 host/        Makefile, ito_cli.c, host_test_v3.c, gen_selftest.c, opcount_v3.c, golden/ (test references)
-tools/       fetch_weights.sh, flash.sh, say.py, chip_wav.py, build_fw.sh, estimate_v3.py, qemu/run_qemu.sh, qemu/qemu_client.py
+tools/       fetch_weights.sh, flash.sh, say.py, chip_wav.py, build_fw.sh, estimate_v3.py, icount_estimate.py, trace_sim.py, sched_eval.py, qemu/run_qemu.sh, qemu/icount_profile.sh, qemu/qemu_client.py
 prebuilt/    ito_app_merged.bin
 ```

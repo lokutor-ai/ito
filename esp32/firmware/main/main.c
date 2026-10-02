@@ -43,14 +43,27 @@
 #define STEADY_FRAMES 24             // frames per chunk once the start-up ramp is over (24 frames = 300 ms): every chunk reads each weight
                                      // matrix once from PSRAM, so bigger chunks mean less weight traffic per second of audio
 #endif
-#define NBUF 2                       // double buffer between synthesis and I2S
-#ifndef RAMP_FRAMES
-#define RAMP_FRAMES STEADY_FRAMES    // frames of chunks 1, 2, ... after the first one, then STEADY_FRAMES: a start-up ramp such as "8, 16" lets the
-                                     // second chunk come sooner but costs one more full weight pass per ramp step (measured: no gain, see NOTES)
+#define NBUF 4                       // PCM chunk buffers between synthesis and I2S (PSRAM, 14 KB each): with a start delay the player waits while synthesis keeps going
+// Start-up schedule (gapless speech from the first chunk). Time to first audio is the time of chunk 0; for playback never to starve, every later chunk
+// must be ready before the audio of the chunks before it has played, and each chunk costs a fixed weight pass plus about 6.5 ms (central) per frame.
+// A first chunk of 2 frames is out after about 145 ms (central) but its 25 ms of audio is gone long before the 24-frame chunk after it (about 230 ms
+// later) is ready, so the speech has a gap. The ramp below starts with 10 frames (125 ms of audio), then 11, 12, 14, 18 and 24: each chunk takes
+// less time to make than the one before it takes to play, so playback can start with the first chunk and never starves (estimates, see the
+// README). The text side advances in steps of 8 tokens meanwhile (a 24-token step would make one chunk 65 ms slower than its neighbours). The audio
+// is bit-identical to any other chunking (host test G).
+#ifndef RAMP_LIST
+#define RAMP_LIST 11, 12, 14, 18     // frames of chunks 1, 2, ... after the first one, then STEADY_FRAMES
+#endif
+#ifndef TEXT_STEP_LIST
+#define TEXT_STEP_LIST 8, 8, 8, 8, 8, 8, 8, 8   // text-side tokens added per step in chunk 0, 1, ... (0 or past the list: the engine's default, 24)
 #endif
 #ifndef FIRST_FRAMES
-#define FIRST_FRAMES 2               // low-latency first chunk: 2 frames (25 ms at 80 fps), then the ramp and the steady-state chunks. The output
-                                     // is bit-identical to any other chunking; `first <n>` changes it (n >= chunk = off)
+#define FIRST_FRAMES 10              // frames of the first chunk (10 = 125 ms of audio). `first <n>` changes it (n >= chunk = no ramp at all); `first 2` is the
+                                     // lowest-latency start (about 145 ms central) but not gapless
+#endif
+#ifndef START_DELAY_MS
+#define START_DELAY_MS 0             // start playback this many ms after the text (0 = with the first chunk, which is gapless if the estimates hold; set it from
+                                     // the underruns the TIMING line reports: the delay that is just enough is the gapless start delay of this board)
 #endif
 #ifndef ITOFS_ACT_BITS
 #define ITOFS_ACT_BITS 8             // activations of the int8-weight layers: 8 (one int8 plane, default) or 16; `act` command
@@ -59,9 +72,10 @@
 static itofs_model_t s_model;
 static itofs_ctx_t s_ctx;
 static int s_hop, s_sr, s_chunk_frames, s_chunk_samples, s_style, s_first = FIRST_FRAMES;
-static const int s_ramp_default[] = { RAMP_FRAMES };
+static const int s_ramp_default[] = { RAMP_LIST };
 static const int *s_ramp = s_ramp_default;
 static int s_nramp = (int)(sizeof s_ramp_default / sizeof s_ramp_default[0]);
+static const int s_tstep[] = { TEXT_STEP_LIST };
 
 // frames to request for chunk k (0, 1, ...) of an utterance: `first` frames, then the ramp, then the steady-state chunk.
 // first <= 0 or >= a full chunk turns the ramp off.
@@ -72,12 +86,21 @@ static int chunk_frames_for(int k)
     if (k - 1 < s_nramp) return s_ramp[k - 1] < s_chunk_frames ? s_ramp[k - 1] : s_chunk_frames;
     return s_chunk_frames;
 }
+// text-side tokens per step while chunk k is made: small steps early (a step is a whole pass over the text weights, plus the tokens),
+// so the start-up chunks stay even; the engine's default (24 tokens) once the ramp is over. Audio is identical for every value.
+static int text_step_for(int k)
+{
+    if (s_first <= 0 || s_first >= s_chunk_frames) return 0;
+    return k < (int)(sizeof s_tstep / sizeof s_tstep[0]) ? s_tstep[k] : 0;
+}
 static const int32_t *s_st, *s_st16; // self-test records from the blob ("selftest": default 8-bit activations,
                                      // "selftest_a16": 16-bit); NULL if absent
 
 typedef struct { int16_t *pcm; int n; } buf_t;      // n = samples, 0 = end of utterance
 static QueueHandle_t s_free_q, s_full_q, s_req_q, s_done_q;
 static volatile int s_underruns, s_playing;
+static volatile int64_t s_utt_t0;       // esp_timer time (us) at which the current utterance was handed to the engine
+static int s_start_delay_ms = START_DELAY_MS;   // hold the DAC until this long after the text arrived (0: start with the first chunk); `delay <ms>`
 
 typedef struct { int kind; int n; int16_t tok[MAX_TOKENS]; } req_t;   // 0 say, 1 demos, 2 self-test, 3 style, 4 act bits, 5 bench, 6 wmode, 7 icprof, 8 first
 static req_t s_req_tmp;
@@ -129,6 +152,10 @@ static void play_task(void *arg)
             xQueueReceive(s_full_q, &b, portMAX_DELAY);
         }
         if (b.n == 0) { s_playing = 0; xQueueSend(s_done_q, &b, portMAX_DELAY); continue; }
+        if (!s_playing && s_start_delay_ms > 0) {          // pre-roll: the first chunk waits for the delay, later chunks keep arriving meanwhile
+            const int64_t wait = s_utt_t0 + (int64_t)s_start_delay_ms * 1000 - esp_timer_get_time();
+            if (wait > 1000) vTaskDelay(pdMS_TO_TICKS((wait + 999) / 1000));
+        }
         s_playing = 1;
 #ifndef ITOFS_QEMU
         for (int o = 0; o < b.n; o += I2S_SLICE) {
@@ -154,6 +181,8 @@ static int speak(const int *tok, int n, int style, uint32_t seed, int play, int1
 {
     S->tok_first = 0;
     int64_t t0 = esp_timer_get_time();
+    s_utt_t0 = t0;
+    s3_stats_reset();
     int T = itofs_begin(&s_ctx, tok, n, style, seed);
     int64_t t1 = esp_timer_get_time();
     if (T < 0) { printf("ERROR itofs_begin: %s\n", itofs_strerror(T)); return T; }
@@ -165,6 +194,7 @@ static int speak(const int *tok, int n, int style, uint32_t seed, int play, int1
         buf_t b = { NULL, 0 };
         if (play) xQueueReceive(s_free_q, &b, portMAX_DELAY);
         int16_t *dst = play ? b.pcm : out + pos;
+        s_ctx.text_step = text_step_for(kch);
         const int want = chunk_frames_for(kch++) * s_hop;                                  // low-latency first chunk, ramp, steady state
         int room = play ? want : (int)((out_max - pos) < want ? (out_max - pos) : want);
         int64_t a = esp_timer_get_time();
@@ -181,6 +211,7 @@ static int speak(const int *tok, int n, int style, uint32_t seed, int play, int1
         xQueueSend(s_full_q, &end, portMAX_DELAY);
         xQueueReceive(s_done_q, &end, portMAX_DELAY);
     }
+    s_ctx.text_step = 0;
     S->begin_ms = ms(t1 - t0); S->ttfa_ms = ms(ttfa); S->compute_ms = ms(compute);
     S->frames = s_ctx.T; S->audio_s = (double)pos / s_sr; (void)T;
     return (int)pos;
@@ -189,9 +220,10 @@ static int speak(const int *tok, int n, int style, uint32_t seed, int play, int1
 static void print_timing(const char *what, const stats_t *S, int n_tok, int style)
 {
     printf("TIMING %s: %d tokens, style %d, %.2f s audio | first chunk %.1f ms (begin %.1f ms; %s text side, %d tokens final at first chunk) | "
-           "compute %.1f ms, RTF %.3f | underruns %d\n",
+           "compute %.1f ms, RTF %.3f | underruns %d (start delay %d ms) | weight staging %s: %ld GEMM calls, %ld announced ahead, %ld not\n",
            what, n_tok, style, S->audio_s, S->ttfa_ms, S->begin_ms, s_ctx.text_incr ? "incremental" : "whole-sentence", S->tok_first,
-           S->compute_ms, S->compute_ms / 1000.0 / S->audio_s, s_underruns);
+           S->compute_ms, S->compute_ms / 1000.0 / S->audio_s, s_underruns, s_start_delay_ms, s3_wmode_name(s3_wmode),
+           s3_stats.calls, s3_stats.pf_hit, s3_stats.pf_miss + s3_stats.pf_free);
     mem_report(what);
 }
 
@@ -303,16 +335,26 @@ static double ctx_ops(int which)        // which 0: int8 executed, 1: f32
     return a;
 }
 
+// weight staging mode; the engine announces the next GEMM call's weights only when the kernel can use it (mode 3)
+static int set_wmode(int m)
+{
+    const int r = s3_set_wmode(m);
+    if (!r) s_ctx.qnext = m == 3 ? s3_prefetch : NULL;
+    return r;
+}
+
 static void tts_bench(void)
 {
     int16_t *pcm = heap_caps_malloc(sizeof(int16_t) * (size_t)s_chunk_samples, MALLOC_CAP_SPIRAM);   // one chunk, overwritten
     if (!pcm) { printf("BENCH ERROR: no memory for the PCM buffer\n"); return; }
-    double best_rtf = 1e30, sum_ttfa[3] = {0}, sum_rtf[3] = {0}, gops[3] = {0};
-    int best = s3_wmode, nok[3] = {0};
-    double tt[3][MAX_DEMOS] = {{0}}, tok_n[MAX_DEMOS] = {0};
+    double best_rtf = 1e30, sum_ttfa[4] = {0}, sum_rtf[4] = {0}, gops[4] = {0};
+    int best = s3_wmode, nok[4] = {0};
+    double tt[4][MAX_DEMOS] = {{0}}, tok_n[MAX_DEMOS] = {0};
     const int saved = s3_wmode;
-    for (int mode = 0; mode < 3; mode++) {
-        if (s3_set_wmode(mode)) { printf("BENCH_TTS wmode %s: unavailable\n", s3_wmode_name(mode)); continue; }
+    uint32_t href[MAX_DEMOS] = {0};
+    for (int mode = 0; mode < 4; mode++) {
+        int mismatch = 0;
+        if (set_wmode(mode)) { printf("BENCH_TTS wmode %s: unavailable\n", s3_wmode_name(mode)); continue; }
         double gm = 0, gu = 0;
         for (int k = 0; k < s_ndemo; k++) {
             demo_tokens(k, s_tok_buf);
@@ -325,11 +367,20 @@ static void tts_bench(void)
             if (T < 0) { printf("BENCH ERROR begin: %s\n", itofs_strerror(T)); break; }
             long pos = 0;
             int kc = 0;
+            s_ctx.text_step = text_step_for(kc);
             int got = itofs_next_chunk(&s_ctx, pcm, chunk_frames_for(kc++) * s_hop);
+            uint32_t hh = 2166136261u;
+            for (int i = 0; i < got; i++) { hh ^= (uint16_t)pcm[i]; hh *= 16777619u; }
             const int64_t t2 = esp_timer_get_time();
             const double o8f = ctx_ops(0) - o8a, off = ctx_ops(1) - ofa, gus_first = (double)s3_stats.us;
-            while (got > 0) { pos += got; got = itofs_next_chunk(&s_ctx, pcm, chunk_frames_for(kc++) * s_hop); }
+            while (got > 0) {
+                pos += got; s_ctx.text_step = text_step_for(kc); got = itofs_next_chunk(&s_ctx, pcm, chunk_frames_for(kc++) * s_hop);
+                for (int i = 0; i < got; i++) { hh ^= (uint16_t)pcm[i]; hh *= 16777619u; }
+            }
             const int64_t t3 = esp_timer_get_time();
+            // every staging mode must give the same audio as direct reads; a mode that does not is excluded from the choice
+            if (mode == 0) href[k] = hh;
+            else if (hh != href[k]) { printf("BENCH_TTS wmode %s demo %d: OUTPUT MISMATCH (hash %08lx, direct %08lx): mode excluded\n", s3_wmode_name(mode), k, (unsigned long)hh, (unsigned long)href[k]); mismatch = 1; }
             const double o8 = ctx_ops(0) - o8a, of = ctx_ops(1) - ofa, aud = (double)pos / s_sr, tot = (double)(t3 - t0);
             const double rtf = tot / 1e6 / aud;
             printf("BENCH_TTS wmode %s demo %d: %d tokens, %.2f s audio | text side %.1f ms | first chunk %.1f ms "
@@ -343,6 +394,7 @@ static void tts_bench(void)
             gm += s3_stats.macs; gu += s3_stats.us;
         }
         gops[mode] = gm / (gu * 1e3 + 1e-9);
+        if (mismatch) nok[mode] = 0;
         if (nok[mode] && sum_rtf[mode] / nok[mode] < best_rtf) { best_rtf = sum_rtf[mode] / nok[mode]; best = mode; }
         if (nok[mode] >= 2) {     // TTFA = a + b * tokens (least squares over the demos)
             double sx = 0, sy = 0, sxx = 0, sxy = 0; int m = nok[mode];
@@ -352,9 +404,9 @@ static void tts_bench(void)
                    s3_wmode_name(mode), a, b, b > 0 ? (int)((200 - a) / b) : -1);
         }
     }
-    s3_set_wmode(nok[best] ? best : saved);
+    set_wmode(nok[best] ? best : saved);
     printf("BOARD_SUMMARY fw=v3bench arch=%d act=%d best_wmode=%s", s_model.arch, s_ctx.act_bits, s3_wmode_name(s3_wmode));
-    for (int mode = 0; mode < 3; mode++)
+    for (int mode = 0; mode < 4; mode++)
         if (nok[mode]) printf(" | %s: mean first chunk %.1f ms, mean RTF %.3f, GEMM %.3f GMAC/s", s3_wmode_name(mode),
                               sum_ttfa[mode] / nok[mode], sum_rtf[mode] / nok[mode], gops[mode]);
     printf(" | demo tokens");
@@ -416,7 +468,9 @@ static int ic_fr(const int *sch, int k) { for (int i = 0; i <= k; i++) if (!sch[
 #define IC_MAXCH 160
 static float s_icch[IC_MAXCH][4];    // per chunk: samples, critical-path ticks (mode 1), weight bytes, f32 MACs
 // sch: frames of chunk 0, 1, ... (0 ends the list: the steady-state chunk follows); sid is its id in the log
-static void ic_one(const char *tag, const int *tok, int n, int style, uint32_t seed, int mode, int16_t *pcm, const int *sch, int sid)
+static int s_ic_all;     // icprof 2: trace every chunk of the self-test sentence and the demos (start-up schedule comparison)
+static int ic_ts(const int *ts, int k) { for (int i = 0; i <= k; i++) if (!ts[i]) return 0; return ts[k]; }   // text-side tokens per step of chunk k (0 = engine default)
+static void ic_one(const char *tag, const int *tok, int n, int style, uint32_t seed, int mode, int16_t *pcm, const int *sch, const int *tsch, int sid)
 {
     itofs_prof_clock = ic_clock;
     memset(itofs_prof, 0, sizeof itofs_prof);
@@ -426,11 +480,18 @@ static void ic_one(const char *tag, const int *tok, int n, int style, uint32_t s
     icsnap_t z, f, e;
     ic_snap(&z, 0);
     vTaskDelay(1);
+    const int do_trace = mode == 1 && (s_ic_all ? 1 : (sid == 0 && !strcmp(tag, "demo1")));
+    if (do_trace) {
+        if (!s3_trace) { s3_trace_max = 16000; s3_trace = heap_caps_malloc(sizeof(s3_ev_t) * s3_trace_max, MALLOC_CAP_SPIRAM); }
+        s3_trace_reset(); s3_trace_on = s3_trace != NULL;
+    }
     const uint32_t c0 = esp_cpu_get_cycle_count();
     int T = itofs_begin(&s_ctx, tok, n, style, seed);
     if (T < 0) { printf("ICPROF ERROR %s\n", itofs_strerror(T)); return; }
     int kc = 0;
+    s_ctx.text_step = ic_ts(tsch, kc);
     int got = itofs_next_chunk(&s_ctx, pcm, ic_fr(sch, kc++) * s_hop);
+    if (do_trace) s3_trace_mark();
     uint32_t cp = esp_cpu_get_cycle_count();
     double el = (double)(uint32_t)(cp - c0);
     ic_snap(&f, el);
@@ -443,7 +504,9 @@ static void ic_one(const char *tag, const int *tok, int n, int style, uint32_t s
     while (got > 0) {
         for (int i = 0; i < got; i++) { h ^= (uint16_t)pcm[i]; h *= 16777619u; }
         pos += got; nch++;
+        s_ctx.text_step = ic_ts(tsch, kc);
         got = itofs_next_chunk(&s_ctx, pcm, ic_fr(sch, kc++) * s_hop);
+        if (do_trace) s3_trace_mark();
         const uint32_t cn = esp_cpu_get_cycle_count();
         const double de = (double)(uint32_t)(cn - cp);
         el += de; cp = cn;
@@ -456,6 +519,16 @@ static void ic_one(const char *tag, const int *tok, int n, int style, uint32_t s
         pv = cu;
     }
     ic_snap(&e, el);
+    if (do_trace) {
+        s3_trace_on = 0;
+        int ch = 0;
+        for (int i = 0; i < s3_trace_n && (s_ic_all || ch < 6); i++) {
+            const s3_ev_t *v = &s3_trace[i];
+            printf("ICTRACE %s %d %d %d %u %u %u %u %u %d %d %d\n", tag, sid, ch, v->kind, (unsigned)v->gap, (unsigned)v->h0, (unsigned)v->h1, (unsigned)v->ovh, (unsigned)v->bytes, v->rows, v->in, v->out);
+            if (v->kind == 9) ch++;
+        }
+        printf("ICTRACE_END %s %d events %d\n", tag, sid, s3_trace_n);
+    }
     printf("ICPROF %s mode %s first %d sched %d tokens %d audio %.4f chunks %d fnv %08lx", tag, mode == 0 ? "1core" : mode == 1 ? "2core-serial" : "2core-par",
            sch[0] ? sch[0] : s_chunk_frames, sid, n, (double)pos / s_sr, nch, (unsigned long)h);
     ic_print("first", &z, &f);
@@ -476,20 +549,44 @@ static void icprof(int quick)
     if (!pcm) { printf("ICPROF ERROR no memory\n"); return; }
     printf("ICPROF begin: chunk %d frames, %d-bit activations, wmode %s\n", s_chunk_frames, s_ctx.act_bits, s3_wmode_name(s3_wmode));
     // (mode, schedule): 1 core; 2 cores serialised (exact per-core split) with several start-up ramps; 2 cores in parallel
-    static const int sched[][6] = { {2, 0}, {2, 8, 16, 0}, {2, 8, 0}, {2, 12, 0}, {2, 6, 12, 0}, {1, 0}, {8, 0} };
+    static const int sched[][12] = { {2, 0}, {2, 8, 16, 0}, {2, 8, 0}, {2, 12, 0}, {2, 6, 12, 0}, {1, 0}, {8, 0} };
+    // start-up schedules compared by `icprof 2` (every chunk traced, all four sentences): frames per chunk (then 24) and text-side tokens per step
+    // (then the engine default). 0 = the old 2-frame first chunk (fastest first sound, but a gap follows), 1 = shipped, 2 / 3 = a longer / shorter first chunk
+    static const int sched2[][12] = { {2, 0}, {10, 11, 12, 14, 18, 0}, {12, 14, 17, 21, 0}, {8, 9, 10, 12, 15, 19, 0} };
+    static const int tsched2[][12] = { {0}, {8, 8, 8, 8, 8, 8, 8, 8, 0}, {8, 8, 8, 8, 8, 8, 8, 8, 0}, {8, 8, 8, 8, 8, 8, 8, 8, 0} };
+    static const int zts[12] = {0};
     static const int runs[][2] = { {0, 0}, {1, 0}, {1, 1}, {1, 2}, {1, 3}, {1, 4}, {1, 5}, {1, 6}, {2, 1} };
+    if (quick >= 2) {
+        s_ic_all = 1;
+        for (int sid = 0; sid < (int)(sizeof sched2 / sizeof sched2[0]); sid++) {
+            if (s_st) {
+                int n = s_st[1];
+                for (int i = 0; i < n; i++) s_tok_buf[i] = s_st[7 + i];
+                ic_one("selftest", s_tok_buf, n, s_st[2], (uint32_t)s_st[3], 1, pcm, sched2[sid], tsched2[sid], sid);
+            }
+            for (int k = 0; k < s_ndemo; k++) {
+                char tg[16]; snprintf(tg, sizeof tg, "demo%d", k);
+                demo_tokens(k, s_tok_buf);
+                ic_one(tg, s_tok_buf, s_demo_len[k], s_demo_style[k], 1u + (uint32_t)k, 1, pcm, sched2[sid], tsched2[sid], sid);
+            }
+        }
+        s_ic_all = 0; s3_dual_enabled = 1; s3_ic_serial = 0;
+        heap_caps_free(pcm);
+        printf("ICPROF end\n");
+        return;
+    }
     for (int ri = 0; ri < (int)(sizeof runs / sizeof runs[0]); ri++) {
         const int mode = runs[ri][0], sid = runs[ri][1];
         if (quick && ri > 1) break;
         if (s_st) {
             int n = s_st[1];
             for (int i = 0; i < n; i++) s_tok_buf[i] = s_st[7 + i];
-            ic_one("selftest", s_tok_buf, n, s_st[2], (uint32_t)s_st[3], mode, pcm, sched[sid], sid);
+            ic_one("selftest", s_tok_buf, n, s_st[2], (uint32_t)s_st[3], mode, pcm, sched[sid], zts, sid);
         }
         for (int k = 0; k < s_ndemo; k++) {
             char tg[16]; snprintf(tg, sizeof tg, "demo%d", k);
             demo_tokens(k, s_tok_buf);
-            ic_one(tg, s_tok_buf, s_demo_len[k], s_demo_style[k], 1u + (uint32_t)k, mode, pcm, sched[sid], sid);
+            ic_one(tg, s_tok_buf, s_demo_len[k], s_demo_style[k], 1u + (uint32_t)k, mode, pcm, sched[sid], zts, sid);
         }
     }
     s3_dual_enabled = 1; s3_ic_serial = 0;
@@ -539,7 +636,7 @@ static void synth_task(void *arg)
             s_first = s_req_tmp.n;
             printf("OK first chunk %d frames%s\n", s_first, s_first >= s_chunk_frames || s_first <= 0 ? " (= a full chunk)" : "");
         } else if (s_req_tmp.kind == 6) {
-            if (s3_set_wmode(s_req_tmp.n)) printf("ERROR weight staging mode %d unavailable\n", s_req_tmp.n);
+            if (set_wmode(s_req_tmp.n)) printf("ERROR weight staging mode %d unavailable\n", s_req_tmp.n);
             else printf("OK weight staging %s\n", s3_wmode_name(s3_wmode));
         } else {
             s_ctx.act_bits = s_req_tmp.n;
@@ -602,12 +699,15 @@ static void handle_line(char *line)
     } else if (!strncmp(line, "first", 5)) {
         s_in_req.kind = 8; s_in_req.n = atoi(line + 5);
         xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
+    } else if (!strncmp(line, "delay", 5)) {
+        s_start_delay_ms = atoi(line + 5);
+        printf("OK start delay %d ms\n", s_start_delay_ms);
     } else if (!strncmp(line, "wmode", 5)) {
         s_in_req.kind = 6; s_in_req.n = atoi(line + 5);
         xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
     } else if (line[0]) {
         printf("commands: say <comma-separated token ids> | style <0-%d> | act <8|16> | demo [0-%d] | test | stats | bench | "
-               "wmode <0 direct|1 copy|2 gdma> | first <frames of the first chunk>\n", s_model.n_styles - 1, s_ndemo - 1);
+               "wmode <0 direct|1 copy|2 gdma|3 gdma+prefetch> | first <frames of the first chunk> | delay <ms before playback starts>\n", s_model.n_styles - 1, s_ndemo - 1);
     }
 }
 
@@ -756,7 +856,8 @@ void app_main(void)
     const char *hot_where = "internal SRAM";
     printf("internal SRAM before the hot arena: largest free block %u KB, free %u KB\n", (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) >> 10),
            (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) >> 10));
-    if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) > hb + 24 * 1024)
+    // the arena needs one block of its size; what is left must still hold the task stacks, the 16 KB of staging tiles and the I2S slice
+    if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) >= hb + 4 * 1024 && heap_caps_get_free_size(MALLOC_CAP_INTERNAL) >= hb + 56 * 1024)
         hot = heap_caps_aligned_alloc(16, hb, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!hot) { hot = heap_caps_aligned_alloc(16, hb, MALLOC_CAP_SPIRAM); hot_where = "PSRAM (internal SRAM too small)"; }
     void *bulk = heap_caps_aligned_alloc(16, bb, MALLOC_CAP_SPIRAM);

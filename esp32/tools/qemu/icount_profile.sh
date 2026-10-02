@@ -3,10 +3,15 @@
 # 40 MHz there, so 1 tick = 25 instructions, calibrated at run time by ICPROF_CALIB). Builds the profiling firmware
 # (build_icprof: -D ITOFS_ICPROF=1, QEMU config) and runs its `icprof` command: the self-test sentence and the 3 demo
 # sentences on 1 core, on 2 cores with the GEMM halves serialised (exact per-core split) and on 2 cores in parallel.
-#   esp32/tools/qemu/icount_profile.sh [weights.bin]        (log in esp32/logs/qemu_icprof.log)
+#   esp32/tools/qemu/icount_profile.sh /absolute/path/weights.bin        (log in esp32/logs/qemu_icprof.log)
 #   python3 esp32/tools/icount_estimate.py esp32/logs/qemu_icprof.log      -> estimated TTFA / RTF (not measured on silicon)
+# Start-up schedules and gapless start delay: ICPROF_CMD="icprof 2" esp32/tools/qemu/icount_profile.sh /abs/weights.bin   (every chunk of the 4 sentences
+# is traced call by call), then  python3 esp32/tools/sched_eval.py esp32/logs/qemu_icprof.log <sentence>   (needs HOST_PY=<python with numpy> and
+# QEMU_BIN=<qemu-system-xtensa> in the environment).
 set -e
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+export HOST_PY=${HOST_PY:-$(command -v python3)}            # the host Python (numpy), before ESP-IDF's environment replaces python3
+[ -n "$1" ] && set -- "$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"     # the script changes directory: make the weights path absolute
 IDF=${IDF_PATH:-$HOME/esp/esp-idf}
 . "$IDF/export.sh" > /dev/null
 cd "$ROOT/esp32/firmware"

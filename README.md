@@ -10,12 +10,13 @@ before it does not grow with the sentence length. The voice is distilled from a 
 [Lokutor](https://lokutor.com), the makers of [Oído](https://github.com/lokutor-ai/oido) (speech recognition on the
 same chip).
 
-> **Status (2 October 2026).** The on-chip engine is verified on a laptop and in Espressif's QEMU emulator: the
+> **Status (3 October 2026).** The on-chip engine is verified on a laptop and in Espressif's QEMU emulator: the
 > firmware's audio is bit-identical to the host build of the engine, and every sample in [`samples/`](samples) is that
 > engine's exact output. **Nothing has run on a physical board yet.** Time to first audio and real-time factor are
 > **estimated** from exact instruction counts (QEMU) and an assumed PSRAM bandwidth. **Real-time playback is not established on silicon:**
-> the optimistic and central estimates are faster than real time (RTF 0.53–0.55 and 0.77–0.79) and the pessimistic one is still slower
-> (1.18–1.22). An earlier version of this page claimed 130–210 ms and
+> the optimistic and central estimates are faster than real time (RTF 0.53–0.54 and 0.77–0.80) and the pessimistic one is still slower
+> (1.18–1.27). The engine now starts with a 125 ms first chunk and a short ramp so that speech is gapless from the first chunk
+> (estimated first sound 137–143 / 200–207 / 311–318 ms, optimistic / central / pessimistic). An earlier version of this page claimed 130–210 ms and
 > real time at 0.5–1 GOPS; that was too optimistic (see [`esp32/README.md`](esp32/README.md) §4). The firmware measures the real numbers at boot;
 > we will publish them here after we run it on boards.
 
@@ -100,11 +101,11 @@ UTMOS cannot hear intonation, so treat it as a check, not a verdict. On 60 held-
 | Chip weights | **4.89 MB** (`ito_female_esp32s3.bin`): int8 mel head and vocoder; int16 pitch path |
 | Flash | 296 KB app + 4.89 MB weights; about 9 MB of the 14 MB weights partition stays free |
 | PSRAM / SRAM | peak 6.5 of 8 MB PSRAM, 346 of 383 KB internal SRAM (QEMU; about 358 KB on the chip with the I2S buffers) |
-| Work before the first audio (25 ms first chunk) | **17.4–17.9 M instructions and 4.8 MB of weights read from PSRAM, for any sentence length** (exact counts from QEMU) |
-| Work per second of audio | about 99 M instructions on the dual-core critical path, 17 MB of weights read from PSRAM (24-frame chunks; exact counts; the conversion to time is an estimate) |
-| Time to first audio | **estimated, not measured:** 94–97 ms optimistic, **145–148 ms central**, 237–240 ms pessimistic (the first public version of the engine: 338 / 463 / 672 ms) |
-| Real-time factor | **estimated, not measured:** 0.53–0.55 optimistic, **0.77–0.79 central**, 1.18–1.22 pessimistic. Below 1 is faster than real time, so the pessimistic case (40 MB/s PSRAM, nothing overlapped, CPI 1.6) is **still slower than real time** |
-| Start delay for gapless speech | **estimated:** about 220 ms optimistic, **about 340 ms central** (342–346), 850 ms or more pessimistic. "Time to first audio" is when the first 25 ms of sound can start; the next chunk is 300 ms of audio and takes longer to compute, so to play without a gap you must wait about this long before starting the DAC |
+| Work before the first audio (125 ms first chunk) | **25.3–26.3 M instructions and 5.1 MB of weights read from PSRAM, for any sentence length** (exact counts from QEMU; 17.2–17.8 M and 4.5 MB for a 25 ms first chunk) |
+| Work per second of audio | about 98 M instructions on the dual-core critical path, 15 MB of weights read from PSRAM (24-frame chunks; exact counts; the conversion to time is an estimate) |
+| Time to first audio | **estimated, not measured:** 137–143 ms optimistic, **200–207 ms central**, 311–318 ms pessimistic. The first chunk is 125 ms of audio and the chunks behind it are sized so that playback can start with it without a gap (the version of 2 October made 25 ms of sound after 145 ms and then fell silent for about 200 ms; `first 2` still does that; the first public version of the engine: 338 / 463 / 672 ms) |
+| Real-time factor | **estimated, not measured:** 0.53–0.54 optimistic, **0.77–0.80 central** (0.76 for long sentences), 1.18–1.27 pessimistic (1.14 for long sentences). Below 1 is faster than real time, so the pessimistic case (40 MB/s PSRAM, nothing overlapped, CPI 1.6) is **still slower than real time** |
+| Start delay for gapless speech | **estimated:** optimistic = the time to first audio (137–143 ms), **central 215–240 ms**, pessimistic 880 ms or more (the real-time factor is above 1 there, so the delay grows with the sentence: 0.9 s for a 25-token sentence, 2.2 s for 175 tokens). Before 3 October: about 220 ms / 342–346 ms / 850–2700 ms. `delay <ms>` on the serial console holds playback for a chosen time |
 | On a laptop | RTF ≈ 0.01 on an Apple M4 Max CPU, for both the PyTorch model (whole utterance) and the C engine |
 
 All of this is **estimated from exact instruction counts, not measured on silicon.** The open question is the effective PSRAM

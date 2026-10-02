@@ -73,6 +73,27 @@ static void tap_fn(void *u, int what, int t, const float *row, int w)
     else if (what == ITOFS_TAP_F0) tp->f0[t] = row[0];
 }
 
+// weight-prefetch hint check: the hints (itofs_qnext_fn) must name exactly the GEMM calls that follow, in order. Models the firmware's
+// kernel: a FIFO of hints (2 deep), the head is consumed by the matching call; a mismatch flushes it. hits = hinted calls that
+// matched, bad = calls that did not match a pending hint, free = calls made with nothing pending (no hint known), dups = repeats
+typedef struct { const int8_t *w; int in, out, rows; } hint_t;
+typedef struct { hint_t q[2]; int n; long hits, bad, freec, dups, over; } hintchk_t;
+static void hint_fn(const int8_t *w, int in, int out, int rows, void *u)
+{
+    hintchk_t *h = u;
+    if (h->n && h->q[h->n - 1].w == w && h->q[h->n - 1].in == in && h->q[h->n - 1].out == out && h->q[h->n - 1].rows == rows) { h->dups++; return; }
+    if (h->n == 2) { h->over++; return; }
+    h->q[h->n].w = w; h->q[h->n].in = in; h->q[h->n].out = out; h->q[h->n].rows = rows; h->n++;
+}
+static void hint_gemm(const int8_t *x, int rows, int ldx, int in, const int8_t *w, int out, int32_t *acc, void *u)
+{
+    hintchk_t *h = u;
+    if (h->n == 0) h->freec++;
+    else if (h->q[0].w == w && h->q[0].in == in && h->q[0].out == out && h->q[0].rows == rows) { h->hits++; h->q[0] = h->q[1]; h->n--; }
+    else { h->bad++; h->n = 0; }
+    itofs_qgemm_ref(x, rows, ldx, in, w, out, acc, NULL);
+}
+
 static int g_act = 8;
 static itofs_ctx_t *make_ctx_w(const itofs_model_t *m, int max_tokens, int chunk, int whole)
 {
@@ -100,6 +121,24 @@ static long synth(itofs_ctx_t *c, const int *tok, int n, int style, uint32_t see
         if (got == 0) break;
         pos += got;
     }
+    return pos;
+}
+
+// production-style start-up schedule: chunk k has frames[k] frames (the last entry repeats), text step tsteps[k] tokens (0 = engine default; the last entry repeats)
+static long synth_sched(itofs_ctx_t *c, const int *tok, int n, int style, uint32_t seed, float *out, long cap, const int *frames, int nf, const int *tsteps, int nt)
+{
+    int T = itofs_begin(c, tok, n, style, seed);
+    if (T < 0) { fprintf(stderr, "begin: %s\n", itofs_strerror(T)); exit(1); }
+    long pos = 0;
+    for (int k = 0;; k++) {
+        c->text_step = tsteps[k < nt ? k : nt - 1];
+        const long want = (long)frames[k < nf ? k : nf - 1] * c->m->hop;
+        int got = itofs_next_chunk_f32(c, out + pos, (int)(want < cap - pos ? want : cap - pos));
+        if (got < 0) { fprintf(stderr, "next_chunk: %s\n", itofs_strerror(got)); exit(1); }
+        if (got == 0) break;
+        pos += got;
+    }
+    c->text_step = 0;
     return pos;
 }
 
@@ -282,6 +321,52 @@ int main(int argc, char **argv)
                 const int same_f = nsx == nw && !memcmp(y, y2, (size_t)nw * 4);
                 printf(" %d:%s%s%s", chunks[ci], same ? "identical" : "DIFF", same_p ? "" : "(row-parallel DIFF)", same_f ? "" : "(2-frame first chunk DIFF)");
                 if (!same || !same_p || !same_f) fails++;
+            }
+            printf("\n");
+        }
+
+        // ---- H: weight-prefetch hints name the next GEMM calls exactly, and change no bit
+        {
+            const int chunks_h[] = {2, 8, 24};
+            for (int ci = 0; ci < 3; ci++) {
+                itofs_ctx_t *ch = make_ctx(&m, 400, chunks_h[ci]);
+                hintchk_t hk; memset(&hk, 0, sizeof hk);
+                ch->qgemm = hint_gemm; ch->qgemm_user = &hk; ch->qnext = hint_fn;
+                ch->par = host_par;
+                g_first = 2;
+                long nsx = synth(ch, tok, n, style, 12345u, y2, cap);
+                g_first = 0;
+                itofs_ctx_t *cr = make_ctx(&m, 400, chunks_h[ci]);
+                g_first = 2;
+                long nsr = synth(cr, tok, n, style, 12345u, y, cap);
+                g_first = 0;
+                const int same = nsx == nsr && !memcmp(y, y2, (size_t)nsr * 4);
+                printf("H prefetch hints, chunk %d (2-frame first): %ld GEMM calls hinted, %ld unhinted, %ld mismatched, %ld repeated hints, %ld dropped; audio %s\n",
+                       chunks_h[ci], hk.hits, hk.freec, hk.bad, hk.dups, hk.over, same ? "identical" : "DIFF");
+                if (!same || hk.bad) fails++;
+            }
+        }
+
+        // ---- G: the shipped start-up schedule (10, 11, 12, 14, 18, then 24 frames; 8-token text steps) and other text steps change no bit
+        {
+            const int fr_prod[] = {10, 11, 12, 14, 18, 24}, ts_prod[] = {8, 8, 8, 8, 8, 8, 8, 8, 0};
+            itofs_ctx_t *cp = make_ctx(&m, 400, 24);
+            cp->ext_noise = NULL;
+            long nsp = synth_sched(cp, tok, n, style, 12345u, y2, cap, fr_prod, 6, ts_prod, 9);
+            itofs_ctx_t *cr2 = make_ctx(&m, 400, 24);
+            long nsr2 = synth(cr2, tok, n, style, 12345u, y, cap);
+            const int same = nsp == nsr2 && !memcmp(y, y2, (size_t)nsr2 * 4);
+            printf("G shipped start-up schedule (10,11,12,14,18,24 frames, 8-token text steps): audio %s;", same ? "identical" : "DIFF");
+            if (!same) fails++;
+            const int steps[] = {1, 3, 8, 13, 24, 40};
+            const int one[] = {24};
+            for (int si = 0; si < 6; si++) {
+                const int tsv[] = {steps[si]};
+                itofs_ctx_t *cq = make_ctx(&m, 400, 24);
+                long nq2 = synth_sched(cq, tok, n, style, 12345u, y2, cap, one, 1, tsv, 1);
+                const int sm = nq2 == nsr2 && !memcmp(y, y2, (size_t)nsr2 * 4);
+                printf(" text step %d:%s", steps[si], sm ? "identical" : "DIFF");
+                if (!sm) fails++;
             }
             printf("\n");
         }

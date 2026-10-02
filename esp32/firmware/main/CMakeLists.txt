@@ -7,7 +7,7 @@ target_compile_options(${COMPONENT_LIB} PRIVATE -O2 -ffp-contract=off -Wno-unuse
 # them cuts instructions without touching the order of any floating-point operation
 target_compile_options(${COMPONENT_LIB} PRIVATE -funroll-loops)
 if(ITOFS_QEMU)
-  target_compile_definitions(${COMPONENT_LIB} PRIVATE ITOFS_QEMU=1)
+  target_compile_definitions(${COMPONENT_LIB} PRIVATE ITOFS_QEMU=1 ITOFS_EMU_DMA=1)
 endif()
 if(ITOFS_EXTRA_DEFS)      # e.g. -D ITOFS_EXTRA_DEFS="STEADY_FRAMES=16;WIDE_ROWS=12": experiments with the chunk size / wide-layer batch
   target_compile_definitions(${COMPONENT_LIB} PRIVATE ${ITOFS_EXTRA_DEFS})

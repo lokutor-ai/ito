@@ -39,7 +39,7 @@ extern "C" {
 #define ITOFS_MAX_LAYERS 8     // text / duration / prosody conv layers
 #define ITOFS_MAX_BLOCKS 16    // decoder ConvNeXt blocks
 
-typedef struct {               // int8 or int16 conv / linear, tap-major weights [K][out][in]
+typedef struct itofs_qlin_s {  // int8 or int16 conv / linear, tap-major weights [K][out][in]
     const int8_t *w;           // int8 weights, or the high plane of int16 weights
     const int8_t *w_lo;        // NULL for int8; low plane of int16 weights (q16 = 256 * w + w_lo, |q16| <= 32639)
     const float *sw;           // [out] per-output-channel scale
@@ -114,6 +114,10 @@ int itofs_blob_find(const void *blob, size_t size, const char *name, const void 
 // alignment; acc rows stride `out`), exact int32.
 typedef void (*itofs_qgemm_fn)(const int8_t *x, int rows, int ldx, int in, const int8_t *w, int out, int32_t *acc, void *user);
 void itofs_qgemm_ref(const int8_t *x, int rows, int ldx, int in, const int8_t *w, int out, int32_t *acc, void *user);
+// Optional weight-prefetch hint (never changes a result): called with the weights / width / output channels / rows of a GEMM call that
+// WILL follow, before the current one is made, so a kernel with a DMA from slow memory can start loading its first tiles during the
+// float work in between. A hint that does not match the next itofs_qgemm_fn call must be harmless (the kernel drops it).
+typedef void (*itofs_qnext_fn)(const int8_t *w, int in, int out, int rows, void *user);
 
 // Debug taps: called with every frame of an intermediate.
 typedef void (*itofs_tap_fn)(void *user, int what, int t, const float *row, int width);
@@ -149,6 +153,9 @@ typedef struct {
     const itofs_model_t *m;
     itofs_limits_t lim;
     itofs_qgemm_fn qgemm; void *qgemm_user;
+    itofs_qnext_fn qnext;                          // NULL: no hints
+    const struct itofs_qlin_s *pf_L; int pf_n;     // hint state: the dense layer (and row count) that follows the qlin_run about to be made
+    const struct itofs_qlin_s *nx_L; int nx_n;     // the dense layer (and rows) the next stage run starts with
     itofs_tap_fn tap; void *tap_user;
     itofs_par_fn par; void *par_user;              // NULL: everything on the calling core (taps disable it)
     // ---- test hooks (NULL / 0 in normal use) ----

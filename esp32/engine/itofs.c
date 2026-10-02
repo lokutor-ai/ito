@@ -15,11 +15,14 @@
                                 // The output-channel tile shrinks to fit the same accumulator scratch: bit-identical results.
 #define FIRST_TEXT_STEP 8       // tokens the text side adds per step before the first chunk (0 = chunk_frames after it)
 #define MAX_FACTORS 32
+#ifndef FILL_ROWS
 #define FILL_ROWS 2             // extra rows in the frame-batch scratch, so a 2-frame first chunk's pipeline fill runs every
-                                // stage in one pass over its weights (~16 KB of internal SRAM)
+                                // stage in one pass over its weights (the arena is the same size with 0: the wide layers set the size of y0 now;
+                                // without them the first chunk costs 2-3 % more instructions)
+#endif
 #define MAX_FILL 64             // most rows a stage computes in one run (first-chunk pipeline fill; scratch permitting)
 #ifndef WIDE_ROWS
-#define WIDE_ROWS 8             // rows the two wide (n_fft + 2 = 1202 column) layers, harm_proj and the output head, process per weight
+#define WIDE_ROWS 12            // rows the two wide (n_fft + 2 = 1202 column) layers, harm_proj and the output head, process per weight
                                 // pass: their float rows are 4.8 KB each, so they are batched less than the rest of the decoder
 #endif
 #define ACC_BYTES (24 * 1024)   // int32 accumulator scratch of one GEMM call; the output-channel tile shrinks to fit (bit-identical)
@@ -1104,6 +1107,7 @@ static void qlin_run(itofs_ctx_t *c, const itofs_qlin_t *L, const float *X, int 
 {
     PROF_T(pl0);
     qlin_run_(c, L, X, ldx, n, Y, ldy, grp);
+    c->pf_L = NULL;                       // a following-layer hint applies to this call only
     PROF_ADD(ITOFS_PROF_QLIN, pl0);
 }
 typedef struct { itofs_ctx_t *c; const float *X; int ldx, in, ldq, P; } quant_arg_t;
@@ -1208,11 +1212,43 @@ static void bias_body(void *a_, int t0, int t1, int core)
     }
 }
 
+// output channels per GEMM call of layer L on n rows: as many as the accumulator scratch holds for n * P rows x WP planes (<= ACC_TILE).
+// Each output's arithmetic (taps accumulated in order) does not depend on the tiling.
+static inline int qlin_tile(const itofs_ctx_t *c, const itofs_qlin_t *L, int n)
+{
+    const int WP = L->w_lo ? 2 : 1, P = (L->w_lo || L->act16) ? 2 : c->act_planes;
+    int tile = (int)(c->acc_bytes / ((size_t)n * P * WP * 4)) & ~7;
+    return imin(c->acc_tile, imax(8, tile));
+}
+// the ci-th GEMM call of qlin_run_ (order: output tile, tap, weight plane): its weights and channel count
+static inline void qlin_call(const itofs_qlin_t *L, int tile, int ci, const int8_t **w, int *ot)
+{
+    const int WP = L->w_lo ? 2 : 1, K = L->K, out = L->out;
+    const int p = ci % WP, k = (ci / WP) % K, o0 = (ci / (WP * K)) * tile;
+    *w = (p ? L->w_lo : L->w) + ((size_t)k * out + o0) * L->in;
+    *ot = imin(tile, out - o0);
+}
+static inline int qP_(const itofs_ctx_t *c, const itofs_qlin_t *L) { return (L->w_lo || L->act16) ? 2 : c->act_planes; }
+static inline int qlin_ncalls(const itofs_qlin_t *L, int tile) { return ((L->out + tile - 1) / tile) * L->K * (L->w_lo ? 2 : 1); }
+// hint: the GEMM call `ci` of L (for ci past the end: the first call of the layer queued in c->pf_L, if any)
+static void qlin_hint(itofs_ctx_t *c, const itofs_qlin_t *L, int tile, int ci, int n)
+{
+    const int8_t *w; int ot;
+    if (ci < qlin_ncalls(L, tile)) { qlin_call(L, tile, ci, &w, &ot); c->qnext(w, L->in, ot, n * qP_(c, L), c->qgemm_user); }
+    else if (c->pf_L && c->pf_n > 0) {
+        const itofs_qlin_t *N = c->pf_L;
+        qlin_call(N, qlin_tile(c, N, c->pf_n), 0, &w, &ot);
+        c->qnext(w, N->in, ot, c->pf_n * qP_(c, N), c->qgemm_user);
+    }
+}
+
 static void qlin_run_(itofs_ctx_t *c, const itofs_qlin_t *L, const float *X, int ldx, int n, float *Y, int ldy, int grp)
 {
     const int in = L->in, out = L->out, K = L->K, ldq = pad16(in);
     const int WP = L->w_lo ? 2 : 1, P = (L->w_lo || L->act16) ? 2 : c->act_planes;
     const int rows = n + K - 1;
+    const int tile = qlin_tile(c, L, n);
+    if (c->qnext) qlin_hint(c, L, tile, 0, n);          // the first call's weights load while the activations are quantised
     PROF_T(pq0);
     quant_arg_t qa = { c, X, ldx, in, ldq, P };
     par_for(c, quant_body, &qa, rows, (long)rows * in);
@@ -1221,10 +1257,7 @@ static void qlin_run_(itofs_ctx_t *c, const itofs_qlin_t *L, const float *X, int
     bias_arg_t ba = { L, Y, ldy, 1 };
     if (!fast) for (int t = 0; t < n; t++) memset(Y + (size_t)t * ldy, 0, (size_t)out * 4);
     const int exact32 = in <= 1024;     // |128*acc_hi + acc_lo| <= 16256*127*in < 2^31
-    // output channels per GEMM call: as many as the accumulator scratch holds for n * P rows x WP planes (<= ACC_TILE).
-    // Each output's arithmetic (taps accumulated in order) does not depend on the tiling.
-    int tile = (int)(c->acc_bytes / ((size_t)n * P * WP * 4)) & ~7;
-    tile = imin(c->acc_tile, imax(8, tile));
+    int ci = 0;
     for (int o0 = 0; o0 < out; o0 += tile) {
         const int ot = imin(tile, out - o0);
         int32_t *a0 = c->s_acc, *a1 = c->s_acc + (size_t)n * P * ot;
@@ -1232,8 +1265,13 @@ static void qlin_run_(itofs_ctx_t *c, const itofs_qlin_t *L, const float *X, int
             const int8_t *xq = c->s_q8 + (size_t)k * P * ldq;
             const size_t woff = ((size_t)k * out + o0) * in;
             PROF_T(pg0);
+            if (c->qnext) qlin_hint(c, L, tile, ci + 1, n);        // the call after this one (WP == 2: the low plane)
             c->qgemm(xq, n * P, ldq, in, L->w + woff, ot, a0, c->qgemm_user);
-            if (WP == 2) c->qgemm(xq, n * P, ldq, in, L->w_lo + woff, ot, a1, c->qgemm_user);
+            if (WP == 2) {
+                if (c->qnext) qlin_hint(c, L, tile, ci + 2, n);
+                c->qgemm(xq, n * P, ldq, in, L->w_lo + woff, ot, a1, c->qgemm_user);
+            }
+            ci += WP;
             PROF_ADD(ITOFS_PROF_GEMM, pg0);
             resc_arg_t ra = { c, Y, ldy, o0, ot, k, WP, P, exact32, a0, a1, L, k == 0, k == K - 1 };
             PROF_T(pr0);
@@ -1844,7 +1882,23 @@ static void blk_dw_body(void *a_, int t0, int t1, int core)         // depthwise
     const int W = A->W, K = A->K;
     for (int t = t0; t < t1; t++) {
         float *y = c->s_y0 + (size_t)t * W;
-        for (int ch = 0; ch < W; ch++) {
+        int ch = 0;
+        if (K == 7) {
+            // the 7-tap kernel, four channels at a time: the taps are unrolled and the four channels share the row pointers (immediate
+            // offsets), so a tap costs 4 loads + 4 multiplies + 4 adds instead of 4 x (loads + loop + address arithmetic). Per channel the
+            // products are accumulated in the same order from 0.f, so the result is bit-identical to the generic loop below.
+            const float *x0 = c->s_g0 + (size_t)t * W, *dwb = A->bk->dw_b;
+            for (; ch + 4 <= W; ch += 4) {
+                const float *w = A->bk->dw_w + (size_t)ch * 7;
+                float a0 = 0.f, a1 = 0.f, a2 = 0.f, a3 = 0.f;
+                const float *x = x0 + ch;
+#define DWTAP(k_) do { a0 += x[0] * w[(k_)]; a1 += x[1] * w[7 + (k_)]; a2 += x[2] * w[14 + (k_)]; a3 += x[3] * w[21 + (k_)]; } while (0)
+                DWTAP(0); x += W; DWTAP(1); x += W; DWTAP(2); x += W; DWTAP(3); x += W; DWTAP(4); x += W; DWTAP(5); x += W; DWTAP(6);
+#undef DWTAP
+                y[ch] = a0 + dwb[ch]; y[ch + 1] = a1 + dwb[ch + 1]; y[ch + 2] = a2 + dwb[ch + 2]; y[ch + 3] = a3 + dwb[ch + 3];
+            }
+        }
+        for (; ch < W; ch++) {
             float a = 0.f;
             const float *w = A->bk->dw_w + (size_t)ch * K;
             for (int k = 0; k < K; k++) a += c->s_g0[(size_t)(t + k) * W + ch] * w[k];
@@ -1967,6 +2021,7 @@ static void head_ln_body(void *a_, int i0, int i1, int core)      // final Layer
     for (int t = i0; t < i1; t++) layernorm_row(c->s_g0 + (size_t)t * A->D, A->D, m->n1_g, m->n1_b, m->eps_dec, c->s_g0 + (size_t)t * A->D);
 }
 
+#define PF_NEXT(c_) do { (c_)->pf_L = (c_)->nx_L; (c_)->pf_n = (c_)->nx_n; } while (0)   // hint: the dense layer the next stage run starts with
 static void run_stage_(itofs_ctx_t *c, int s, int t0, int t1);
 static void run_stage(itofs_ctx_t *c, int s, int t0, int t1)
 {
@@ -1988,6 +2043,7 @@ static void run_stage_(itofs_ctx_t *c, int s, int t0, int t1)
     switch (S->kind) {
     case SK_PIN: {
         for (int t = t0; t < t1; t++) hf_row(c, t, c->s_g0 + (size_t)(t - t0) * m->hf_dim);
+        PF_NEXT(c);
         qlin_run(c, &m->pros_in, c->s_g0, m->hf_dim, n, c->s_y0, W, ITOFS_G_PROS);
         put_rows(c, s, t0, n, c->s_y0, W);
         break;
@@ -1997,6 +2053,7 @@ static void run_stage_(itofs_ctx_t *c, int s, int t0, int t1)
         const itofs_convln_t *L = mel ? &m->mel[S->idx] : &m->pros[S->idx];
         const int p = S->prod[0], lp = S->L[0];
         gather(c, p, t0 - lp, t1 + S->R[0], 0, W, c->s_g0, W);
+        PF_NEXT(c);
         qlin_run(c, &L->conv, c->s_g0, W, n, c->s_y0, W, mel ? ITOFS_G_MEL : ITOFS_G_PROS);
         const float *g1 = mel ? c->mfilm_g1[S->idx] : c->film_g1[S->idx], *bb = mel ? c->mfilm_b[S->idx] : c->film_b[S->idx];
         cln_arg_t a = { c, L, c->s_y0, c->s_g0, W, lp, g1, bb, NULL, s, t0, 1, m->eps_text };
@@ -2053,6 +2110,7 @@ static void run_stage_(itofs_ctx_t *c, int s, int t0, int t1)
         const int N = m->n_fft;
         st_arg_t a = { c, s, t0 };
         { PROF_T(pf0); par_for(c, hft_body, &a, n, (long)n * N * 8); PROF_ADD(ITOFS_PROF_P0 + 8, pf0); }
+        PF_NEXT(c);
         qlin_run(c, &m->harm_proj, c->s_y0, N + 2, n, c->s_y0, W, ITOFS_G_HARM);     // the wide input is dead once quantised: the output reuses y0
         put_rows(c, s, t0, n, c->s_y0, W);
         break;
@@ -2065,6 +2123,7 @@ static void run_stage_(itofs_ctx_t *c, int s, int t0, int t1)
             const float *cr = ring_row(c, pc, t);
             d[HD] = cr[0]; d[HD + 1] = cr[1]; d[HD + 2] = cr[2];
         }
+        PF_NEXT(c);
         qlin_run(c, &m->mel_in, c->s_g0, DI, n, c->s_y0, W, ITOFS_G_MEL);
         put_rows(c, s, t0, n, c->s_y0, W);
         break;
@@ -2072,6 +2131,7 @@ static void run_stage_(itofs_ctx_t *c, int s, int t0, int t1)
     case SK_MOUT: {
         const int pm = S->prod[0], pc = S->prod[1], MD = m->mel_dim, NM = m->n_mels;
         gather(c, pm, t0, t1, 0, MD, c->s_g0, MD);
+        PF_NEXT(c);
         qlin_run(c, &m->mel_out, c->s_g0, MD, n, c->s_y0, NM, ITOFS_G_MEL);
         for (int t = 0; t < n; t++) {
             float *r = ring_row(c, s, t0 + t);
@@ -2093,6 +2153,7 @@ static void run_stage_(itofs_ctx_t *c, int s, int t0, int t1)
             const float *cr = ring_row(c, pc, t);
             d[HD] = cr[0]; d[HD + 1] = cr[1]; d[HD + 2] = cr[2];
         }
+        PF_NEXT(c);
         qlin_run(c, &m->dec_embed, c->s_g0, DI, n, c->s_y0, W, ITOFS_G_EMBED);
         { PROF_T(pl0); emb_arg_t ea = { c, s, ph, t0, W }; par_for(c, emb_ln_body, &ea, n, (long)n * W * 8); PROF_ADD(ITOFS_PROF_P0 + 6, pl0); }
         put_rows(c, s, t0, n, c->s_y0, W);
@@ -2105,8 +2166,10 @@ static void run_stage_(itofs_ctx_t *c, int s, int t0, int t1)
         blk_arg_t a = { c, bk, W, K, DI, lp };
         { PROF_T(pp); par_for(c, blk_dw_body, &a, n, (long)n * W * K); PROF_ADD(ITOFS_PROF_P0 + 0, pp); }
         c->macs_f32[ITOFS_G_BLOCKS] += (double)n * W * K;
+        c->pf_L = &bk->pw2; c->pf_n = n;
         qlin_run(c, &bk->pw1, c->s_y0, W, n, c->s_y1, DI, ITOFS_G_BLOCKS);
         { PROF_T(pp); par_for(c, blk_gelu_body, &a, n, (long)n * DI * 8); PROF_ADD(ITOFS_PROF_P0 + 1, pp); }
+        PF_NEXT(c);
         qlin_run(c, &bk->pw2, c->s_y1, DI, n, c->s_y0, W, ITOFS_G_BLOCKS);    // y0 (the dw output) is dead once pw1 has quantised it
         { PROF_T(pp); par_for(c, blk_res_body, &a, n, (long)n * W); PROF_ADD(ITOFS_PROF_P0 + 2, pp); }
         put_rows(c, s, t0, n, c->s_y0, W);
@@ -2116,6 +2179,7 @@ static void run_stage_(itofs_ctx_t *c, int s, int t0, int t1)
         const int D = m->dec_dim, N = m->n_fft, NB = N / 2 + 1;
         gather(c, S->prod[0], t0, t1, 0, D, c->s_g0, D);
         { PROF_T(pl0); head_ln_arg_t ha = { c, D }; par_for(c, head_ln_body, &ha, n, (long)n * D * 8); PROF_ADD(ITOFS_PROF_P0 + 6, pl0); }
+        PF_NEXT(c);
         qlin_run(c, &m->dec_out, c->s_g0, D, n, c->s_y0, N + 2, ITOFS_G_HEAD);
         st_arg_t a = { c, s, t0 };
         PROF_T(ph0);
@@ -2199,6 +2263,26 @@ static int set_bmax(itofs_ctx_t *c)
     return E_OK;
 }
 
+#define MAX_PLAN 256
+// the dense layer a stage run starts with (NULL: no GEMM in the stage)
+static const itofs_qlin_t *stage_first_q(const itofs_ctx_t *c, int s)
+{
+    const itofs_model_t *m = c->m;
+    const itofs_stage_t *S = &c->st[s];
+    switch (S->kind) {
+    case SK_PIN: return &m->pros_in;
+    case SK_PROS: return &m->pros[S->idx].conv;
+    case SK_MEL: return &m->mel[S->idx].conv;
+    case SK_MIN: return &m->mel_in;
+    case SK_MOUT: return &m->mel_out;
+    case SK_HFT: return &m->harm_proj;
+    case SK_EMB: return &m->dec_embed;
+    case SK_BLK: return &m->blk[S->idx].pw1;
+    case SK_HEAD: return &m->dec_out;
+    default: return NULL;
+    }
+}
+
 // compute every stage as far as audio frames [0, F) need
 static void advance(itofs_ctx_t *c, int F)
 {
@@ -2219,6 +2303,28 @@ static void advance(itofs_ctx_t *c, int F)
         if (c->start[c->n_done] >= hf_need) break;
         text_ensure(c, hf_need);    // may finish the text side (then T is known and the needs are recomputed)
     }
+    // the runs of this call in order, so that each can hint the dense layer the next run starts with (the weights of its first GEMM call
+    // are then fetched during the float work in between)
+    typedef struct { int s, t0, t1; } run_t;
+    run_t runs[MAX_PLAN];
+    int nr = 0;
+    if (c->qnext) {
+        for (int s = 0; s < S && nr < MAX_PLAN; s++) {
+            int d = c->st[s].done;
+            while (d < need[s] && nr < MAX_PLAN) { const int t1 = imin(need[s], d + c->st[s].bmax); runs[nr].s = s; runs[nr].t0 = d; runs[nr].t1 = t1; nr++; d = t1; }
+        }
+    }
+    for (int r = 0; r < nr; r++) {
+        itofs_stage_t *st = &c->st[runs[r].s];
+        c->nx_L = NULL; c->nx_n = 0;
+        for (int q = r + 1; q < nr && !c->nx_L; q++) {
+            c->nx_L = stage_first_q(c, runs[q].s);
+            c->nx_n = runs[q].t1 - runs[q].t0;
+        }
+        run_stage(c, runs[r].s, runs[r].t0, runs[r].t1);
+        st->done = runs[r].t1;
+    }
+    c->nx_L = NULL; c->nx_n = 0;
     for (int s = 0; s < S; s++) {
         itofs_stage_t *st = &c->st[s];
         while (st->done < need[s]) {
