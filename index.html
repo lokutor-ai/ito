@@ -1,0 +1,139 @@
+<title>Ito</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+:root{--ink:#1d1d1f;--muted:#5f6368;--rule:#d9d9d9;--link:#1a56b0;--ground:#ffffff;color-scheme:light}
+body{background:var(--ground);color:var(--ink);font:17px/1.6 "Source Serif 4",Georgia,"Times New Roman",serif}
+.page{max-width:1000px;margin:0 auto;padding-inline:20px;padding-block:48px 72px}
+h1{font-size:30px;font-weight:600;line-height:1.25;text-align:center;margin:0 0 12px;text-wrap:balance}
+.authors{text-align:center;margin:0}
+.affil{text-align:center;color:var(--muted);font-size:15px;margin:2px 0 14px}
+.links{text-align:center;margin:0 0 36px}
+.links a{margin:0 8px}
+a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
+a:focus-visible{outline:2px solid var(--link);outline-offset:2px}
+h2{font-size:22px;font-weight:600;margin:40px 0 10px}
+h3{font-size:18px;font-weight:600;margin:28px 0 8px}
+p{margin:0 0 12px}
+.prose{max-width:720px;margin-inline:auto}
+.abstract{text-align:justify;hyphens:auto}
+.note{color:var(--muted);font-size:15px}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:15px}
+th,td{padding:8px 10px;vertical-align:middle;text-align:left}
+thead th{border-top:1.5px solid var(--ink);border-bottom:1px solid var(--ink);font-weight:600}
+tbody tr:last-child td{border-bottom:1.5px solid var(--ink)}
+.samples td{border-bottom:1px solid var(--rule)}
+.samples .txt{min-width:220px;max-width:300px}
+.samples audio{width:190px;height:34px}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.res td{border:0}
+.res tr.ours td{font-weight:600}
+.res tr.group td{padding-top:14px;font-style:italic;color:var(--muted)}
+caption{caption-side:bottom;text-align:left;color:var(--muted);font-size:14px;padding-top:8px}
+pre{background:#f6f6f4;padding:12px 14px;overflow-x:auto;font-size:13.5px;line-height:1.5}
+footer{margin-top:48px;color:var(--muted);font-size:14px;text-align:center}
+</style>
+<div class="page">
+<h1>Ito: Natural Streaming Text-to-Speech on a $5 Microcontroller</h1>
+<p class="authors">Daniel Varela</p>
+<p class="affil">Lokutor (Hashing Works, S.L.L.), Madrid</p>
+<p class="links"><a href="https://github.com/lokutor-ai/ito">Code</a> · <a href="https://huggingface.co/lokutor-ai/ito">Model</a> · <span class="note">Paper (coming soon)</span></p>
+<video controls preload="none" poster="demo_poster.jpg" style="display:block;width:100%;max-width:720px;margin:0 auto 36px"><source src="demo.mp4" type="video/mp4">Your browser cannot play this video: <a href="demo.mp4">download demo.mp4</a>.</video>
+
+<div class="prose">
+<h2>Abstract</h2>
+<p class="abstract">Ito is a 4.0 M-parameter neural text-to-speech model that runs entirely on an ESP32-S3, a 240 MHz dual-core microcontroller with no neural accelerator. A causal acoustic model predicts a mel spectrogram with bounded lookahead, and a small convolutional vocoder with a harmonic source turns it into a 24 kHz waveform, so audio streams out while the sentence is still being synthesized. The model runs in int8 on the chip's vector unit and takes 4.9 MB of flash. In a blind listening test it was rated 4.0 out of 5 against 2.0 for sanoTTS, the previous best open model for this chip, and on a 54-sentence benchmark its automatic naturalness score (UTMOS22 4.44) is within 0.03 of the 191 M-parameter model it was distilled from.</p>
+<p class="note">All Ito samples below are the exact output of the on-chip engine: the firmware running in Espressif's QEMU emulator produces bit-identical audio. Time to first audio and real-time factor are <strong>estimated</strong> from exact QEMU instruction counts and an assumed PSRAM bandwidth, not measured on silicon: about 200 ms to first audio in the central case (137 to 318 ms across the range), and a real-time factor of 0.77 to 0.80 centrally (0.53 to 1.27 across the range, so the pessimistic case is still slower than real time). The first chunk is 125 ms of audio and the chunks behind it are sized so that speech is gapless from the first chunk in the optimistic case; the central case needs about 220 to 240 ms before playback starts. <strong>Real-time playback is not yet established on silicon.</strong></p>
+</div>
+
+<h2>Samples</h2>
+<p>Eight sentences that none of the models saw in training. Ito runs on the microcontroller, in two voices (female and male); the other columns are references.</p>
+<div class="scroll">
+<table class="samples">
+<thead><tr><th>Text</th><th>Ito, female voice (ours, ESP32-S3)</th><th>Ito, male voice (ours, ESP32-S3)</th><th>sanoTTS amy</th><th>sanoTTS heart-nano</th><th>Teacher (StyleTTS 2, server)</th></tr></thead>
+<tbody>
+<tr><td class="txt">Hey, are you still coming over for dinner tonight, or should I save you a plate?</td><td><audio controls preload="none" src="audio/ito/01.mp3"></audio></td><td><audio controls preload="none" src="audio/ito_g/01.mp3"></audio></td><td><audio controls preload="none" src="audio/amy/01.mp3"></audio></td><td><audio controls preload="none" src="audio/heart/01.mp3"></audio></td><td><audio controls preload="none" src="audio/teacher/01.mp3"></audio></td></tr>
+<tr><td class="txt">Your package should arrive on Friday, October 9th, sometime before noon.</td><td><audio controls preload="none" src="audio/ito/02.mp3"></audio></td><td><audio controls preload="none" src="audio/ito_g/02.mp3"></audio></td><td><audio controls preload="none" src="audio/amy/02.mp3"></audio></td><td><audio controls preload="none" src="audio/heart/02.mp3"></audio></td><td><audio controls preload="none" src="audio/teacher/02.mp3"></audio></td></tr>
+<tr><td class="txt">When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company.</td><td><audio controls preload="none" src="audio/ito/03.mp3"></audio></td><td><audio controls preload="none" src="audio/ito_g/03.mp3"></audio></td><td><audio controls preload="none" src="audio/amy/03.mp3"></audio></td><td><audio controls preload="none" src="audio/heart/03.mp3"></audio></td><td><audio controls preload="none" src="audio/teacher/03.mp3"></audio></td></tr>
+<tr><td class="txt">The pharmacist recommended an anti-inflammatory, but honestly, I&#x27;d rather try physiotherapy first.</td><td><audio controls preload="none" src="audio/ito/04.mp3"></audio></td><td><audio controls preload="none" src="audio/ito_g/04.mp3"></audio></td><td><audio controls preload="none" src="audio/amy/04.mp3"></audio></td><td><audio controls preload="none" src="audio/heart/04.mp3"></audio></td><td><audio controls preload="none" src="audio/teacher/04.mp3"></audio></td></tr>
+<tr><td class="txt">Thanks so much for calling. I&#x27;ll check the schedule and get back to you first thing tomorrow morning.</td><td><audio controls preload="none" src="audio/ito/05.mp3"></audio></td><td><audio controls preload="none" src="audio/ito_g/05.mp3"></audio></td><td><audio controls preload="none" src="audio/amy/05.mp3"></audio></td><td><audio controls preload="none" src="audio/heart/05.mp3"></audio></td><td><audio controls preload="none" src="audio/teacher/05.mp3"></audio></td></tr>
+<tr><td class="txt">Could you grab some quinoa and Worcestershire sauce on your way home?</td><td><audio controls preload="none" src="audio/ito/06.mp3"></audio></td><td><audio controls preload="none" src="audio/ito_g/06.mp3"></audio></td><td><audio controls preload="none" src="audio/amy/06.mp3"></audio></td><td><audio controls preload="none" src="audio/heart/06.mp3"></audio></td><td><audio controls preload="none" src="audio/teacher/06.mp3"></audio></td></tr>
+<tr><td class="txt">It&#x27;s about 23 degrees outside, so you probably won&#x27;t need a jacket.</td><td><audio controls preload="none" src="audio/ito/07.mp3"></audio></td><td><audio controls preload="none" src="audio/ito_g/07.mp3"></audio></td><td><audio controls preload="none" src="audio/amy/07.mp3"></audio></td><td><audio controls preload="none" src="audio/heart/07.mp3"></audio></td><td><audio controls preload="none" src="audio/teacher/07.mp3"></audio></td></tr>
+<tr><td class="txt">I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up.</td><td><audio controls preload="none" src="audio/ito/08.mp3"></audio></td><td><audio controls preload="none" src="audio/ito_g/08.mp3"></audio></td><td><audio controls preload="none" src="audio/amy/08.mp3"></audio></td><td><audio controls preload="none" src="audio/heart/08.mp3"></audio></td><td><audio controls preload="none" src="audio/teacher/08.mp3"></audio></td></tr>
+</tbody>
+</table>
+</div>
+<p class="note">sanoTTS clips were generated with the released <a href="https://github.com/ampixa/sanoTTS">sanoTTS</a> package. The teacher is the public <a href="https://github.com/yl4579/StyleTTS2">StyleTTS 2</a> LibriTTS model in its female voice. All clips are loudness-matched.</p>
+
+<h2>Results</h2>
+<p>Automatic metrics for 17 systems on 54 fixed English prompts that none of them saw in training. Ito is scored on the chip engine's exact output. The full table, with 22 systems and confidence intervals, is in the repository.</p>
+<div class="scroll">
+<table class="res">
+<thead><tr><th>System</th><th class="num">Params</th><th>Runs on a microcontroller</th><th class="num">UTMOSv2</th><th class="num">UTMOS22</th><th class="num">DNSMOS</th><th class="num">WER %</th></tr></thead>
+<tbody>
+<tr class="group"><td colspan="7">Built for microcontrollers</td></tr>
+<tr class="ours"><td>Ito (ours)</td><td class="num">4.05 M</td><td>ESP32-S3 (emulated, bit-exact)</td><td class="num">3.15</td><td class="num">4.44</td><td class="num">3.39</td><td class="num">0.4</td></tr>
+<tr><td>Inflect Nano v2 (Owen Song)</td><td class="num">3.97 M</td><td>ESP32-P4, 3.5× slower than real time</td><td class="num">3.08</td><td class="num">4.41</td><td class="num">3.40</td><td class="num">1.1</td></tr>
+<tr><td>TinyTTS</td><td class="num">1.6 M</td><td>ESP32-S3, 22.9× slower than real time</td><td class="num">2.45</td><td class="num">3.66</td><td class="num">3.29</td><td class="num">6.8</td></tr>
+<tr><td>sanoTTS amy</td><td class="num">1.45 M</td><td>no<sup>a</sup></td><td class="num">2.80</td><td class="num">3.96</td><td class="num">3.18</td><td class="num">1.2</td></tr>
+<tr><td>sanoTTS heart-nano</td><td class="num">0.29 M</td><td>MCU-sized</td><td class="num">1.33</td><td class="num">2.17</td><td class="num">2.97</td><td class="num">1.7</td></tr>
+<tr><td>eSpeak NG (rule-based)</td><td class="num">—</td><td>community ports</td><td class="num">1.74</td><td class="num">2.14</td><td class="num">2.76</td><td class="num">0.3</td></tr>
+<tr class="group"><td colspan="7">Larger models (CPU or GPU)</td></tr>
+<tr><td>Inflect Micro v2 (Owen Song)</td><td class="num">9.36 M</td><td>no</td><td class="num">3.46</td><td class="num">4.41</td><td class="num">3.38</td><td class="num">1.0</td></tr>
+<tr><td>Kitten TTS nano</td><td class="num">14.0 M</td><td>no</td><td class="num">1.99</td><td class="num">3.93</td><td class="num">3.31</td><td class="num">1.1</td></tr>
+<tr><td>Piper amy low</td><td class="num">15.6 M</td><td>no</td><td class="num">3.42</td><td class="num">4.44</td><td class="num">3.28</td><td class="num">0.7</td></tr>
+<tr><td>Piper lessac medium</td><td class="num">15.7 M</td><td>no</td><td class="num">3.69</td><td class="num">4.28</td><td class="num">3.29</td><td class="num">0.7</td></tr>
+<tr><td>MeloTTS EN</td><td class="num">51.9 M</td><td>no</td><td class="num">3.03</td><td class="num">3.72</td><td class="num">3.01</td><td class="num">3.2</td></tr>
+<tr><td>Supertonic 2</td><td class="num">65 M</td><td>no</td><td class="num">3.62</td><td class="num">4.44</td><td class="num">3.35</td><td class="num">2.4</td></tr>
+<tr><td>Kokoro-82M</td><td class="num">81.8 M</td><td>no</td><td class="num">3.87</td><td class="num">4.49</td><td class="num">3.41</td><td class="num">0.8</td></tr>
+<tr><td>Supertonic 3</td><td class="num">99 M</td><td>no</td><td class="num">3.84</td><td class="num">4.45</td><td class="num">3.32</td><td class="num">1.7</td></tr>
+<tr><td>MOSS-TTS-Nano</td><td class="num">~100 M</td><td>no</td><td class="num">3.44</td><td class="num">4.37</td><td class="num">3.21</td><td class="num">1.7</td></tr>
+<tr><td>Pocket TTS</td><td class="num">110 M</td><td>no</td><td class="num">3.31</td><td class="num">4.33</td><td class="num">3.31</td><td class="num">2.5</td></tr>
+<tr><td>StyleTTS 2 (our teacher)</td><td class="num">191 M</td><td>no</td><td class="num">3.43</td><td class="num">4.47</td><td class="num">3.34</td><td class="num">1.5</td></tr>
+</tbody>
+<caption>Higher is better for UTMOSv2, UTMOS22 and DNSMOS (overall); WER from Whisper large-v3. 95% confidence intervals are about ±0.05–0.1 for the quality scores. <sup>a</sup> The sanoTTS model that runs on the chip has 567 K parameters; its paper reports UTMOS 2.80.</caption>
+</table>
+</div>
+<p>Among systems built for a microcontroller, Ito has the highest UTMOS22 and DNSMOS and the lowest word error rate of the neural systems. Inflect Nano (Owen Song), a 4 M-parameter model, ties it on UTMOSv2 but runs 3.5 times slower than real time on a larger chip. Several models 2 to 50 times larger, which need a CPU or GPU, score higher on UTMOSv2.</p>
+
+<h3>Listening test</h3>
+<div class="scroll">
+<table class="res">
+<thead><tr><th>System</th><th class="num">Rating (1–5)</th></tr></thead>
+<tbody>
+<tr><td>Teacher, StyleTTS 2</td><td class="num">4.75</td></tr>
+<tr class="ours"><td>Ito (ours)</td><td class="num">4.00</td></tr>
+<tr><td>sanoTTS amy</td><td class="num">2.00</td></tr>
+<tr><td>sanoTTS heart-nano</td><td class="num">1.00</td></tr>
+</tbody>
+<caption>Blind, unlabeled clips rated for how human they sound; 4 sentences per system, one expert listener. A larger public test is planned.</caption>
+</table>
+</div>
+
+<div class="prose">
+<h2>On the chip</h2>
+<div class="scroll">
+<table class="res">
+<tbody>
+<tr><td>Weights</td><td>4.9 MB int8, in flash</td></tr>
+<tr><td>Compute</td><td>about 350 M int8 multiply-accumulates per second of audio</td></tr>
+<tr><td>Streaming</td><td>yes; time to first audio does not depend on sentence length</td></tr>
+<tr><td>Time to first audio</td><td>estimated, not measured on silicon: 137 to 143 ms optimistic, 200 to 207 ms central, 311 to 318 ms pessimistic (any sentence length)</td></tr>
+<tr><td>Real-time factor</td><td>estimated: 0.53 to 0.54 optimistic, 0.77 to 0.80 central, 1.18 to 1.27 pessimistic (below 1 is faster than real time, so the pessimistic case is still slower). Real time is not yet established on silicon</td></tr>
+<tr><td>Start delay for gapless speech</td><td>estimated: 137 to 143 ms optimistic (the same as the time to first audio), 215 to 240 ms central, 880 ms or more pessimistic (the real-time factor is above 1 there). The first chunk is 125 ms of audio and the next ones grow in steps, so speech is gapless from the first chunk when the chip is fast enough</td></tr>
+</tbody>
+</table>
+</div>
+<p class="note">The firmware measures its own throughput at boot and prints a <code>BOARD_SUMMARY</code> line. If you run it on an ESP32-S3 board, please share the line in an issue.</p>
+
+<h2>Try it</h2>
+<pre>pip install git+https://github.com/lokutor-ai/ito
+ito-tts "Good morning! The coffee is ready." -o hello.wav</pre>
+<p>Flashing instructions for the ESP32-S3 are in the <a href="https://github.com/lokutor-ai/ito">repository</a>.</p>
+
+<h2>License</h2>
+<p>The engine and firmware code are GPLv3. The model weights are CC BY-NC-SA 4.0 with additional <a href="https://github.com/lokutor-ai/ito/blob/main/models/TERMS.md">terms</a>: no commercial use. For commercial licenses, or a free license for a small company, maker project or research group, write to contact@lokutor.com.</p>
+</div>
+
+<footer><a href="https://lokutor.com">Lokutor</a> · 2026</footer>
+</div>
