@@ -14,12 +14,15 @@ same chip).
 > firmware's audio is bit-identical to the host build of the engine, and every sample in [`samples/`](samples) is that
 > engine's exact output. **Nothing has run on a physical board yet.** Time to first audio and real-time factor are
 > **estimated** from exact instruction counts (QEMU) and an assumed PSRAM bandwidth. **Real-time playback is not established on silicon:**
-> the optimistic and central estimates are faster than real time (RTF 0.43–0.47 and 0.63–0.66) and the pessimistic one is only just below it
+> with the main weight set the optimistic and central estimates are faster than real time (RTF 0.43–0.47 and 0.63–0.66) and the pessimistic one is only just below it
 > (0.97–0.99 for whole sentences, 0.96 for long ones). The vocoder is now 192 wide instead of 256, which is what moved the numbers; in a blind test
 > (#10, one listener) it sounded the same as the 256-wide one. The engine starts with a 125 ms first chunk and a short ramp so that speech is gapless from the first chunk
-> (estimated first sound 124–127 / 171–175 / 251–255 ms, optimistic / central / pessimistic). An earlier version of this page claimed 130–210 ms and
-> real time at 0.5–1 GOPS; that was too optimistic (see [`esp32/README.md`](esp32/README.md) §4). The firmware measures the real numbers at boot;
-> we will publish them here after we run it on boards.
+> (estimated first sound 124–132 / 171–180 / 251–260 ms, optimistic / central / pessimistic). An earlier version of this page claimed 130–210 ms and
+> real time at 0.5–1 GOPS; that was too optimistic (see [`esp32/README.md`](esp32/README.md) §4).
+>
+> **The firmware now enforces real time by measurement.** Each voice ships three weight sets (main int8; main with int4 blocks; a light set with one block fewer): at boot the board measures the real time of every chunk with each set, keeps the first
+> whose measured RTF is <= 0.85, plans the playback start delay from those measurements, and prints `WARNING: DEGRADED` (and sets a flag) if even the fastest set measures >= 0.95. In the pessimistic estimate the light set would be kept as
+> "marginal" (RTF 0.88, start delay about 0.41 s). This is tested in QEMU with injected timings, not on silicon: it is a guarantee **by measurement on the board that runs it**, not a promise about hardware we have not seen. We will publish board measurements here as soon as we have them.
 
 > **Licensing in one line.** The code is GPLv3; the voice model that makes it talk is **non-commercial**
 > (CC BY-NC-SA 4.0 + [terms](models/TERMS.md)). Hobby, research and education use is welcome. For anything commercial,
@@ -112,20 +115,30 @@ UTMOS cannot hear intonation, so treat it as a check, not a verdict. On 60 held-
 | | |
 |---|---|
 | Parameters | 3.34 M: acoustic front 1.62 M + vocoder 1.72 M (was 4.40 M with a 256-wide vocoder) |
-| Chip weights | **3.81 MB** (`ito_female_esp32s3.bin`; was 4.89 MB): int8 mel head and vocoder; int16 pitch path |
-| Flash | 340 KB app + 3.81 MB weights; about 10 MB of the 14 MB weights partition stays free |
+| Chip weights | **3.81 MB** main set (`ito_female_esp32s3.bin`; was 4.89 MB): int8 mel head and vocoder; int16 pitch path. Fallback sets for the boot calibration: main-int4 3.20 MB (`_int4`), light 3.05 MB (`_light`) |
+| Flash | 379 KB app + three 4.5 MB weight partitions (main 3.81 MB, main-int4 3.20 MB, light 3.05 MB per voice) |
 | PSRAM / SRAM | peak 5.3 of 8 MB PSRAM, 314 of 383 KB internal SRAM (QEMU; about 327 KB on the chip with the I2S buffers) |
-| Work before the first audio (125 ms first chunk) | **23.0–23.5 M instructions and 3.9 MB of weights read from PSRAM, for any sentence length** (exact counts from QEMU; 16.0–16.1 M and 3.45 MB for a 25 ms first chunk) |
-| Work per second of audio | about 85 M instructions on the dual-core critical path, 11 MB of weights read from PSRAM (24-frame chunks; exact counts; the conversion to time is an estimate) |
-| Time to first audio | **estimated, not measured:** 124–127 ms optimistic, **171–175 ms central**, 251–255 ms pessimistic. The first chunk is 125 ms of audio and the chunks behind it are sized so that playback can start with it without a gap (the version of 2 October made 25 ms of sound after 145 ms and then fell silent for about 200 ms; `first 2` still does that; the first public version of the engine: 338 / 463 / 672 ms; the 256-wide vocoder of 3 October: 137–143 / 200–207 / 311–318 ms) |
+| Work before the first audio (125 ms first chunk) | **23.0–24.3 M instructions and 3.9 MB of weights read from PSRAM, for any sentence length** (exact counts from QEMU; 16.0–16.5 M and 3.45 MB for a 25 ms first chunk) |
+| Work per second of audio | 76–86 M instructions on the dual-core critical path, 10.5–11.2 MB of weights read from PSRAM (24-frame chunks; exact counts; the conversion to time is an estimate) |
+| Time to first audio | **estimated, not measured:** 124–132 ms optimistic, **171–180 ms central**, 251–260 ms pessimistic. The first chunk is 125 ms of audio and the chunks behind it are sized so that playback can start with it without a gap (the version of 2 October made 25 ms of sound after 145 ms and then fell silent for about 200 ms; `first 2` still does that; the first public version of the engine: 338 / 463 / 672 ms; the 256-wide vocoder of 3 October: 137–143 / 200–207 / 311–318 ms) |
 | Real-time factor | **estimated, not measured:** 0.43–0.47 optimistic, **0.63–0.66 central** (0.65 for long sentences), 0.97–0.99 pessimistic (0.96 for long sentences; 1.05 for a very short one). Below 1 is faster than real time; the pessimistic case (40 MB/s PSRAM, nothing overlapped, CPI 1.6) is **only just below it, which is not a margin**. With the 256-wide vocoder it was 0.77–0.80 central and 1.18–1.27 pessimistic |
-| Start delay for gapless speech | **estimated:** optimistic = the time to first audio (124–127 ms), **central 176–179 ms**, pessimistic 560–660 ms (short sentences need the most). With the 256-wide vocoder: 137–143 / 215–240 / 880–2200 ms. `delay <ms>` on the serial console holds playback for a chosen time |
+| Start delay for gapless speech | **estimated:** optimistic = the time to first audio (125–130 ms), **central 176–182 ms**, pessimistic 558–663 ms (short sentences need the most); the firmware now plans this delay from its own measurements. With the 256-wide vocoder: 137–143 / 215–240 / 880–2200 ms. `delay <ms>` on the serial console holds playback for a chosen time |
 | On a laptop | RTF ≈ 0.01 on an Apple M4 Max CPU, for both the PyTorch model (whole utterance) and the C engine |
 
 All of this is **estimated from exact instruction counts, not measured on silicon.** The open question is the effective PSRAM
 bandwidth and how much of it overlaps compute (GDMA); the pessimistic column is decided by those two assumptions. A weight pass
-serves 24-frame (300 ms) chunks, and the 192-wide vocoder cuts the weight traffic from 15 to 11 MB per second of audio. The firmware's boot benchmark measures the real numbers and prints `BOARD_SUMMARY`.
+serves 24-frame (300 ms) chunks, and the 192-wide vocoder cuts the weight traffic from 15 to 11 MB per second of audio. The firmware's boot benchmark measures the real numbers and prints `BOARD_SUMMARY`, `CALIB` and `TIER_SELECT`.
 The estimate model and full tables are in [`esp32/README.md`](esp32/README.md).
+
+**The three weight sets, estimated the same way** (optimistic / central / pessimistic; whole sentences with the start-up ramp; not measured on silicon):
+
+| | main int8 | main int4 | light (4 blocks, int4) |
+|---|---|---|---|
+| time to first audio | 124–132 / 171–180 / 251–260 ms | 127–133 / 168–174 / 236–243 ms | 118–124 / 157–164 / 222–229 ms |
+| real-time factor | 0.43–0.47 / 0.63–0.66 / 0.97–0.99 | 0.45–0.48 / 0.62–0.64 / 0.92–0.93 | 0.42–0.45 / 0.59–0.61 / 0.88 |
+| gapless start delay | 125–130 / 176–182 / 558–663 ms | 127–133 / 173–179 / 481–526 ms | 118–124 / 162–169 / 406–429 ms |
+
+int4 weights save a fifth of the weight traffic for about 1 % more instructions (with a PIE unpack kernel), which helps only where the PSRAM is the limit. In the pessimistic column no set reaches the 0.85 target; the boot would keep the light set as "marginal".
 
 ## How it works
 
@@ -205,10 +218,10 @@ DIN→GPIO17 (PCM5102A or MAX98357A).
 
 ```bash
 pip install esptool pyserial
-esp32/tools/fetch_weights.sh                       # ito_female_esp32s3.bin from Hugging Face into models/ (flash.sh also does it)
-esp32/tools/flash.sh /dev/ttyUSB0                  # prebuilt app + female voice (ito_female_esp32s3.bin)
-VOICE=male esp32/tools/flash.sh /dev/ttyUSB0       # ... or the male voice: flashes ito_male_esp32s3.bin at 0x200000
-python -m serial.tools.miniterm /dev/ttyUSB0 115200   # press RST: self-test, benchmark, 3 demo sentences, READY
+esp32/tools/fetch_weights.sh                       # the voice's three weight sets (ito_female_esp32s3{,_int4,_light}.bin) from Hugging Face into models/ (flash.sh also does it)
+esp32/tools/flash.sh /dev/ttyUSB0                  # prebuilt app + female voice, all three sets (0x200000 / 0x680000 / 0xB00000)
+VOICE=male esp32/tools/flash.sh /dev/ttyUSB0       # ... or the male voice
+python -m serial.tools.miniterm /dev/ttyUSB0 115200   # press RST: self-test, benchmark, weight-set calibration, 3 demo sentences, READY
 python esp32/tools/say.py "Hello from a five dollar chip." --port /dev/ttyUSB0
 ```
 
@@ -238,7 +251,7 @@ docs/            prior_art.md (being merged)
 ## Limitations
 
 - English only, two voices (D female, G male); one voice per chip weights file.
-- Speed is estimated until board measurements are published.
+- Speed is estimated until board measurements are published; the boot calibration that picks a weight set and plans the start delay has only been tested with simulated timings.
 - The chip uses one fixed speaking style. Expressiveness comes from the text through the front, but there is no
   per-sentence style control.
 - The pitch range is still slightly narrower than the teacher's (0.94).
