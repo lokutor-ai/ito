@@ -1,209 +1,631 @@
-# 5 October 2026: 192-wide vocoder, female voice (est_D) then male voice (est_G); python3 esp32/tools/icount_estimate.py on the QEMU logs
+# 5 October 2026, final firmware (weight sets, PIE int4 unpack). Estimates from exact QEMU instruction counts (icprof 2); python3 esp32/tools/icount_estimate.py on each log. Order: female main int8, female main int4, female light, male main int8, male main int4, male light.
+
+######## female, set 0 (main int8)
 EXACT counts (QEMU -icount; 1 CCOUNT tick = 24.95 instructions), text-in -> first chunk, per start-up schedule (frames of chunk 0, 1, ...; then 24)
 sentence  tok   sched  audio | 2-core tot crit-path  | PSRAM MB | bit-exact
-demo0     25    s0 f2  2.1   | 27.5       16.1       | 3.45     | a39e1a7b
-demo1     108   s0 f2  7.2   | 27.5       16.0       | 3.45     | f6afba59
+demo0     25    s0 f2  2.1   | 27.4       16.0       | 3.45     | a39e1a7b
+demo1     108   s0 f2  7.2   | 27.4       16.0       | 3.45     | f6afba59
 demo2     175   s0 f2  10.5  | 27.5       16.1       | 3.45     | 18154ad5
 selftest  84    s0 f2  5.6   | 27.4       16.0       | 3.45     | 023bd6b1
-demo0     25    s1 f10 2.1   | 41.1       23.0       | 3.91     | a39e1a7b
-demo1     108   s1 f10 7.2   | 41.0       23.0       | 3.91     | f6afba59
+demo0     25    s1 f10 2.1   | 41.6       23.5       | 3.91     | a39e1a7b
+demo1     108   s1 f10 7.2   | 42.0       23.9       | 3.91     | f6afba59
 demo2     175   s1 f10 10.5  | 41.6       23.5       | 3.91     | 18154ad5
 selftest  84    s1 f10 5.6   | 41.0       23.0       | 3.91     | 023bd6b1
-demo0     25    s2 f12 2.1   | 44.9       25.3       | 3.91     | a39e1a7b
-demo1     108   s2 f12 7.2   | 44.5       24.8       | 3.91     | f6afba59
-demo2     175   s2 f12 10.5  | 44.5       24.8       | 3.91     | 18154ad5
-selftest  84    s2 f12 5.6   | 44.5       24.8       | 3.91     | 023bd6b1
-demo0     25    s3 f8  2.1   | 38.1       21.8       | 3.68     | a39e1a7b
-demo1     108   s3 f8  7.2   | 37.6       21.3       | 3.68     | f6afba59
-demo2     175   s3 f8  10.5  | 37.6       21.3       | 3.68     | 18154ad5
-selftest  84    s3 f8  5.6   | 38.6       22.2       | 3.68     | 023bd6b1
+demo0     25    s2 f12 2.1   | 45.1       25.5       | 3.91     | a39e1a7b
+demo1     108   s2 f12 7.2   | 44.5       24.9       | 3.91     | f6afba59
+demo2     175   s2 f12 10.5  | 44.5       24.9       | 3.91     | 18154ad5
+selftest  84    s2 f12 5.6   | 45.0       25.4       | 3.91     | 023bd6b1
+demo0     25    s3 f8  2.1   | 37.6       21.3       | 3.68     | a39e1a7b
+demo1     108   s3 f8  7.2   | 38.6       22.3       | 3.68     | f6afba59
+demo2     175   s3 f8  10.5  | 38.1       21.8       | 3.68     | 18154ad5
+selftest  84    s3 f8  5.6   | 38.1       21.8       | 3.68     | 023bd6b1
 
 Per core in the first chunk (serialised halves): core0 11.8 M, core1 12.3 M instr (demo1, sched 0)
 
 ESTIMATED time-to-first-audio (ms) -- estimated from exact QEMU instruction counts, not measured on silicon
 sentence  tok   first  | optimistic (cpu/mem)   central                pessimistic           
 selftest  84    s0 f2  |    87 (  87/  43)          125 (  97/  58)          193 ( 107/  86)       
-demo0     25    s0 f2  |    87 (  87/  43)          126 (  97/  58)          193 ( 107/  86)       
+demo0     25    s0 f2  |    87 (  87/  43)          125 (  97/  58)          193 ( 107/  86)       
 demo1     108   s0 f2  |    87 (  87/  43)          126 (  97/  58)          193 ( 107/  86)       
-demo2     175   s0 f2  |    87 (  87/  43)          126 (  97/  58)          194 ( 107/  86)       
+demo2     175   s0 f2  |    87 (  87/  43)          126 (  97/  58)          193 ( 107/  86)       
 selftest  84    s1 f10 |   124 ( 124/  49)          171 ( 139/  65)          251 ( 153/  98)       
-demo0     25    s1 f10 |   125 ( 125/  49)          172 ( 139/  65)          251 ( 153/  98)       
-demo1     108   s1 f10 |   124 ( 124/  49)          171 ( 139/  65)          251 ( 153/  98)       
+demo0     25    s1 f10 |   127 ( 127/  49)          175 ( 142/  65)          255 ( 157/  98)       
+demo1     108   s1 f10 |   130 ( 130/  49)          177 ( 145/  65)          257 ( 160/  98)       
 demo2     175   s1 f10 |   127 ( 127/  49)          175 ( 142/  65)          255 ( 157/  98)       
-selftest  84    s2 f12 |   134 ( 134/  49)          183 ( 150/  65)          263 ( 165/  98)       
-demo0     25    s2 f12 |   137 ( 137/  49)          185 ( 153/  65)          266 ( 169/  98)       
-demo1     108   s2 f12 |   134 ( 134/  49)          183 ( 150/  65)          263 ( 165/  98)       
+selftest  84    s2 f12 |   137 ( 137/  49)          186 ( 153/  65)          267 ( 169/  98)       
+demo0     25    s2 f12 |   138 ( 138/  49)          187 ( 154/  65)          268 ( 170/  98)       
+demo1     108   s2 f12 |   135 ( 135/  49)          183 ( 150/  65)          264 ( 166/  98)       
 demo2     175   s2 f12 |   135 ( 135/  49)          183 ( 150/  65)          264 ( 166/  98)       
-selftest  84    s3 f8  |   120 ( 120/  46)          165 ( 134/  61)          240 ( 148/  92)       
-demo0     25    s3 f8  |   118 ( 118/  46)          162 ( 131/  61)          237 ( 145/  92)       
-demo1     108   s3 f8  |   115 ( 115/  46)          159 ( 128/  61)          234 ( 142/  92)       
-demo2     175   s3 f8  |   115 ( 115/  46)          159 ( 128/  61)          234 ( 142/  92)       
+selftest  84    s3 f8  |   118 ( 118/  46)          162 ( 131/  61)          237 ( 145/  92)       
+demo0     25    s3 f8  |   115 ( 115/  46)          159 ( 129/  61)          234 ( 142/  92)       
+demo1     108   s3 f8  |   121 ( 121/  46)          165 ( 135/  61)          241 ( 149/  92)       
+demo2     175   s3 f8  |   118 ( 118/  46)          162 ( 132/  61)          237 ( 145/  92)       
   (add <= 1 DMA descriptor (<= 20 ms) before the first sample reaches the DAC)
 
 ESTIMATED steady-state RTF: all audio after the first chunk, INCLUDING the start-up ramp chunks (< 1 needed)
 sentence  tok   sched  | crit M/s PSRAM MB/s (+rings)  | optimistic   central      pessimistic 
-selftest  84    s0     | 83       11.0      15.5      |  0.45(c0.45 m0.19)  0.63(c0.50 m0.26)  0.94(c0.56 m0.39)
+selftest  84    s0     | 84       11.0      15.5      |  0.45(c0.45 m0.19)  0.63(c0.51 m0.26)  0.95(c0.56 m0.39)
 demo0     25    s0     | 78       10.9      15.4      |  0.42(c0.42 m0.19)  0.60(c0.47 m0.26)  0.91(c0.52 m0.39)
 demo1     108   s0     | 84       11.0      15.5      |  0.46(c0.46 m0.19)  0.64(c0.51 m0.26)  0.95(c0.56 m0.39)
 demo2     175   s0     | 86       11.0      15.5      |  0.46(c0.46 m0.19)  0.65(c0.52 m0.26)  0.96(c0.57 m0.39)
-selftest  84    s1     | 85       12.1      16.6      |  0.46(c0.46 m0.21)  0.65(c0.51 m0.28)  0.98(c0.57 m0.41)
-demo0     25    s1     | 79       13.6      18.1      |  0.43(c0.43 m0.23)  0.63(c0.48 m0.30)  0.98(c0.53 m0.45)
+selftest  84    s1     | 85       12.1      16.6      |  0.46(c0.46 m0.21)  0.65(c0.51 m0.28)  0.98(c0.56 m0.41)
+demo0     25    s1     | 80       13.6      18.1      |  0.43(c0.43 m0.23)  0.63(c0.48 m0.30)  0.98(c0.53 m0.45)
 demo1     108   s1     | 85       11.8      16.3      |  0.46(c0.46 m0.20)  0.65(c0.51 m0.27)  0.97(c0.57 m0.41)
-demo2     175   s1     | 86       11.5      16.0      |  0.47(c0.47 m0.20)  0.65(c0.52 m0.27)  0.98(c0.57 m0.40)
-selftest  84    s2     | 84       11.8      16.3      |  0.46(c0.46 m0.20)  0.65(c0.51 m0.27)  0.97(c0.56 m0.41)
-demo0     25    s2     | 79       12.7      17.2      |  0.43(c0.43 m0.22)  0.62(c0.48 m0.29)  0.96(c0.53 m0.43)
+demo2     175   s1     | 86       11.5      16.0      |  0.47(c0.47 m0.20)  0.65(c0.52 m0.27)  0.97(c0.57 m0.40)
+selftest  84    s2     | 85       11.8      16.3      |  0.46(c0.46 m0.20)  0.65(c0.51 m0.27)  0.97(c0.56 m0.41)
+demo0     25    s2     | 80       12.7      17.2      |  0.43(c0.43 m0.22)  0.63(c0.48 m0.29)  0.96(c0.53 m0.43)
 demo1     108   s2     | 85       11.7      16.2      |  0.46(c0.46 m0.20)  0.65(c0.51 m0.27)  0.97(c0.57 m0.41)
-demo2     175   s2     | 86       11.4      15.9      |  0.47(c0.47 m0.20)  0.65(c0.52 m0.27)  0.97(c0.57 m0.40)
+demo2     175   s2     | 86       11.4      15.9      |  0.47(c0.47 m0.20)  0.66(c0.52 m0.27)  0.98(c0.58 m0.40)
 selftest  84    s3     | 85       12.3      16.8      |  0.46(c0.46 m0.21)  0.65(c0.51 m0.28)  0.99(c0.57 m0.42)
-demo0     25    s3     | 81       14.3      18.8      |  0.44(c0.44 m0.23)  0.65(c0.49 m0.31)  1.01(c0.54 m0.47)
+demo0     25    s3     | 81       14.3      18.8      |  0.44(c0.44 m0.23)  0.64(c0.49 m0.31)  1.01(c0.54 m0.47)
 demo1     108   s3     | 85       12.0      16.5      |  0.46(c0.46 m0.21)  0.65(c0.52 m0.28)  0.98(c0.57 m0.41)
-demo2     175   s3     | 87       11.7      16.2      |  0.47(c0.47 m0.20)  0.66(c0.52 m0.27)  0.98(c0.58 m0.40)
+demo2     175   s3     | 86       11.7      16.2      |  0.47(c0.47 m0.20)  0.66(c0.52 m0.27)  0.98(c0.58 m0.40)
 
 ESTIMATED RTF of the steady-state chunks alone (full 24-frame chunks only: the long-sentence limit)
 sentence  tok   sched  | crit M/s PSRAM MB/s (+rings)  | optimistic   central      pessimistic 
 selftest  84    s0     | 85       10.9      15.4      |  0.46(c0.46 m0.19)  0.64(c0.51 m0.26)  0.95(c0.57 m0.39)
 demo0     25    s0     | 83       10.9      15.4      |  0.45(c0.45 m0.19)  0.63(c0.50 m0.26)  0.93(c0.55 m0.38)
-demo1     108   s0     | 86       10.9      15.4      |  0.46(c0.46 m0.19)  0.65(c0.52 m0.26)  0.96(c0.57 m0.39)
+demo1     108   s0     | 85       10.9      15.4      |  0.46(c0.46 m0.19)  0.64(c0.52 m0.26)  0.96(c0.57 m0.39)
 demo2     175   s0     | 87       11.0      15.5      |  0.47(c0.47 m0.19)  0.65(c0.52 m0.26)  0.96(c0.58 m0.39)
 selftest  84    s1     | 86       11.2      15.7      |  0.47(c0.47 m0.20)  0.65(c0.52 m0.26)  0.97(c0.57 m0.39)
-demo0     25    s1     | 75       10.5      15.0      |  0.41(c0.41 m0.19)  0.58(c0.45 m0.25)  0.88(c0.50 m0.38)
-demo1     108   s1     | 85       11.2      15.7      |  0.46(c0.46 m0.20)  0.64(c0.51 m0.26)  0.96(c0.57 m0.39)
-demo2     175   s1     | 86       11.1      15.6      |  0.47(c0.47 m0.19)  0.65(c0.52 m0.26)  0.96(c0.58 m0.39)
-selftest  84    s2     | 86       11.3      15.8      |  0.47(c0.47 m0.20)  0.65(c0.52 m0.26)  0.97(c0.57 m0.40)
-demo0     25    s2     | 76       10.5      15.0      |  0.41(c0.41 m0.19)  0.58(c0.46 m0.25)  0.88(c0.50 m0.38)
-demo1     108   s2     | 85       11.3      15.8      |  0.46(c0.46 m0.20)  0.65(c0.51 m0.26)  0.96(c0.57 m0.40)
-demo2     175   s2     | 86       11.2      15.7      |  0.47(c0.47 m0.20)  0.65(c0.52 m0.26)  0.97(c0.57 m0.39)
-selftest  84    s3     | 85       11.1      15.6      |  0.46(c0.46 m0.19)  0.64(c0.51 m0.26)  0.95(c0.56 m0.39)
+demo0     25    s1     | 76       10.5      15.0      |  0.41(c0.41 m0.19)  0.58(c0.46 m0.25)  0.88(c0.51 m0.38)
+demo1     108   s1     | 85       11.2      15.7      |  0.46(c0.46 m0.20)  0.65(c0.51 m0.26)  0.96(c0.57 m0.39)
+demo2     175   s1     | 86       11.1      15.6      |  0.47(c0.47 m0.19)  0.65(c0.52 m0.26)  0.96(c0.57 m0.39)
+selftest  84    s2     | 86       11.3      15.8      |  0.47(c0.47 m0.20)  0.65(c0.52 m0.26)  0.97(c0.58 m0.40)
+demo0     25    s2     | 76       10.5      15.0      |  0.41(c0.41 m0.19)  0.59(c0.46 m0.25)  0.89(c0.51 m0.38)
+demo1     108   s2     | 86       11.3      15.8      |  0.46(c0.46 m0.20)  0.65(c0.52 m0.26)  0.97(c0.57 m0.40)
+demo2     175   s2     | 87       11.2      15.7      |  0.47(c0.47 m0.20)  0.65(c0.52 m0.26)  0.97(c0.58 m0.39)
+selftest  84    s3     | 85       11.1      15.6      |  0.46(c0.46 m0.19)  0.64(c0.51 m0.26)  0.96(c0.57 m0.39)
 demo0     25    s3     | 79       10.5      15.0      |  0.43(c0.43 m0.19)  0.60(c0.48 m0.25)  0.90(c0.53 m0.38)
-demo1     108   s3     | 86       11.0      15.5      |  0.46(c0.46 m0.19)  0.65(c0.52 m0.26)  0.96(c0.57 m0.39)
+demo1     108   s3     | 86       11.0      15.5      |  0.47(c0.47 m0.19)  0.65(c0.52 m0.26)  0.96(c0.57 m0.39)
 demo2     175   s3     | 87       11.0      15.5      |  0.47(c0.47 m0.19)  0.65(c0.52 m0.26)  0.97(c0.58 m0.39)
   sensitivity: at 27 MB/s (forum memcpy EXT->EXT) the PSRAM term alone is 0.40 of real time (demo1, sched 0)
 
 Sensitivity (CPI 1.45, demo1, sched 0): TTFA ms of the first chunk / steady RTF, PSRAM MB/s x share of PSRAM time hidden by overlap
 MB/s      hidden 0.00      hidden 0.50      hidden 0.80      hidden 1.00      
-27         225 ms / 1.08    161 ms / 0.80    128 ms / 0.62    128 ms / 0.57   
-40         183 ms / 0.90    140 ms / 0.70    114 ms / 0.59     97 ms / 0.51   
+27         225 ms / 1.08    161 ms / 0.79    128 ms / 0.62    128 ms / 0.57   
+40         183 ms / 0.89    140 ms / 0.70    114 ms / 0.59     97 ms / 0.51   
 50         166 ms / 0.82    131 ms / 0.66    111 ms / 0.57     97 ms / 0.51   
 60         154 ms / 0.77    126 ms / 0.64    108 ms / 0.56     97 ms / 0.51   
-80         140 ms / 0.70    118 ms / 0.61    105 ms / 0.55     97 ms / 0.51   
+80         140 ms / 0.70    118 ms / 0.60    105 ms / 0.55     97 ms / 0.51   
 
 Gapless start (audio never underruns): smallest delay S after text-in so that every later chunk is ready when the speaker needs it
 S = max over chunks k of (ready_k - audio_before_k); I2S descriptor not included; 'lag' = how far synthesis is behind playback at the end
 sentence  tok   sched  | optimistic               central                  pessimistic             
-demo0     25    s0     |   192 ms (last chunk lag -1128)   284 ms (last chunk lag -722)   477 ms (last chunk lag  -22)
-demo1     108   s0     |   189 ms (last chunk lag -3820)   281 ms (last chunk lag -2482)   500 ms (last chunk lag -194)
-demo2     175   s0     |   190 ms (last chunk lag -5534)   282 ms (last chunk lag -3590)   501 ms (last chunk lag -270)
-demo0     25    s1     |   125 ms (last chunk lag -1110)   176 ms (last chunk lag -672)   558 ms (last chunk lag  105)
-demo1     108   s1     |   124 ms (last chunk lag -3805)   176 ms (last chunk lag -2425)   662 ms (last chunk lag  -45)
-demo2     175   s1     |   127 ms (last chunk lag -5504)   179 ms (last chunk lag -3517)   618 ms (last chunk lag -111)
-demo0     25    s2     |   137 ms (last chunk lag -1111)   191 ms (last chunk lag -689)   506 ms (last chunk lag   56)
-demo1     108   s2     |   134 ms (last chunk lag -3795)   188 ms (last chunk lag -2425)   612 ms (last chunk lag  -64)
-demo2     175   s2     |   135 ms (last chunk lag -5517)   188 ms (last chunk lag -3543)   540 ms (last chunk lag -160)
-demo0     25    s3     |   118 ms (last chunk lag -1099)   166 ms (last chunk lag -639)   600 ms (last chunk lag  166)
-demo1     108   s3     |   115 ms (last chunk lag -3790)   163 ms (last chunk lag -2391)   683 ms (last chunk lag   16)
-demo2     175   s3     |   115 ms (last chunk lag -5485)   163 ms (last chunk lag -3479)   667 ms (last chunk lag  -40)
+demo0     25    s0     |   189 ms (last chunk lag -1128)   281 ms (last chunk lag -722)   477 ms (last chunk lag  -21)
+demo1     108   s0     |   190 ms (last chunk lag -3833)   281 ms (last chunk lag -2497)   500 ms (last chunk lag -210)
+demo2     175   s0     |   192 ms (last chunk lag -5529)   285 ms (last chunk lag -3585)   504 ms (last chunk lag -264)
+demo0     25    s1     |   127 ms (last chunk lag -1105)   179 ms (last chunk lag -665)   558 ms (last chunk lag  112)
+demo1     108   s1     |   130 ms (last chunk lag -3795)   182 ms (last chunk lag -2413)   663 ms (last chunk lag  -32)
+demo2     175   s1     |   127 ms (last chunk lag -5513)   179 ms (last chunk lag -3528)   619 ms (last chunk lag -122)
+demo0     25    s2     |   138 ms (last chunk lag -1101)   192 ms (last chunk lag -679)   510 ms (last chunk lag   65)
+demo1     108   s2     |   135 ms (last chunk lag -3791)   188 ms (last chunk lag -2420)   599 ms (last chunk lag  -58)
+demo2     175   s2     |   135 ms (last chunk lag -5490)   189 ms (last chunk lag -3513)   549 ms (last chunk lag -126)
+demo0     25    s3     |   115 ms (last chunk lag -1104)   163 ms (last chunk lag -645)   594 ms (last chunk lag  160)
+demo1     108   s3     |   121 ms (last chunk lag -3779)   169 ms (last chunk lag -2379)   697 ms (last chunk lag   29)
+demo2     175   s3     |   118 ms (last chunk lag -5490)   166 ms (last chunk lag -3484)   653 ms (last chunk lag  -46)
 
-######## male
+######## female, set 1 (main int4)
 EXACT counts (QEMU -icount; 1 CCOUNT tick = 24.95 instructions), text-in -> first chunk, per start-up schedule (frames of chunk 0, 1, ...; then 24)
 sentence  tok   sched  audio | 2-core tot crit-path  | PSRAM MB | bit-exact
-demo0     25    s0 f2  2.1   | 28.5       17.0       | 3.45     | a9cf618d
-demo1     108   s0 f2  7.3   | 27.8       16.4       | 3.45     | 89b77362
-demo2     175   s0 f2  10.2  | 27.5       16.0       | 3.45     | a8f3eb6b
+demo0     25    s0 f2  2.1   | 28.3       16.5       | 2.84     | 0284b26f
+demo1     108   s0 f2  7.2   | 28.3       16.5       | 2.84     | 251a24a1
+demo2     175   s0 f2  10.5  | 28.8       16.9       | 2.84     | d18ddec4
+selftest  84    s0 f2  5.6   | 28.3       16.5       | 2.84     | 363d7d98
+demo0     25    s1 f10 2.1   | 42.1       23.6       | 3.20     | 0284b26f
+demo1     108   s1 f10 7.2   | 42.0       23.5       | 3.20     | 251a24a1
+demo2     175   s1 f10 10.5  | 42.0       23.5       | 3.20     | d18ddec4
+selftest  84    s1 f10 5.6   | 41.9       23.4       | 3.20     | 363d7d98
+demo0     25    s2 f12 2.1   | 46.1       26.0       | 3.20     | 0284b26f
+demo1     108   s2 f12 7.2   | 45.4       25.3       | 3.20     | 251a24a1
+demo2     175   s2 f12 10.5  | 45.5       25.4       | 3.20     | d18ddec4
+selftest  84    s2 f12 5.6   | 45.4       25.3       | 3.20     | 363d7d98
+demo0     25    s3 f8  2.1   | 38.6       21.7       | 2.97     | 0284b26f
+demo1     108   s3 f8  7.2   | 39.6       22.7       | 2.97     | 251a24a1
+demo2     175   s3 f8  10.5  | 38.6       21.8       | 2.97     | d18ddec4
+selftest  84    s3 f8  5.6   | 39.1       22.2       | 2.97     | 363d7d98
+
+Per core in the first chunk (serialised halves): core0 12.3 M, core1 12.7 M instr (demo1, sched 0)
+
+ESTIMATED time-to-first-audio (ms) -- estimated from exact QEMU instruction counts, not measured on silicon
+sentence  tok   first  | optimistic (cpu/mem)   central                pessimistic           
+selftest  84    s0 f2  |    89 (  89/  36)          123 (  99/  47)          181 ( 110/  71)       
+demo0     25    s0 f2  |    89 (  89/  36)          123 (  99/  47)          181 ( 110/  71)       
+demo1     108   s0 f2  |    89 (  89/  36)          123 (  99/  47)          181 ( 110/  71)       
+demo2     175   s0 f2  |    92 (  92/  36)          126 ( 102/  47)          184 ( 113/  71)       
+selftest  84    s1 f10 |   127 ( 127/  40)          168 ( 141/  53)          236 ( 156/  80)       
+demo0     25    s1 f10 |   128 ( 128/  40)          169 ( 143/  53)          237 ( 157/  80)       
+demo1     108   s1 f10 |   127 ( 127/  40)          168 ( 142/  53)          236 ( 156/  80)       
+demo2     175   s1 f10 |   127 ( 127/  40)          168 ( 142/  53)          236 ( 156/  80)       
+selftest  84    s2 f12 |   137 ( 137/  40)          180 ( 153/  53)          249 ( 169/  80)       
+demo0     25    s2 f12 |   141 ( 141/  40)          184 ( 157/  53)          253 ( 173/  80)       
+demo1     108   s2 f12 |   137 ( 137/  40)          180 ( 153/  53)          249 ( 169/  80)       
+demo2     175   s2 f12 |   138 ( 138/  40)          180 ( 153/  53)          249 ( 169/  80)       
+selftest  84    s3 f8  |   120 ( 120/  37)          159 ( 134/  49)          222 ( 148/  74)       
+demo0     25    s3 f8  |   118 ( 118/  37)          156 ( 131/  49)          219 ( 145/  74)       
+demo1     108   s3 f8  |   123 ( 123/  37)          162 ( 137/  49)          226 ( 152/  74)       
+demo2     175   s3 f8  |   118 ( 118/  37)          156 ( 132/  49)          219 ( 145/  74)       
+  (add <= 1 DMA descriptor (<= 20 ms) before the first sample reaches the DAC)
+
+ESTIMATED steady-state RTF: all audio after the first chunk, INCLUDING the start-up ramp chunks (< 1 needed)
+sentence  tok   sched  | crit M/s PSRAM MB/s (+rings)  | optimistic   central      pessimistic 
+selftest  84    s0     | 86       8.6       13.1      |  0.46(c0.46 m0.16)  0.63(c0.52 m0.22)  0.90(c0.57 m0.33)
+demo0     25    s0     | 79       8.5       13.0      |  0.43(c0.43 m0.16)  0.59(c0.48 m0.22)  0.86(c0.53 m0.33)
+demo1     108   s0     | 86       8.6       13.1      |  0.47(c0.47 m0.16)  0.63(c0.52 m0.22)  0.90(c0.57 m0.33)
+demo2     175   s0     | 88       8.6       13.1      |  0.47(c0.47 m0.16)  0.64(c0.53 m0.22)  0.91(c0.58 m0.33)
+selftest  84    s1     | 86       9.5       14.0      |  0.47(c0.47 m0.18)  0.64(c0.52 m0.23)  0.92(c0.57 m0.35)
+demo0     25    s1     | 82       10.6      15.1      |  0.45(c0.45 m0.19)  0.62(c0.50 m0.25)  0.93(c0.55 m0.38)
+demo1     108   s1     | 87       9.3       13.8      |  0.47(c0.47 m0.17)  0.64(c0.52 m0.23)  0.92(c0.58 m0.35)
+demo2     175   s1     | 88       9.1       13.6      |  0.48(c0.48 m0.17)  0.64(c0.53 m0.23)  0.93(c0.59 m0.34)
+selftest  84    s2     | 86       9.3       13.8      |  0.47(c0.47 m0.17)  0.63(c0.52 m0.23)  0.92(c0.57 m0.34)
+demo0     25    s2     | 82       10.0      14.5      |  0.44(c0.44 m0.18)  0.61(c0.49 m0.24)  0.91(c0.54 m0.36)
+demo1     108   s2     | 86       9.2       13.7      |  0.47(c0.47 m0.17)  0.64(c0.52 m0.23)  0.92(c0.58 m0.34)
+demo2     175   s2     | 87       9.0       13.5      |  0.47(c0.47 m0.17)  0.64(c0.53 m0.22)  0.92(c0.58 m0.34)
+selftest  84    s3     | 86       9.7       14.2      |  0.47(c0.47 m0.18)  0.64(c0.52 m0.24)  0.93(c0.58 m0.35)
+demo0     25    s3     | 83       11.2      15.7      |  0.45(c0.45 m0.20)  0.63(c0.50 m0.26)  0.95(c0.55 m0.39)
+demo1     108   s3     | 87       9.4       13.9      |  0.47(c0.47 m0.17)  0.64(c0.52 m0.23)  0.93(c0.58 m0.35)
+demo2     175   s3     | 88       9.2       13.7      |  0.48(c0.48 m0.17)  0.65(c0.53 m0.23)  0.93(c0.59 m0.34)
+
+ESTIMATED RTF of the steady-state chunks alone (full 24-frame chunks only: the long-sentence limit)
+sentence  tok   sched  | crit M/s PSRAM MB/s (+rings)  | optimistic   central      pessimistic 
+selftest  84    s0     | 87       8.6       13.1      |  0.47(c0.47 m0.16)  0.64(c0.53 m0.22)  0.91(c0.58 m0.33)
+demo0     25    s0     | 84       8.5       13.0      |  0.45(c0.45 m0.16)  0.61(c0.51 m0.22)  0.88(c0.56 m0.32)
+demo1     108   s0     | 87       8.6       13.1      |  0.47(c0.47 m0.16)  0.64(c0.53 m0.22)  0.91(c0.58 m0.33)
+demo2     175   s0     | 89       8.6       13.1      |  0.48(c0.48 m0.16)  0.64(c0.54 m0.22)  0.92(c0.59 m0.33)
+selftest  84    s1     | 87       8.8       13.3      |  0.47(c0.47 m0.17)  0.64(c0.53 m0.22)  0.92(c0.58 m0.33)
+demo0     25    s1     | 78       8.1       12.6      |  0.42(c0.42 m0.16)  0.57(c0.47 m0.21)  0.83(c0.52 m0.32)
+demo1     108   s1     | 87       8.8       13.3      |  0.47(c0.47 m0.17)  0.63(c0.52 m0.22)  0.91(c0.58 m0.33)
+demo2     175   s1     | 88       8.7       13.2      |  0.48(c0.48 m0.16)  0.64(c0.53 m0.22)  0.92(c0.59 m0.33)
+selftest  84    s2     | 87       8.9       13.4      |  0.47(c0.47 m0.17)  0.64(c0.53 m0.22)  0.92(c0.58 m0.34)
+demo0     25    s2     | 77       8.1       12.6      |  0.42(c0.42 m0.16)  0.57(c0.47 m0.21)  0.83(c0.51 m0.32)
+demo1     108   s2     | 86       8.9       13.4      |  0.47(c0.47 m0.17)  0.63(c0.52 m0.22)  0.91(c0.58 m0.34)
+demo2     175   s2     | 88       8.8       13.3      |  0.47(c0.47 m0.17)  0.64(c0.53 m0.22)  0.92(c0.58 m0.33)
+selftest  84    s3     | 86       8.7       13.2      |  0.47(c0.47 m0.16)  0.63(c0.52 m0.22)  0.90(c0.57 m0.33)
+demo0     25    s3     | 80       8.2       12.7      |  0.43(c0.43 m0.16)  0.59(c0.48 m0.21)  0.85(c0.53 m0.32)
+demo1     108   s3     | 87       8.6       13.1      |  0.47(c0.47 m0.16)  0.63(c0.53 m0.22)  0.91(c0.58 m0.33)
+demo2     175   s3     | 88       8.6       13.1      |  0.48(c0.48 m0.16)  0.64(c0.53 m0.22)  0.92(c0.59 m0.33)
+  sensitivity: at 27 MB/s (forum memcpy EXT->EXT) the PSRAM term alone is 0.32 of real time (demo1, sched 0)
+
+Sensitivity (CPI 1.45, demo1, sched 0): TTFA ms of the first chunk / steady RTF, PSRAM MB/s x share of PSRAM time hidden by overlap
+MB/s      hidden 0.00      hidden 0.50      hidden 0.80      hidden 1.00      
+27         205 ms / 1.00    152 ms / 0.76    120 ms / 0.62    105 ms / 0.52   
+40         170 ms / 0.85    135 ms / 0.68    114 ms / 0.58     99 ms / 0.52   
+50         156 ms / 0.78    128 ms / 0.65    111 ms / 0.57     99 ms / 0.52   
+60         147 ms / 0.74    123 ms / 0.63    109 ms / 0.56     99 ms / 0.52   
+80         135 ms / 0.68    117 ms / 0.60    107 ms / 0.55     99 ms / 0.52   
+
+Gapless start (audio never underruns): smallest delay S after text-in so that every later chunk is ready when the speaker needs it
+S = max over chunks k of (ready_k - audio_before_k); I2S descriptor not included; 'lag' = how far synthesis is behind playback at the end
+sentence  tok   sched  | optimistic               central                  pessimistic             
+demo0     25    s0     |   197 ms (last chunk lag -1111)   278 ms (last chunk lag -750)   435 ms (last chunk lag -140)
+demo1     108   s0     |   195 ms (last chunk lag -3757)   276 ms (last chunk lag -2559)   458 ms (last chunk lag -558)
+demo2     175   s0     |   200 ms (last chunk lag -5417)   282 ms (last chunk lag -3672)   468 ms (last chunk lag -764)
+demo0     25    s1     |   128 ms (last chunk lag -1083)   174 ms (last chunk lag -691)   481 ms (last chunk lag  -18)
+demo1     108   s1     |   127 ms (last chunk lag -3739)   173 ms (last chunk lag -2504)   526 ms (last chunk lag -424)
+demo2     175   s1     |   127 ms (last chunk lag -5401)   173 ms (last chunk lag -3622)   501 ms (last chunk lag -641)
+demo0     25    s2     |   141 ms (last chunk lag -1088)   189 ms (last chunk lag -710)   448 ms (last chunk lag  -64)
+demo1     108   s2     |   137 ms (last chunk lag -3751)   185 ms (last chunk lag -2523)   445 ms (last chunk lag -457)
+demo2     175   s2     |   138 ms (last chunk lag -5436)   186 ms (last chunk lag -3668)   441 ms (last chunk lag -704)
+demo0     25    s3     |   118 ms (last chunk lag -1077)   160 ms (last chunk lag -672)   501 ms (last chunk lag   22)
+demo1     108   s3     |   123 ms (last chunk lag -3728)   166 ms (last chunk lag -2480)   566 ms (last chunk lag -383)
+demo2     175   s3     |   118 ms (last chunk lag -5398)   160 ms (last chunk lag -3605)   516 ms (last chunk lag -602)
+
+######## female, set 2 (light 4 blocks int4)
+EXACT counts (QEMU -icount; 1 CCOUNT tick = 24.95 instructions), text-in -> first chunk, per start-up schedule (frames of chunk 0, 1, ...; then 24)
+sentence  tok   sched  audio | 2-core tot crit-path  | PSRAM MB | bit-exact
+demo0     25    s0 f2  2.1   | 26.8       15.8       | 2.72     | 4961ecd4
+demo1     108   s0 f2  7.2   | 26.3       15.3       | 2.72     | 1be9e33a
+demo2     175   s0 f2  10.5  | 26.4       15.3       | 2.72     | 98faff55
+selftest  84    s0 f2  5.6   | 26.4       15.3       | 2.72     | 5f12d5e1
+demo0     25    s1 f10 2.1   | 39.1       21.8       | 3.07     | 4961ecd4
+demo1     108   s1 f10 7.2   | 39.6       22.4       | 3.07     | 1be9e33a
+demo2     175   s1 f10 10.5  | 39.1       21.9       | 3.07     | 98faff55
+selftest  84    s1 f10 5.6   | 39.2       21.9       | 3.07     | 5f12d5e1
+demo0     25    s2 f12 2.1   | 42.4       23.5       | 3.07     | 4961ecd4
+demo1     108   s2 f12 7.2   | 43.3       24.5       | 3.07     | 1be9e33a
+demo2     175   s2 f12 10.5  | 42.8       23.9       | 3.07     | 98faff55
+selftest  84    s2 f12 5.6   | 42.7       23.9       | 3.07     | 5f12d5e1
+demo0     25    s3 f8  2.1   | 36.4       20.7       | 2.84     | 4961ecd4
+demo1     108   s3 f8  7.2   | 35.9       20.2       | 2.84     | 1be9e33a
+demo2     175   s3 f8  10.5  | 36.5       20.7       | 2.84     | 98faff55
+selftest  84    s3 f8  5.6   | 37.0       21.2       | 2.84     | 5f12d5e1
+
+Per core in the first chunk (serialised halves): core0 11.4 M, core1 11.7 M instr (demo1, sched 0)
+
+ESTIMATED time-to-first-audio (ms) -- estimated from exact QEMU instruction counts, not measured on silicon
+sentence  tok   first  | optimistic (cpu/mem)   central                pessimistic           
+selftest  84    s0 f2  |    83 (  83/  34)          115 (  93/  45)          170 ( 102/  68)       
+demo0     25    s0 f2  |    86 (  86/  34)          118 (  96/  45)          173 ( 105/  68)       
+demo1     108   s0 f2  |    83 (  83/  34)          115 (  93/  45)          170 ( 102/  68)       
+demo2     175   s0 f2  |    83 (  83/  34)          115 (  93/  45)          170 ( 102/  68)       
+selftest  84    s1 f10 |   119 ( 119/  38)          158 ( 132/  51)          223 ( 146/  77)       
+demo0     25    s1 f10 |   118 ( 118/  38)          157 ( 132/  51)          222 ( 145/  77)       
+demo1     108   s1 f10 |   121 ( 121/  38)          161 ( 135/  51)          226 ( 149/  77)       
+demo2     175   s1 f10 |   118 ( 118/  38)          158 ( 132/  51)          223 ( 146/  77)       
+selftest  84    s2 f12 |   129 ( 129/  38)          170 ( 144/  51)          236 ( 159/  77)       
+demo0     25    s2 f12 |   127 ( 127/  38)          168 ( 142/  51)          233 ( 157/  77)       
+demo1     108   s2 f12 |   133 ( 133/  38)          173 ( 148/  51)          240 ( 163/  77)       
+demo2     175   s2 f12 |   130 ( 130/  38)          170 ( 145/  51)          236 ( 160/  77)       
+selftest  84    s3 f8  |   115 ( 115/  36)          152 ( 128/  47)          212 ( 141/  71)       
+demo0     25    s3 f8  |   112 ( 112/  36)          149 ( 125/  47)          209 ( 138/  71)       
+demo1     108   s3 f8  |   109 ( 109/  36)          145 ( 122/  47)          205 ( 134/  71)       
+demo2     175   s3 f8  |   112 ( 112/  36)          149 ( 125/  47)          209 ( 138/  71)       
+  (add <= 1 DMA descriptor (<= 20 ms) before the first sample reaches the DAC)
+
+ESTIMATED steady-state RTF: all audio after the first chunk, INCLUDING the start-up ramp chunks (< 1 needed)
+sentence  tok   sched  | crit M/s PSRAM MB/s (+rings)  | optimistic   central      pessimistic 
+selftest  84    s0     | 81       8.2       12.7      |  0.44(c0.44 m0.16)  0.59(c0.49 m0.21)  0.85(c0.54 m0.32)
+demo0     25    s0     | 75       8.1       12.6      |  0.40(c0.40 m0.16)  0.56(c0.45 m0.21)  0.81(c0.50 m0.32)
+demo1     108   s0     | 81       8.2       12.7      |  0.44(c0.44 m0.16)  0.60(c0.49 m0.21)  0.86(c0.54 m0.32)
+demo2     175   s0     | 82       8.2       12.7      |  0.45(c0.45 m0.16)  0.60(c0.50 m0.21)  0.87(c0.55 m0.32)
+selftest  84    s1     | 81       9.0       13.5      |  0.44(c0.44 m0.17)  0.60(c0.49 m0.23)  0.88(c0.54 m0.34)
+demo0     25    s1     | 77       10.1      14.6      |  0.42(c0.42 m0.18)  0.59(c0.46 m0.24)  0.88(c0.51 m0.37)
+demo1     108   s1     | 82       8.9       13.4      |  0.44(c0.44 m0.17)  0.60(c0.49 m0.22)  0.88(c0.54 m0.33)
+demo2     175   s1     | 83       8.6       13.1      |  0.45(c0.45 m0.16)  0.61(c0.50 m0.22)  0.88(c0.55 m0.33)
+selftest  84    s2     | 81       8.9       13.4      |  0.44(c0.44 m0.17)  0.60(c0.49 m0.22)  0.87(c0.54 m0.33)
+demo0     25    s2     | 77       9.5       14.0      |  0.42(c0.42 m0.18)  0.58(c0.47 m0.23)  0.86(c0.51 m0.35)
+demo1     108   s2     | 81       8.8       13.3      |  0.44(c0.44 m0.17)  0.60(c0.49 m0.22)  0.87(c0.54 m0.33)
+demo2     175   s2     | 83       8.6       13.1      |  0.45(c0.45 m0.16)  0.61(c0.50 m0.22)  0.88(c0.55 m0.33)
+selftest  84    s3     | 81       9.2       13.7      |  0.44(c0.44 m0.17)  0.61(c0.49 m0.23)  0.88(c0.54 m0.34)
+demo0     25    s3     | 78       10.6      15.1      |  0.42(c0.42 m0.19)  0.60(c0.47 m0.25)  0.90(c0.52 m0.38)
+demo1     108   s3     | 82       9.0       13.5      |  0.44(c0.44 m0.17)  0.61(c0.49 m0.22)  0.88(c0.54 m0.34)
+demo2     175   s3     | 83       8.7       13.2      |  0.45(c0.45 m0.17)  0.61(c0.50 m0.22)  0.89(c0.55 m0.33)
+
+ESTIMATED RTF of the steady-state chunks alone (full 24-frame chunks only: the long-sentence limit)
+sentence  tok   sched  | crit M/s PSRAM MB/s (+rings)  | optimistic   central      pessimistic 
+selftest  84    s0     | 82       8.1       12.6      |  0.44(c0.44 m0.16)  0.60(c0.49 m0.21)  0.86(c0.55 m0.32)
+demo0     25    s0     | 79       8.1       12.6      |  0.43(c0.43 m0.16)  0.58(c0.47 m0.21)  0.84(c0.52 m0.31)
+demo1     108   s0     | 82       8.1       12.6      |  0.45(c0.45 m0.16)  0.60(c0.50 m0.21)  0.87(c0.55 m0.32)
+demo2     175   s0     | 83       8.2       12.7      |  0.45(c0.45 m0.16)  0.61(c0.50 m0.21)  0.87(c0.56 m0.32)
+selftest  84    s1     | 82       8.4       12.9      |  0.44(c0.44 m0.16)  0.60(c0.50 m0.22)  0.87(c0.55 m0.32)
+demo0     25    s1     | 73       7.7       12.2      |  0.39(c0.39 m0.15)  0.54(c0.44 m0.20)  0.79(c0.49 m0.31)
+demo1     108   s1     | 82       8.4       12.9      |  0.44(c0.44 m0.16)  0.60(c0.49 m0.21)  0.87(c0.55 m0.32)
+demo2     175   s1     | 83       8.3       12.8      |  0.45(c0.45 m0.16)  0.61(c0.50 m0.21)  0.87(c0.55 m0.32)
+selftest  84    s2     | 82       8.5       13.0      |  0.45(c0.45 m0.16)  0.61(c0.50 m0.22)  0.87(c0.55 m0.32)
+demo0     25    s2     | 73       7.7       12.2      |  0.40(c0.40 m0.15)  0.54(c0.44 m0.20)  0.79(c0.49 m0.31)
+demo1     108   s2     | 82       8.5       13.0      |  0.44(c0.44 m0.16)  0.60(c0.49 m0.22)  0.87(c0.54 m0.32)
+demo2     175   s2     | 83       8.4       12.9      |  0.45(c0.45 m0.16)  0.61(c0.50 m0.21)  0.87(c0.55 m0.32)
+selftest  84    s3     | 82       8.4       12.9      |  0.44(c0.44 m0.16)  0.60(c0.49 m0.22)  0.87(c0.54 m0.32)
+demo0     25    s3     | 75       7.7       12.2      |  0.41(c0.41 m0.15)  0.56(c0.46 m0.20)  0.81(c0.50 m0.31)
+demo1     108   s3     | 82       8.2       12.7      |  0.44(c0.44 m0.16)  0.60(c0.49 m0.21)  0.86(c0.55 m0.32)
+demo2     175   s3     | 83       8.2       12.7      |  0.45(c0.45 m0.16)  0.61(c0.50 m0.21)  0.87(c0.56 m0.32)
+  sensitivity: at 27 MB/s (forum memcpy EXT->EXT) the PSRAM term alone is 0.30 of real time (demo1, sched 0)
+
+Sensitivity (CPI 1.45, demo1, sched 0): TTFA ms of the first chunk / steady RTF, PSRAM MB/s x share of PSRAM time hidden by overlap
+MB/s      hidden 0.00      hidden 0.50      hidden 0.80      hidden 1.00      
+27         193 ms / 0.96    143 ms / 0.72    113 ms / 0.58    101 ms / 0.49   
+40         160 ms / 0.81    126 ms / 0.65    106 ms / 0.55     93 ms / 0.49   
+50         147 ms / 0.74    120 ms / 0.62    103 ms / 0.54     93 ms / 0.49   
+60         138 ms / 0.70    115 ms / 0.60    102 ms / 0.53     93 ms / 0.49   
+80         126 ms / 0.65    109 ms / 0.57     99 ms / 0.52     93 ms / 0.49   
+
+Gapless start (audio never underruns): smallest delay S after text-in so that every later chunk is ready when the speaker needs it
+S = max over chunks k of (ready_k - audio_before_k); I2S descriptor not included; 'lag' = how far synthesis is behind playback at the end
+sentence  tok   sched  | optimistic               central                  pessimistic             
+demo0     25    s0     |   182 ms (last chunk lag -1169)   260 ms (last chunk lag -822)   398 ms (last chunk lag -234)
+demo1     108   s0     |   180 ms (last chunk lag -3950)   258 ms (last chunk lag -2799)   424 ms (last chunk lag -871)
+demo2     175   s0     |   183 ms (last chunk lag -5718)   261 ms (last chunk lag -4045)   426 ms (last chunk lag -1246)
+demo0     25    s1     |   118 ms (last chunk lag -1148)   162 ms (last chunk lag -774)   406 ms (last chunk lag -127)
+demo1     108   s1     |   121 ms (last chunk lag -3931)   165 ms (last chunk lag -2746)   429 ms (last chunk lag -742)
+demo2     175   s1     |   118 ms (last chunk lag -5703)   162 ms (last chunk lag -3997)   417 ms (last chunk lag -1129)
+demo0     25    s2     |   127 ms (last chunk lag -1149)   173 ms (last chunk lag -787)   392 ms (last chunk lag -165)
+demo1     108   s2     |   133 ms (last chunk lag -3942)   179 ms (last chunk lag -2763)   379 ms (last chunk lag -772)
+demo2     175   s2     |   130 ms (last chunk lag -5713)   176 ms (last chunk lag -4015)   379 ms (last chunk lag -1159)
+demo0     25    s3     |   112 ms (last chunk lag -1133)   152 ms (last chunk lag -745)   438 ms (last chunk lag  -78)
+demo1     108   s3     |   109 ms (last chunk lag -3935)   149 ms (last chunk lag -2738)   451 ms (last chunk lag -720)
+demo2     175   s3     |   112 ms (last chunk lag -5680)   153 ms (last chunk lag -3958)   438 ms (last chunk lag -1066)
+
+######## male, set 0 (main int8)
+EXACT counts (QEMU -icount; 1 CCOUNT tick = 24.95 instructions), text-in -> first chunk, per start-up schedule (frames of chunk 0, 1, ...; then 24)
+sentence  tok   sched  audio | 2-core tot crit-path  | PSRAM MB | bit-exact
+demo0     25    s0 f2  2.1   | 27.5       16.1       | 3.45     | a9cf618d
+demo1     108   s0 f2  7.3   | 27.5       16.1       | 3.45     | 89b77362
+demo2     175   s0 f2  10.2  | 28.0       16.5       | 3.45     | a8f3eb6b
 selftest  84    s0 f2  5.7   | 28.0       16.5       | 3.45     | 35f96c0b
 demo0     25    s1 f10 2.1   | 41.1       23.1       | 3.91     | a9cf618d
-demo1     108   s1 f10 7.3   | 41.6       23.5       | 3.91     | 89b77362
-demo2     175   s1 f10 10.2  | 41.6       23.5       | 3.91     | a8f3eb6b
-selftest  84    s1 f10 5.7   | 41.1       23.0       | 3.91     | 35f96c0b
-demo0     25    s2 f12 2.1   | 44.7       25.0       | 3.91     | a9cf618d
-demo1     108   s2 f12 7.3   | 45.0       25.4       | 3.91     | 89b77362
-demo2     175   s2 f12 10.2  | 44.5       24.9       | 3.91     | a8f3eb6b
+demo1     108   s1 f10 7.3   | 41.7       23.6       | 3.91     | 89b77362
+demo2     175   s1 f10 10.2  | 41.1       23.0       | 3.91     | a8f3eb6b
+selftest  84    s1 f10 5.7   | 42.4       24.3       | 3.91     | 35f96c0b
+demo0     25    s2 f12 2.1   | 44.8       25.1       | 3.91     | a9cf618d
+demo1     108   s2 f12 7.3   | 44.6       24.9       | 3.91     | 89b77362
+demo2     175   s2 f12 10.2  | 45.6       25.9       | 3.91     | a8f3eb6b
 selftest  84    s2 f12 5.7   | 44.6       24.9       | 3.91     | 35f96c0b
 demo0     25    s3 f8  2.1   | 37.7       21.3       | 3.68     | a9cf618d
 demo1     108   s3 f8  7.3   | 37.7       21.4       | 3.68     | 89b77362
-demo2     175   s3 f8  10.2  | 37.6       21.3       | 3.68     | a8f3eb6b
-selftest  84    s3 f8  5.7   | 38.2       21.8       | 3.68     | 35f96c0b
+demo2     175   s3 f8  10.2  | 37.7       21.3       | 3.68     | a8f3eb6b
+selftest  84    s3 f8  5.7   | 38.8       22.4       | 3.68     | 35f96c0b
 
 Per core in the first chunk (serialised halves): core0 11.8 M, core1 12.3 M instr (demo1, sched 0)
 
 ESTIMATED time-to-first-audio (ms) -- estimated from exact QEMU instruction counts, not measured on silicon
 sentence  tok   first  | optimistic (cpu/mem)   central                pessimistic           
-selftest  84    s0 f2  |    89 (  89/  43)          129 ( 100/  58)          196 ( 110/  86)       
-demo0     25    s0 f2  |    92 (  92/  43)          132 ( 103/  58)          200 ( 114/  86)       
-demo1     108   s0 f2  |    89 (  89/  43)          128 (  99/  58)          195 ( 109/  86)       
-demo2     175   s0 f2  |    87 (  87/  43)          126 (  97/  58)          193 ( 107/  86)       
-selftest  84    s1 f10 |   124 ( 124/  49)          171 ( 139/  65)          251 ( 153/  98)       
+selftest  84    s0 f2  |    90 (  90/  43)          129 ( 100/  58)          197 ( 110/  86)       
+demo0     25    s0 f2  |    87 (  87/  43)          126 (  97/  58)          193 ( 107/  86)       
+demo1     108   s0 f2  |    87 (  87/  43)          126 (  97/  58)          193 ( 107/  86)       
+demo2     175   s0 f2  |    89 (  89/  43)          129 ( 100/  58)          196 ( 110/  86)       
+selftest  84    s1 f10 |   132 ( 132/  49)          180 ( 147/  65)          260 ( 162/  98)       
 demo0     25    s1 f10 |   125 ( 125/  49)          172 ( 139/  65)          252 ( 154/  98)       
-demo1     108   s1 f10 |   127 ( 127/  49)          175 ( 142/  65)          254 ( 157/  98)       
-demo2     175   s1 f10 |   127 ( 127/  49)          175 ( 142/  65)          255 ( 157/  98)       
-selftest  84    s2 f12 |   135 ( 135/  49)          183 ( 151/  65)          264 ( 166/  98)       
-demo0     25    s2 f12 |   136 ( 136/  49)          184 ( 151/  65)          265 ( 167/  98)       
-demo1     108   s2 f12 |   137 ( 137/  49)          186 ( 153/  65)          267 ( 169/  98)       
-demo2     175   s2 f12 |   135 ( 135/  49)          183 ( 150/  65)          264 ( 166/  98)       
-selftest  84    s3 f8  |   118 ( 118/  46)          162 ( 132/  61)          237 ( 145/  92)       
-demo0     25    s3 f8  |   116 ( 116/  46)          160 ( 129/  61)          234 ( 142/  92)       
-demo1     108   s3 f8  |   116 ( 116/  46)          160 ( 129/  61)          234 ( 142/  92)       
-demo2     175   s3 f8  |   115 ( 115/  46)          159 ( 128/  61)          234 ( 142/  92)       
+demo1     108   s1 f10 |   128 ( 128/  49)          175 ( 142/  65)          255 ( 157/  98)       
+demo2     175   s1 f10 |   125 ( 125/  49)          172 ( 139/  65)          251 ( 153/  98)       
+selftest  84    s2 f12 |   135 ( 135/  49)          183 ( 150/  65)          264 ( 166/  98)       
+demo0     25    s2 f12 |   136 ( 136/  49)          184 ( 152/  65)          265 ( 167/  98)       
+demo1     108   s2 f12 |   135 ( 135/  49)          183 ( 150/  65)          264 ( 166/  98)       
+demo2     175   s2 f12 |   140 ( 140/  49)          189 ( 156/  65)          270 ( 173/  98)       
+selftest  84    s3 f8  |   121 ( 121/  46)          166 ( 135/  61)          241 ( 149/  92)       
+demo0     25    s3 f8  |   115 ( 115/  46)          159 ( 129/  61)          234 ( 142/  92)       
+demo1     108   s3 f8  |   116 ( 116/  46)          160 ( 129/  61)          235 ( 142/  92)       
+demo2     175   s3 f8  |   115 ( 115/  46)          159 ( 129/  61)          234 ( 142/  92)       
   (add <= 1 DMA descriptor (<= 20 ms) before the first sample reaches the DAC)
 
 ESTIMATED steady-state RTF: all audio after the first chunk, INCLUDING the start-up ramp chunks (< 1 needed)
 sentence  tok   sched  | crit M/s PSRAM MB/s (+rings)  | optimistic   central      pessimistic 
-selftest  84    s0     | 83       10.9      15.4      |  0.45(c0.45 m0.19)  0.63(c0.50 m0.26)  0.94(c0.56 m0.39)
-demo0     25    s0     | 78       10.7      15.2      |  0.42(c0.42 m0.19)  0.60(c0.47 m0.25)  0.90(c0.52 m0.38)
-demo1     108   s0     | 84       10.9      15.4      |  0.45(c0.45 m0.19)  0.64(c0.51 m0.26)  0.94(c0.56 m0.38)
-demo2     175   s0     | 86       11.0      15.5      |  0.47(c0.47 m0.19)  0.65(c0.52 m0.26)  0.96(c0.58 m0.39)
+selftest  84    s0     | 84       10.9      15.4      |  0.45(c0.45 m0.19)  0.64(c0.51 m0.26)  0.94(c0.56 m0.39)
+demo0     25    s0     | 78       10.7      15.2      |  0.42(c0.42 m0.19)  0.59(c0.47 m0.25)  0.90(c0.52 m0.38)
+demo1     108   s0     | 84       10.9      15.4      |  0.46(c0.46 m0.19)  0.64(c0.51 m0.26)  0.94(c0.56 m0.38)
+demo2     175   s0     | 86       11.0      15.5      |  0.47(c0.47 m0.19)  0.65(c0.52 m0.26)  0.96(c0.57 m0.39)
 selftest  84    s1     | 84       12.1      16.6      |  0.45(c0.45 m0.21)  0.65(c0.51 m0.28)  0.97(c0.56 m0.41)
-demo0     25    s1     | 81       13.7      18.2      |  0.44(c0.44 m0.23)  0.64(c0.49 m0.30)  0.99(c0.54 m0.45)
-demo1     108   s1     | 85       11.8      16.3      |  0.46(c0.46 m0.20)  0.65(c0.51 m0.27)  0.97(c0.56 m0.41)
+demo0     25    s1     | 80       13.7      18.2      |  0.43(c0.43 m0.23)  0.63(c0.48 m0.30)  0.99(c0.53 m0.45)
+demo1     108   s1     | 85       11.8      16.3      |  0.46(c0.46 m0.20)  0.65(c0.51 m0.27)  0.97(c0.57 m0.41)
 demo2     175   s1     | 86       11.6      16.1      |  0.47(c0.47 m0.20)  0.66(c0.52 m0.27)  0.98(c0.58 m0.40)
 selftest  84    s2     | 84       11.8      16.3      |  0.46(c0.46 m0.20)  0.65(c0.51 m0.27)  0.97(c0.56 m0.41)
 demo0     25    s2     | 80       12.8      17.3      |  0.43(c0.43 m0.22)  0.63(c0.48 m0.29)  0.96(c0.53 m0.43)
 demo1     108   s2     | 85       11.6      16.1      |  0.46(c0.46 m0.20)  0.65(c0.51 m0.27)  0.97(c0.56 m0.40)
-demo2     175   s2     | 86       11.5      16.0      |  0.47(c0.47 m0.20)  0.66(c0.52 m0.27)  0.98(c0.58 m0.40)
-selftest  84    s3     | 84       12.2      16.7      |  0.46(c0.46 m0.21)  0.65(c0.51 m0.28)  0.98(c0.56 m0.42)
-demo0     25    s3     | 82       13.9      18.4      |  0.45(c0.45 m0.23)  0.65(c0.50 m0.31)  1.01(c0.55 m0.46)
-demo1     108   s3     | 85       11.9      16.4      |  0.46(c0.46 m0.21)  0.65(c0.51 m0.27)  0.98(c0.57 m0.41)
-demo2     175   s3     | 86       11.7      16.2      |  0.47(c0.47 m0.20)  0.66(c0.52 m0.27)  0.98(c0.57 m0.40)
+demo2     175   s2     | 86       11.5      16.0      |  0.47(c0.47 m0.20)  0.65(c0.52 m0.27)  0.98(c0.57 m0.40)
+selftest  84    s3     | 85       12.2      16.7      |  0.46(c0.46 m0.21)  0.65(c0.51 m0.28)  0.98(c0.56 m0.42)
+demo0     25    s3     | 80       13.9      18.4      |  0.43(c0.43 m0.23)  0.64(c0.48 m0.31)  0.99(c0.53 m0.46)
+demo1     108   s3     | 85       11.9      16.4      |  0.46(c0.46 m0.21)  0.65(c0.52 m0.27)  0.98(c0.57 m0.41)
+demo2     175   s3     | 86       11.7      16.2      |  0.47(c0.47 m0.20)  0.66(c0.52 m0.27)  0.98(c0.58 m0.40)
 
 ESTIMATED RTF of the steady-state chunks alone (full 24-frame chunks only: the long-sentence limit)
 sentence  tok   sched  | crit M/s PSRAM MB/s (+rings)  | optimistic   central      pessimistic 
-selftest  84    s0     | 83       10.9      15.4      |  0.45(c0.45 m0.19)  0.63(c0.50 m0.26)  0.94(c0.56 m0.39)
-demo0     25    s0     | 79       10.8      15.3      |  0.43(c0.43 m0.19)  0.61(c0.48 m0.26)  0.91(c0.53 m0.38)
-demo1     108   s0     | 84       10.9      15.4      |  0.46(c0.46 m0.19)  0.64(c0.51 m0.26)  0.95(c0.56 m0.39)
-demo2     175   s0     | 88       11.0      15.5      |  0.47(c0.47 m0.19)  0.66(c0.53 m0.26)  0.97(c0.58 m0.39)
+selftest  84    s0     | 84       10.9      15.4      |  0.45(c0.45 m0.19)  0.64(c0.51 m0.26)  0.94(c0.56 m0.39)
+demo0     25    s0     | 78       10.8      15.3      |  0.42(c0.42 m0.19)  0.60(c0.47 m0.26)  0.91(c0.52 m0.38)
+demo1     108   s0     | 85       10.9      15.4      |  0.46(c0.46 m0.19)  0.64(c0.51 m0.26)  0.95(c0.56 m0.39)
+demo2     175   s0     | 87       11.0      15.5      |  0.47(c0.47 m0.19)  0.65(c0.52 m0.26)  0.97(c0.58 m0.39)
 selftest  84    s1     | 84       11.2      15.7      |  0.46(c0.46 m0.20)  0.64(c0.51 m0.26)  0.96(c0.56 m0.39)
 demo0     25    s1     | 77       10.5      15.0      |  0.42(c0.42 m0.19)  0.59(c0.47 m0.25)  0.89(c0.52 m0.38)
-demo1     108   s1     | 85       11.1      15.6      |  0.46(c0.46 m0.20)  0.65(c0.52 m0.26)  0.96(c0.57 m0.39)
+demo1     108   s1     | 86       11.1      15.6      |  0.46(c0.46 m0.20)  0.65(c0.52 m0.26)  0.96(c0.57 m0.39)
 demo2     175   s1     | 86       11.0      15.5      |  0.47(c0.47 m0.19)  0.65(c0.52 m0.26)  0.96(c0.58 m0.39)
-selftest  84    s2     | 85       11.2      15.7      |  0.46(c0.46 m0.20)  0.64(c0.51 m0.26)  0.96(c0.57 m0.39)
-demo0     25    s2     | 78       10.5      15.0      |  0.42(c0.42 m0.19)  0.59(c0.47 m0.25)  0.89(c0.52 m0.38)
+selftest  84    s2     | 85       11.2      15.7      |  0.46(c0.46 m0.20)  0.65(c0.52 m0.26)  0.96(c0.57 m0.39)
+demo0     25    s2     | 77       10.5      15.0      |  0.42(c0.42 m0.19)  0.59(c0.47 m0.25)  0.89(c0.51 m0.38)
 demo1     108   s2     | 85       11.2      15.7      |  0.46(c0.46 m0.20)  0.65(c0.52 m0.26)  0.96(c0.57 m0.39)
-demo2     175   s2     | 87       11.2      15.7      |  0.47(c0.47 m0.20)  0.66(c0.52 m0.26)  0.97(c0.58 m0.39)
-selftest  84    s3     | 83       11.0      15.5      |  0.45(c0.45 m0.19)  0.63(c0.50 m0.26)  0.94(c0.55 m0.39)
-demo0     25    s3     | 76       10.5      15.0      |  0.41(c0.41 m0.19)  0.58(c0.46 m0.25)  0.88(c0.50 m0.38)
-demo1     108   s3     | 84       11.0      15.5      |  0.46(c0.46 m0.19)  0.64(c0.51 m0.26)  0.95(c0.56 m0.39)
-demo2     175   s3     | 85       11.0      15.5      |  0.46(c0.46 m0.19)  0.65(c0.52 m0.26)  0.96(c0.57 m0.39)
+demo2     175   s2     | 87       11.2      15.7      |  0.47(c0.47 m0.20)  0.65(c0.52 m0.26)  0.97(c0.58 m0.39)
+selftest  84    s3     | 83       11.0      15.5      |  0.45(c0.45 m0.19)  0.63(c0.50 m0.26)  0.94(c0.56 m0.39)
+demo0     25    s3     | 73       10.5      15.0      |  0.40(c0.40 m0.19)  0.57(c0.44 m0.25)  0.86(c0.49 m0.38)
+demo1     108   s3     | 85       11.0      15.5      |  0.46(c0.46 m0.19)  0.64(c0.51 m0.26)  0.95(c0.57 m0.39)
+demo2     175   s3     | 86       11.0      15.5      |  0.46(c0.46 m0.19)  0.65(c0.52 m0.26)  0.96(c0.57 m0.39)
   sensitivity: at 27 MB/s (forum memcpy EXT->EXT) the PSRAM term alone is 0.40 of real time (demo1, sched 0)
 
 Sensitivity (CPI 1.45, demo1, sched 0): TTFA ms of the first chunk / steady RTF, PSRAM MB/s x share of PSRAM time hidden by overlap
 MB/s      hidden 0.00      hidden 0.50      hidden 0.80      hidden 1.00      
-27         227 ms / 1.08    163 ms / 0.79    128 ms / 0.62    128 ms / 0.57   
-40         185 ms / 0.89    142 ms / 0.70    116 ms / 0.58     99 ms / 0.51   
-50         168 ms / 0.81    133 ms / 0.66    113 ms / 0.57     99 ms / 0.51   
-60         156 ms / 0.76    128 ms / 0.64    110 ms / 0.56     99 ms / 0.51   
-80         142 ms / 0.70    120 ms / 0.60    107 ms / 0.55     99 ms / 0.51   
+27         225 ms / 1.08    161 ms / 0.79    128 ms / 0.62    128 ms / 0.57   
+40         183 ms / 0.89    140 ms / 0.70    114 ms / 0.58     97 ms / 0.51   
+50         166 ms / 0.82    132 ms / 0.66    111 ms / 0.57     97 ms / 0.51   
+60         155 ms / 0.76    126 ms / 0.64    109 ms / 0.56     97 ms / 0.51   
+80         140 ms / 0.70    119 ms / 0.60    106 ms / 0.55     97 ms / 0.51   
 
 Gapless start (audio never underruns): smallest delay S after text-in so that every later chunk is ready when the speaker needs it
 S = max over chunks k of (ready_k - audio_before_k); I2S descriptor not included; 'lag' = how far synthesis is behind playback at the end
 sentence  tok   sched  | optimistic               central                  pessimistic             
-demo0     25    s0     |   195 ms (last chunk lag -1157)   287 ms (last chunk lag -744)   484 ms (last chunk lag  -33)
-demo1     108   s0     |   191 ms (last chunk lag -3881)   283 ms (last chunk lag -2535)   501 ms (last chunk lag -232)
-demo2     175   s0     |   195 ms (last chunk lag -5354)   287 ms (last chunk lag -3450)   508 ms (last chunk lag -202)
-demo0     25    s1     |   125 ms (last chunk lag -1131)   177 ms (last chunk lag -678)   575 ms (last chunk lag  126)
-demo1     108   s1     |   127 ms (last chunk lag -3854)   179 ms (last chunk lag -2457)   624 ms (last chunk lag  -47)
-demo2     175   s1     |   127 ms (last chunk lag -5356)   179 ms (last chunk lag -3416)   614 ms (last chunk lag  -76)
-demo0     25    s2     |   136 ms (last chunk lag -1147)   189 ms (last chunk lag -710)   507 ms (last chunk lag   58)
-demo1     108   s2     |   137 ms (last chunk lag -3859)   191 ms (last chunk lag -2476)   583 ms (last chunk lag  -97)
-demo2     175   s2     |   135 ms (last chunk lag -5362)   188 ms (last chunk lag -3433)   553 ms (last chunk lag -111)
-demo0     25    s3     |   116 ms (last chunk lag -1120)   163 ms (last chunk lag -654)   608 ms (last chunk lag  161)
-demo1     108   s3     |   116 ms (last chunk lag -3839)   163 ms (last chunk lag -2432)   687 ms (last chunk lag   -7)
-demo2     175   s3     |   115 ms (last chunk lag -5377)   163 ms (last chunk lag -3419)   653 ms (last chunk lag  -62)
+demo0     25    s0     |   189 ms (last chunk lag -1170)   281 ms (last chunk lag -759)   475 ms (last chunk lag  -49)
+demo1     108   s0     |   190 ms (last chunk lag -3877)   281 ms (last chunk lag -2531)   499 ms (last chunk lag -228)
+demo2     175   s0     |   192 ms (last chunk lag -5385)   284 ms (last chunk lag -3485)   503 ms (last chunk lag -240)
+demo0     25    s1     |   125 ms (last chunk lag -1141)   177 ms (last chunk lag -689)   562 ms (last chunk lag  114)
+demo1     108   s1     |   128 ms (last chunk lag -3845)   180 ms (last chunk lag -2447)   615 ms (last chunk lag  -35)
+demo2     175   s1     |   125 ms (last chunk lag -5362)   176 ms (last chunk lag -3422)   613 ms (last chunk lag  -83)
+demo0     25    s2     |   136 ms (last chunk lag -1146)   190 ms (last chunk lag -709)   508 ms (last chunk lag   59)
+demo1     108   s2     |   135 ms (last chunk lag -3863)   189 ms (last chunk lag -2480)   581 ms (last chunk lag -101)
+demo2     175   s2     |   140 ms (last chunk lag -5362)   195 ms (last chunk lag -3432)   557 ms (last chunk lag -111)
+demo0     25    s3     |   115 ms (last chunk lag -1144)   163 ms (last chunk lag -681)   597 ms (last chunk lag  132)
+demo1     108   s3     |   116 ms (last chunk lag -3828)   164 ms (last chunk lag -2419)   683 ms (last chunk lag    7)
+demo2     175   s3     |   115 ms (last chunk lag -5370)   163 ms (last chunk lag -3412)   649 ms (last chunk lag  -54)
+
+######## male, set 1 (main int4)
+EXACT counts (QEMU -icount; 1 CCOUNT tick = 24.95 instructions), text-in -> first chunk, per start-up schedule (frames of chunk 0, 1, ...; then 24)
+sentence  tok   sched  audio | 2-core tot crit-path  | PSRAM MB | bit-exact
+demo0     25    s0 f2  2.1   | 28.3       16.5       | 2.84     | 4288d642
+demo1     108   s0 f2  7.3   | 29.0       17.2       | 2.84     | dfa678be
+demo2     175   s0 f2  10.2  | 28.3       16.5       | 2.84     | 7e7cac1d
+selftest  84    s0 f2  5.7   | 28.4       16.5       | 2.84     | b46d58de
+demo0     25    s1 f10 2.1   | 42.4       23.9       | 3.20     | 4288d642
+demo1     108   s1 f10 7.3   | 42.0       23.5       | 3.20     | dfa678be
+demo2     175   s1 f10 10.2  | 43.0       24.5       | 3.20     | 7e7cac1d
+selftest  84    s1 f10 5.7   | 42.0       23.4       | 3.20     | b46d58de
+demo0     25    s2 f12 2.1   | 46.2       26.0       | 3.20     | 4288d642
+demo1     108   s2 f12 7.3   | 45.6       25.5       | 3.20     | dfa678be
+demo2     175   s2 f12 10.2  | 46.2       26.0       | 3.20     | 7e7cac1d
+selftest  84    s2 f12 5.7   | 45.5       25.4       | 3.20     | b46d58de
+demo0     25    s3 f8  2.1   | 38.6       21.8       | 2.97     | 4288d642
+demo1     108   s3 f8  7.3   | 38.6       21.8       | 2.97     | dfa678be
+demo2     175   s3 f8  10.2  | 38.6       21.8       | 2.97     | 7e7cac1d
+selftest  84    s3 f8  5.7   | 38.6       21.8       | 2.97     | b46d58de
+
+Per core in the first chunk (serialised halves): core0 12.3 M, core1 12.7 M instr (demo1, sched 0)
+
+ESTIMATED time-to-first-audio (ms) -- estimated from exact QEMU instruction counts, not measured on silicon
+sentence  tok   first  | optimistic (cpu/mem)   central                pessimistic           
+selftest  84    s0 f2  |    89 (  89/  36)          123 ( 100/  47)          181 ( 110/  71)       
+demo0     25    s0 f2  |    89 (  89/  36)          123 ( 100/  47)          181 ( 110/  71)       
+demo1     108   s0 f2  |    93 (  93/  36)          127 ( 104/  47)          186 ( 114/  71)       
+demo2     175   s0 f2  |    89 (  89/  36)          123 (  99/  47)          181 ( 110/  71)       
+selftest  84    s1 f10 |   127 ( 127/  40)          168 ( 142/  53)          236 ( 156/  80)       
+demo0     25    s1 f10 |   129 ( 129/  40)          171 ( 144/  53)          239 ( 159/  80)       
+demo1     108   s1 f10 |   127 ( 127/  40)          169 ( 142/  53)          237 ( 157/  80)       
+demo2     175   s1 f10 |   133 ( 133/  40)          174 ( 148/  53)          243 ( 163/  80)       
+selftest  84    s2 f12 |   137 ( 137/  40)          180 ( 153/  53)          249 ( 169/  80)       
+demo0     25    s2 f12 |   141 ( 141/  40)          184 ( 157/  53)          254 ( 174/  80)       
+demo1     108   s2 f12 |   138 ( 138/  40)          180 ( 154/  53)          250 ( 170/  80)       
+demo2     175   s2 f12 |   141 ( 141/  40)          184 ( 157/  53)          253 ( 173/  80)       
+selftest  84    s3 f8  |   118 ( 118/  37)          156 ( 131/  49)          219 ( 145/  74)       
+demo0     25    s3 f8  |   118 ( 118/  37)          156 ( 132/  49)          219 ( 145/  74)       
+demo1     108   s3 f8  |   118 ( 118/  37)          156 ( 131/  49)          219 ( 145/  74)       
+demo2     175   s3 f8  |   118 ( 118/  37)          156 ( 132/  49)          219 ( 145/  74)       
+  (add <= 1 DMA descriptor (<= 20 ms) before the first sample reaches the DAC)
+
+ESTIMATED steady-state RTF: all audio after the first chunk, INCLUDING the start-up ramp chunks (< 1 needed)
+sentence  tok   sched  | crit M/s PSRAM MB/s (+rings)  | optimistic   central      pessimistic 
+selftest  84    s0     | 85       8.5       13.0      |  0.46(c0.46 m0.16)  0.62(c0.52 m0.22)  0.89(c0.57 m0.33)
+demo0     25    s0     | 80       8.3       12.8      |  0.43(c0.43 m0.16)  0.59(c0.48 m0.21)  0.85(c0.53 m0.32)
+demo1     108   s0     | 86       8.5       13.0      |  0.46(c0.46 m0.16)  0.63(c0.52 m0.22)  0.90(c0.57 m0.32)
+demo2     175   s0     | 88       8.6       13.1      |  0.47(c0.47 m0.16)  0.64(c0.53 m0.22)  0.91(c0.58 m0.33)
+selftest  84    s1     | 86       9.5       14.0      |  0.47(c0.47 m0.17)  0.64(c0.52 m0.23)  0.92(c0.57 m0.35)
+demo0     25    s1     | 82       10.6      15.1      |  0.45(c0.45 m0.19)  0.62(c0.50 m0.25)  0.93(c0.55 m0.38)
+demo1     108   s1     | 86       9.3       13.8      |  0.47(c0.47 m0.17)  0.64(c0.52 m0.23)  0.92(c0.58 m0.34)
+demo2     175   s1     | 88       9.1       13.6      |  0.48(c0.48 m0.17)  0.64(c0.53 m0.23)  0.93(c0.59 m0.34)
+selftest  84    s2     | 86       9.3       13.8      |  0.46(c0.46 m0.17)  0.63(c0.52 m0.23)  0.92(c0.57 m0.34)
+demo0     25    s2     | 81       10.0      14.5      |  0.44(c0.44 m0.18)  0.61(c0.49 m0.24)  0.91(c0.54 m0.36)
+demo1     108   s2     | 86       9.1       13.6      |  0.47(c0.47 m0.17)  0.63(c0.52 m0.23)  0.92(c0.58 m0.34)
+demo2     175   s2     | 88       9.0       13.5      |  0.47(c0.47 m0.17)  0.64(c0.53 m0.23)  0.92(c0.58 m0.34)
+selftest  84    s3     | 86       9.6       14.1      |  0.47(c0.47 m0.18)  0.64(c0.52 m0.23)  0.93(c0.58 m0.35)
+demo0     25    s3     | 82       10.9      15.4      |  0.44(c0.44 m0.19)  0.62(c0.50 m0.26)  0.93(c0.55 m0.38)
+demo1     108   s3     | 87       9.4       13.9      |  0.47(c0.47 m0.17)  0.64(c0.53 m0.23)  0.93(c0.58 m0.35)
+demo2     175   s3     | 89       9.2       13.7      |  0.48(c0.48 m0.17)  0.65(c0.53 m0.23)  0.93(c0.59 m0.34)
+
+ESTIMATED RTF of the steady-state chunks alone (full 24-frame chunks only: the long-sentence limit)
+sentence  tok   sched  | crit M/s PSRAM MB/s (+rings)  | optimistic   central      pessimistic 
+selftest  84    s0     | 85       8.5       13.0      |  0.46(c0.46 m0.16)  0.62(c0.52 m0.22)  0.89(c0.57 m0.33)
+demo0     25    s0     | 81       8.4       12.9      |  0.44(c0.44 m0.16)  0.60(c0.49 m0.22)  0.86(c0.54 m0.32)
+demo1     108   s0     | 86       8.5       13.0      |  0.47(c0.47 m0.16)  0.63(c0.52 m0.22)  0.90(c0.57 m0.33)
+demo2     175   s0     | 89       8.6       13.1      |  0.48(c0.48 m0.16)  0.64(c0.54 m0.22)  0.92(c0.59 m0.33)
+selftest  84    s1     | 86       8.8       13.3      |  0.47(c0.47 m0.17)  0.63(c0.52 m0.22)  0.91(c0.58 m0.33)
+demo0     25    s1     | 79       8.1       12.6      |  0.43(c0.43 m0.16)  0.58(c0.48 m0.21)  0.84(c0.53 m0.32)
+demo1     108   s1     | 87       8.7       13.2      |  0.47(c0.47 m0.17)  0.63(c0.52 m0.22)  0.91(c0.58 m0.33)
+demo2     175   s1     | 88       8.6       13.1      |  0.48(c0.48 m0.16)  0.64(c0.53 m0.22)  0.91(c0.58 m0.33)
+selftest  84    s2     | 86       8.9       13.4      |  0.47(c0.47 m0.17)  0.63(c0.52 m0.22)  0.91(c0.57 m0.33)
+demo0     25    s2     | 78       8.1       12.6      |  0.42(c0.42 m0.16)  0.58(c0.47 m0.21)  0.84(c0.52 m0.32)
+demo1     108   s2     | 87       8.8       13.3      |  0.47(c0.47 m0.17)  0.63(c0.52 m0.22)  0.91(c0.58 m0.33)
+demo2     175   s2     | 88       8.8       13.3      |  0.48(c0.48 m0.17)  0.64(c0.53 m0.22)  0.92(c0.59 m0.33)
+selftest  84    s3     | 85       8.6       13.1      |  0.46(c0.46 m0.16)  0.62(c0.51 m0.22)  0.89(c0.56 m0.33)
+demo0     25    s3     | 75       8.1       12.6      |  0.41(c0.41 m0.16)  0.56(c0.45 m0.21)  0.82(c0.50 m0.32)
+demo1     108   s3     | 87       8.6       13.1      |  0.47(c0.47 m0.16)  0.63(c0.52 m0.22)  0.90(c0.58 m0.33)
+demo2     175   s3     | 88       8.6       13.1      |  0.48(c0.48 m0.16)  0.64(c0.53 m0.22)  0.91(c0.58 m0.33)
+  sensitivity: at 27 MB/s (forum memcpy EXT->EXT) the PSRAM term alone is 0.31 of real time (demo1, sched 0)
+
+Sensitivity (CPI 1.45, demo1, sched 0): TTFA ms of the first chunk / steady RTF, PSRAM MB/s x share of PSRAM time hidden by overlap
+MB/s      hidden 0.00      hidden 0.50      hidden 0.80      hidden 1.00      
+27         209 ms / 1.00    156 ms / 0.76    125 ms / 0.61    105 ms / 0.52   
+40         175 ms / 0.84    139 ms / 0.68    118 ms / 0.58    104 ms / 0.52   
+50         161 ms / 0.78    132 ms / 0.65    115 ms / 0.57    104 ms / 0.52   
+60         151 ms / 0.73    127 ms / 0.63    113 ms / 0.56    104 ms / 0.52   
+80         139 ms / 0.68    122 ms / 0.60    111 ms / 0.55    104 ms / 0.52   
+
+Gapless start (audio never underruns): smallest delay S after text-in so that every later chunk is ready when the speaker needs it
+S = max over chunks k of (ready_k - audio_before_k); I2S descriptor not included; 'lag' = how far synthesis is behind playback at the end
+sentence  tok   sched  | optimistic               central                  pessimistic             
+demo0     25    s0     |   197 ms (last chunk lag -1139)   279 ms (last chunk lag -771)   436 ms (last chunk lag -152)
+demo1     108   s0     |   204 ms (last chunk lag -3807)   286 ms (last chunk lag -2601)   470 ms (last chunk lag -585)
+demo2     175   s0     |   195 ms (last chunk lag -5288)   277 ms (last chunk lag -3584)   460 ms (last chunk lag -744)
+demo0     25    s1     |   129 ms (last chunk lag -1117)   176 ms (last chunk lag -711)   481 ms (last chunk lag  -19)
+demo1     108   s1     |   127 ms (last chunk lag -3795)   173 ms (last chunk lag -2544)   487 ms (last chunk lag -443)
+demo2     175   s1     |   133 ms (last chunk lag -5280)   179 ms (last chunk lag -3538)   488 ms (last chunk lag -622)
+demo0     25    s2     |   141 ms (last chunk lag -1127)   190 ms (last chunk lag -735)   446 ms (last chunk lag  -69)
+demo1     108   s2     |   138 ms (last chunk lag -3799)   186 ms (last chunk lag -2561)   454 ms (last chunk lag -482)
+demo2     175   s2     |   141 ms (last chunk lag -5296)   189 ms (last chunk lag -3561)   437 ms (last chunk lag -658)
+demo0     25    s3     |   118 ms (last chunk lag -1120)   160 ms (last chunk lag -711)   500 ms (last chunk lag  -10)
+demo1     108   s3     |   118 ms (last chunk lag -3754)   160 ms (last chunk lag -2496)   572 ms (last chunk lag -378)
+demo2     175   s3     |   118 ms (last chunk lag -5245)   160 ms (last chunk lag -3490)   512 ms (last chunk lag -554)
+
+######## male, set 2 (light 4 blocks int4)
+EXACT counts (QEMU -icount; 1 CCOUNT tick = 24.95 instructions), text-in -> first chunk, per start-up schedule (frames of chunk 0, 1, ...; then 24)
+sentence  tok   sched  audio | 2-core tot crit-path  | PSRAM MB | bit-exact
+demo0     25    s0 f2  2.1   | 26.4       15.3       | 2.72     | 2db07b0c
+demo1     108   s0 f2  7.3   | 26.8       15.8       | 2.72     | 92fdddd9
+demo2     175   s0 f2  10.2  | 27.0       16.0       | 2.72     | 65203618
+selftest  84    s0 f2  5.7   | 26.3       15.3       | 2.72     | a14d1c89
+demo0     25    s1 f10 2.1   | 39.6       22.3       | 3.07     | 2db07b0c
+demo1     108   s1 f10 7.3   | 40.2       22.9       | 3.07     | 92fdddd9
+demo2     175   s1 f10 10.2  | 39.2       21.9       | 3.07     | 65203618
+selftest  84    s1 f10 5.7   | 39.1       21.8       | 3.07     | a14d1c89
+demo0     25    s2 f12 2.1   | 42.9       24.0       | 3.07     | 2db07b0c
+demo1     108   s2 f12 7.3   | 42.7       23.9       | 3.07     | 92fdddd9
+demo2     175   s2 f12 10.2  | 42.4       23.5       | 3.07     | 65203618
+selftest  84    s2 f12 5.7   | 42.3       23.4       | 3.07     | a14d1c89
+demo0     25    s3 f8  2.1   | 36.0       20.2       | 2.84     | 2db07b0c
+demo1     108   s3 f8  7.3   | 36.4       20.7       | 2.84     | 92fdddd9
+demo2     175   s3 f8  10.2  | 36.0       20.2       | 2.84     | 65203618
+selftest  84    s3 f8  5.7   | 36.0       20.2       | 2.84     | a14d1c89
+
+Per core in the first chunk (serialised halves): core0 11.4 M, core1 11.7 M instr (demo1, sched 0)
+
+ESTIMATED time-to-first-audio (ms) -- estimated from exact QEMU instruction counts, not measured on silicon
+sentence  tok   first  | optimistic (cpu/mem)   central                pessimistic           
+selftest  84    s0 f2  |    83 (  83/  34)          115 (  92/  45)          170 ( 102/  68)       
+demo0     25    s0 f2  |    83 (  83/  34)          115 (  93/  45)          170 ( 102/  68)       
+demo1     108   s0 f2  |    86 (  86/  34)          118 (  96/  45)          173 ( 105/  68)       
+demo2     175   s0 f2  |    87 (  87/  34)          119 (  97/  45)          175 ( 107/  68)       
+selftest  84    s1 f10 |   118 ( 118/  38)          157 ( 132/  51)          222 ( 145/  77)       
+demo0     25    s1 f10 |   121 ( 121/  38)          161 ( 135/  51)          226 ( 149/  77)       
+demo1     108   s1 f10 |   124 ( 124/  38)          164 ( 138/  51)          229 ( 153/  77)       
+demo2     175   s1 f10 |   119 ( 119/  38)          158 ( 132/  51)          223 ( 146/  77)       
+selftest  84    s2 f12 |   127 ( 127/  38)          167 ( 141/  51)          233 ( 156/  77)       
+demo0     25    s2 f12 |   130 ( 130/  38)          171 ( 145/  51)          237 ( 160/  77)       
+demo1     108   s2 f12 |   129 ( 129/  38)          170 ( 144/  51)          236 ( 159/  77)       
+demo2     175   s2 f12 |   127 ( 127/  38)          168 ( 142/  51)          233 ( 157/  77)       
+selftest  84    s3 f8  |   109 ( 109/  36)          146 ( 122/  47)          206 ( 135/  71)       
+demo0     25    s3 f8  |   109 ( 109/  36)          146 ( 122/  47)          206 ( 135/  71)       
+demo1     108   s3 f8  |   112 ( 112/  36)          149 ( 125/  47)          209 ( 138/  71)       
+demo2     175   s3 f8  |   109 ( 109/  36)          146 ( 122/  47)          206 ( 135/  71)       
+  (add <= 1 DMA descriptor (<= 20 ms) before the first sample reaches the DAC)
+
+ESTIMATED steady-state RTF: all audio after the first chunk, INCLUDING the start-up ramp chunks (< 1 needed)
+sentence  tok   sched  | crit M/s PSRAM MB/s (+rings)  | optimistic   central      pessimistic 
+selftest  84    s0     | 80       8.1       12.6      |  0.43(c0.43 m0.16)  0.59(c0.48 m0.21)  0.85(c0.53 m0.32)
+demo0     25    s0     | 76       7.9       12.4      |  0.41(c0.41 m0.16)  0.56(c0.46 m0.21)  0.82(c0.51 m0.31)
+demo1     108   s0     | 81       8.1       12.6      |  0.44(c0.44 m0.16)  0.59(c0.49 m0.21)  0.85(c0.54 m0.31)
+demo2     175   s0     | 82       8.2       12.7      |  0.45(c0.45 m0.16)  0.60(c0.50 m0.21)  0.87(c0.55 m0.32)
+selftest  84    s1     | 81       9.0       13.5      |  0.44(c0.44 m0.17)  0.60(c0.49 m0.23)  0.88(c0.54 m0.34)
+demo0     25    s1     | 77       10.1      14.6      |  0.42(c0.42 m0.18)  0.59(c0.47 m0.24)  0.88(c0.51 m0.37)
+demo1     108   s1     | 81       8.8       13.3      |  0.44(c0.44 m0.17)  0.60(c0.49 m0.22)  0.88(c0.54 m0.33)
+demo2     175   s1     | 82       8.7       13.2      |  0.45(c0.45 m0.16)  0.61(c0.50 m0.22)  0.88(c0.55 m0.33)
+selftest  84    s2     | 81       8.8       13.3      |  0.44(c0.44 m0.17)  0.60(c0.49 m0.22)  0.87(c0.54 m0.33)
+demo0     25    s2     | 77       9.5       14.0      |  0.42(c0.42 m0.17)  0.58(c0.46 m0.23)  0.86(c0.51 m0.35)
+demo1     108   s2     | 81       8.7       13.2      |  0.44(c0.44 m0.16)  0.60(c0.49 m0.22)  0.87(c0.54 m0.33)
+demo2     175   s2     | 83       8.6       13.1      |  0.45(c0.45 m0.16)  0.61(c0.50 m0.22)  0.88(c0.55 m0.33)
+selftest  84    s3     | 81       9.1       13.6      |  0.44(c0.44 m0.17)  0.60(c0.49 m0.23)  0.88(c0.54 m0.34)
+demo0     25    s3     | 77       10.3      14.8      |  0.42(c0.42 m0.19)  0.59(c0.46 m0.25)  0.88(c0.51 m0.37)
+demo1     108   s3     | 82       8.9       13.4      |  0.44(c0.44 m0.17)  0.61(c0.49 m0.22)  0.88(c0.55 m0.34)
+demo2     175   s3     | 83       8.7       13.2      |  0.45(c0.45 m0.17)  0.61(c0.50 m0.22)  0.88(c0.55 m0.33)
+
+ESTIMATED RTF of the steady-state chunks alone (full 24-frame chunks only: the long-sentence limit)
+sentence  tok   sched  | crit M/s PSRAM MB/s (+rings)  | optimistic   central      pessimistic 
+selftest  84    s0     | 80       8.1       12.6      |  0.43(c0.43 m0.16)  0.59(c0.48 m0.21)  0.85(c0.53 m0.32)
+demo0     25    s0     | 77       8.0       12.5      |  0.42(c0.42 m0.16)  0.57(c0.47 m0.21)  0.83(c0.51 m0.31)
+demo1     108   s0     | 81       8.1       12.6      |  0.44(c0.44 m0.16)  0.60(c0.49 m0.21)  0.86(c0.54 m0.32)
+demo2     175   s0     | 83       8.2       12.7      |  0.45(c0.45 m0.16)  0.61(c0.50 m0.21)  0.87(c0.56 m0.32)
+selftest  84    s1     | 81       8.4       12.9      |  0.44(c0.44 m0.16)  0.60(c0.49 m0.21)  0.86(c0.54 m0.32)
+demo0     25    s1     | 74       7.7       12.2      |  0.40(c0.40 m0.15)  0.55(c0.45 m0.20)  0.80(c0.49 m0.31)
+demo1     108   s1     | 82       8.3       12.8      |  0.44(c0.44 m0.16)  0.60(c0.49 m0.21)  0.87(c0.55 m0.32)
+demo2     175   s1     | 83       8.3       12.8      |  0.45(c0.45 m0.16)  0.61(c0.50 m0.21)  0.87(c0.55 m0.32)
+selftest  84    s2     | 81       8.4       12.9      |  0.44(c0.44 m0.16)  0.60(c0.49 m0.22)  0.87(c0.54 m0.32)
+demo0     25    s2     | 73       7.7       12.2      |  0.40(c0.40 m0.15)  0.55(c0.44 m0.20)  0.79(c0.49 m0.31)
+demo1     108   s2     | 82       8.4       12.9      |  0.44(c0.44 m0.16)  0.60(c0.50 m0.21)  0.87(c0.55 m0.32)
+demo2     175   s2     | 83       8.4       12.9      |  0.45(c0.45 m0.16)  0.61(c0.50 m0.21)  0.88(c0.56 m0.32)
+selftest  84    s3     | 79       8.2       12.7      |  0.43(c0.43 m0.16)  0.58(c0.48 m0.21)  0.84(c0.53 m0.32)
+demo0     25    s3     | 70       7.7       12.2      |  0.38(c0.38 m0.15)  0.53(c0.42 m0.20)  0.77(c0.47 m0.31)
+demo1     108   s3     | 81       8.3       12.8      |  0.44(c0.44 m0.16)  0.60(c0.49 m0.21)  0.86(c0.54 m0.32)
+demo2     175   s3     | 82       8.2       12.7      |  0.45(c0.45 m0.16)  0.60(c0.50 m0.21)  0.87(c0.55 m0.32)
+  sensitivity: at 27 MB/s (forum memcpy EXT->EXT) the PSRAM term alone is 0.30 of real time (demo1, sched 0)
+
+Sensitivity (CPI 1.45, demo1, sched 0): TTFA ms of the first chunk / steady RTF, PSRAM MB/s x share of PSRAM time hidden by overlap
+MB/s      hidden 0.00      hidden 0.50      hidden 0.80      hidden 1.00      
+27         196 ms / 0.95    146 ms / 0.72    116 ms / 0.58    101 ms / 0.49   
+40         163 ms / 0.80    129 ms / 0.64    109 ms / 0.55     96 ms / 0.49   
+50         150 ms / 0.74    123 ms / 0.61    106 ms / 0.54     96 ms / 0.49   
+60         141 ms / 0.70    118 ms / 0.59    105 ms / 0.53     96 ms / 0.49   
+80         129 ms / 0.64    112 ms / 0.57    102 ms / 0.52     96 ms / 0.49   
+
+Gapless start (audio never underruns): smallest delay S after text-in so that every later chunk is ready when the speaker needs it
+S = max over chunks k of (ready_k - audio_before_k); I2S descriptor not included; 'lag' = how far synthesis is behind playback at the end
+sentence  tok   sched  | optimistic               central                  pessimistic             
+demo0     25    s0     |   183 ms (last chunk lag -1187)   261 ms (last chunk lag -833)   404 ms (last chunk lag -236)
+demo1     108   s0     |   183 ms (last chunk lag -4011)   260 ms (last chunk lag -2854)   423 ms (last chunk lag -915)
+demo2     175   s0     |   184 ms (last chunk lag -5575)   262 ms (last chunk lag -3941)   425 ms (last chunk lag -1207)
+demo0     25    s1     |   121 ms (last chunk lag -1182)   165 ms (last chunk lag -793)   416 ms (last chunk lag -127)
+demo1     108   s1     |   124 ms (last chunk lag -3990)   169 ms (last chunk lag -2790)   422 ms (last chunk lag -768)
+demo2     175   s1     |   119 ms (last chunk lag -5586)   163 ms (last chunk lag -3917)   410 ms (last chunk lag -1110)
+demo0     25    s2     |   130 ms (last chunk lag -1188)   177 ms (last chunk lag -813)   399 ms (last chunk lag -173)
+demo1     108   s2     |   129 ms (last chunk lag -3994)   175 ms (last chunk lag -2804)   376 ms (last chunk lag -800)
+demo2     175   s2     |   127 ms (last chunk lag -5550)   173 ms (last chunk lag -3881)   379 ms (last chunk lag -1080)
+demo0     25    s3     |   109 ms (last chunk lag -1185)   150 ms (last chunk lag -794)   424 ms (last chunk lag -122)
+demo1     108   s3     |   112 ms (last chunk lag -3977)   152 ms (last chunk lag -2769)   458 ms (last chunk lag -733)
+demo2     175   s3     |   109 ms (last chunk lag -5556)   149 ms (last chunk lag -3876)   430 ms (last chunk lag -1053)

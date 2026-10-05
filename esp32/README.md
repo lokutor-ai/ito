@@ -5,9 +5,11 @@ encoder, duration head, prosody net, mel head, harmonic F0 source, ConvNeXt voco
 the host that sends the text (`tools/say.py`). The board receives token ids and plays 24 kHz audio over I2S.
 
 > **Status (5 October 2026).** The engine and firmware are verified on the host and in Espressif's QEMU: the firmware's
-> PCM is bit-identical to the host build. **Nothing has run on silicon yet.** Every timing here is an **estimate**
-> from exact QEMU instruction counts and an assumed CPI and PSRAM bandwidth. **Real-time playback is estimated at 0.63-0.66 centrally (0.65 for long sentences) and 0.97-0.99 pessimistically, but not established** (§4). At boot the firmware measures the real numbers itself and
-> prints them (`BOARD_SUMMARY`). We will publish board measurements as soon as we have them.
+> PCM is bit-identical to the host build, for all three weight sets of both voices. **Nothing has run on silicon yet.** Every timing here is an **estimate**
+> from exact QEMU instruction counts and an assumed CPI and PSRAM bandwidth. **Real-time playback is estimated at 0.63-0.66 centrally (0.65 for long sentences) and 0.97-0.99 pessimistically with the main set, but not established** (§4).
+> **What the firmware does about it:** it carries up to three weight sets per voice (main int8, main int4, a light set with one block fewer), measures the real chunk times of each at boot (`CALIB`, `TIER_SELECT`),
+> keeps the first set whose measured RTF is <= 0.85, plans the playback start delay from those measurements, and says so (`WARNING: DEGRADED`) if even the fastest set measures >= 0.95 (§4c). That is a guarantee **by measurement on the board that runs it**, not a promise about silicon we have not seen.
+> We will publish board measurements as soon as we have them.
 
 ## 1. Flash and talk
 
@@ -81,7 +83,7 @@ and per second of audio.
 | Flash | app 379 KB in a 2 MB slot at 0x10000; three 4.5 MB weight partitions at 0x200000 / 0x680000 / 0xB00000 (main 3.81 MB, main-int4 3.20 MB, light 3.05 MB per voice) |
 | PSRAM | **peak 5.3 of 8 MB** (weights copied to PSRAM + stage ring buffers + PCM chunk buffers + text buffers for 400 tokens; QEMU; 6.5 MB with the 256-wide vocoder) |
 | Internal SRAM | **peak 314 of 384 KB in QEMU, about 327 KB on the chip with the I2S DMA buffers** (192 KB hot scratch for 24-frame chunks, 12-row wide layers + 4 weight-staging tiles of 4 KB + stacks; was 340 of 384 KB with a 238 KB scratch for the 256-wide vocoder). The firmware checks at boot that the scratch fits in one block with room left over and falls back to PSRAM (slow) if not: look for `internal SRAM before the hot arena` in the boot log |
-| Work before the first audio | **23.0-23.5 M instructions and 3.9 MB of weights from PSRAM for the shipped 10-frame (125 ms) first chunk; 16.0-16.1 M and 3.45 MB for a 2-frame one (`first 2`). The same for any sentence length** (forward GRU, fixed style: the text side runs incrementally) |
+| Work before the first audio | **23.0-24.3 M instructions and 3.9 MB of weights from PSRAM for the shipped 10-frame (125 ms) first chunk (main int8 set); 16.0-16.5 M and 3.45 MB for a 2-frame one (`first 2`). The same for any sentence length** (forward GRU, fixed style: the text side runs incrementally) |
 | Work per second of audio | 263 M int8 MACs + 1.2 M f32 MACs + other float work; about 85 M instructions on the dual-core critical path |
 | Weight traffic | 11 MB of weights read from PSRAM per second of audio (one weight pass serves a 24-frame, 300 ms chunk, the two 1202-wide layers two passes; 15 MB with the 256-wide vocoder, 17 MB before that, 38 MB with 8-frame chunks) |
 
@@ -142,7 +144,7 @@ Only the conversion to time is an estimate:
 | previous engine, 25 ms first chunk, 8-frame chunks | 22.9-23.4 M instructions, 4.5 MB | 133-144 M instructions, 38 MB (+ about 4.5 MB of activation rings) |
 | previous version of this engine, 2-frame (25 ms) first chunk, then 24-frame (300 ms) chunks | 17.4-17.9 M instructions, 4.8 MB (one pass over the weights) | about 99-101 M instructions, 17 MB (+ about 4.5 MB of activation rings) |
 | engine of 3 October, 256-wide vocoder, shipped start-up ramp (10, 11, 12, 14, 18, then 24 frames) | 25.3-26.3 M instructions, 5.1 MB | about 98 M instructions, 15 MB (+ about 4.5 MB of activation rings) |
-| **this engine, 192-wide vocoder, same ramp** | **23.0-23.5 M instructions, 3.9 MB** | **about 85 M instructions, 11 MB** (+ about 4.5 MB of activation rings) |
+| **this engine, 192-wide vocoder, same ramp (main int8 set)** | **23.0-24.3 M instructions, 3.9 MB** | **76-86 M instructions, 10.5-11.2 MB** (+ about 4.5 MB of activation rings) |
 
 The counts are the same for short (25 tokens), median (108) and long (175 tokens) sentences. The output is bit-identical between the engines and to the host build.
 
@@ -151,9 +153,9 @@ The counts are the same for short (25 tokens), median (108) and long (175 tokens
 | Time to first audio, first release engine | 338 ms | 463 ms | 672 ms |
 | Time to first audio, previous engine (8-frame chunks) | 124-127 ms | 176-179 ms | 266-269 ms |
 | Time to first audio, version of 2 October (25 ms first chunk, **gap after it**) | 94-97 ms | 145-148 ms | 237-240 ms |
-| Time to first audio, this engine with `first 2` (same idea, **gap after it**) | 87 ms | 125-126 ms | 193-194 ms |
+| Time to first audio, this engine with `first 2` (same idea, **gap after it**) | 87-90 ms | 125-129 ms | 193-197 ms |
 | Time to first audio, engine of 3 October (256-wide vocoder), shipped ramp | 137-143 ms | 200-207 ms | 311-318 ms |
-| **Time to first audio, this engine (192-wide vocoder), shipped start-up ramp (no gap after it)** | **124-127 ms** | **171-175 ms** | **251-255 ms** |
+| **Time to first audio, this engine (192-wide vocoder), shipped start-up ramp (no gap after it)** | **124-132 ms** | **171-180 ms** | **251-260 ms** |
 | Real-time factor, previous engine | 0.72-0.78 | 1.15-1.23 | 1.93-2.04 |
 | Real-time factor, version of 2 October (long-sentence limit) | 0.53-0.55 | 0.77-0.79 | 1.18-1.22 |
 | Real-time factor, engine of 3 October (256-wide vocoder; long-sentence limit) | 0.53 | 0.76 | 1.14 |
@@ -161,11 +163,42 @@ The counts are the same for short (25 tokens), median (108) and long (175 tokens
 | Real-time factor, this engine, whole sentences including the start-up ramp | 0.43-0.47 | 0.63-0.66 | 0.97-0.99 |
 | Start delay for gapless playback, version of 2 October | about 220 ms | 342-346 ms | 850-2700 ms |
 | Start delay for gapless playback, engine of 3 October (256-wide), shipped ramp | 137-143 ms | 215-240 ms | 880-2200 ms |
-| **Start delay for gapless playback, this engine, shipped ramp** | **124-127 ms (= time to first audio)** | **176-179 ms** | **560-660 ms** (short sentences need the most; this column is a hair under RTF 1 and is not a guarantee) |
+| **Start delay for gapless playback, this engine, shipped ramp** | **125-130 ms (= time to first audio)** | **176-182 ms** | **558-663 ms** (short sentences need the most; this column is a hair under RTF 1 and is not a guarantee) |
 
 (ranges: the self-test sentence and the three demo sentences, 25 / 84 / 108 / 175 tokens, both voices. The 192-wide figures were recomputed from fresh QEMU instruction counts of the final blobs of both voices.)
 
 Then I2S adds at most one 20 ms DMA buffer.
+
+### The three weight sets (same method, final firmware, both voices)
+
+Exact counts and estimates for each set that the boot calibration can choose from (§4c); `icprof 2` on the final firmware, both voices, the self-test sentence and the three demo sentences (25 / 84 / 108 / 175 tokens), ranges over all of them.
+Still **estimated, not measured on silicon**; same CPI, bandwidth and overlap assumptions as above.
+
+| | main int8 (set 0) | main int4 (set 1) | light, 4 blocks int4 (set 2) |
+|---|---|---|---|
+| blob per voice | 3.81 MB | 3.20 MB | 3.05 MB |
+| before the first audio (125 ms chunk): instructions on the critical path, weights from PSRAM | 23.0-24.3 M, 3.91 MB | 23.4-24.5 M, 3.20 MB | 21.8-22.9 M, 3.07 MB |
+| per second of audio: critical-path instructions, weights from PSRAM (+ about 4.5 MB of activation rings) | 76-86 M, 10.5-11.2 MB | 78-88 M, 8.1-8.8 MB | 73-83 M, 7.7-8.4 MB |
+| **time to first audio** (optimistic / central / pessimistic) | **124-132 / 171-180 / 251-260 ms** | **127-133 / 168-174 / 236-243 ms** | **118-124 / 157-164 / 222-229 ms** |
+| **RTF, whole sentences with the ramp** | **0.43-0.47 / 0.63-0.66 / 0.97-0.99** | **0.45-0.48 / 0.62-0.64 / 0.92-0.93** | **0.42-0.45 / 0.59-0.61 / 0.88** |
+| RTF, long-sentence limit (175 tokens) | 0.46 / 0.65 / 0.96 | 0.47 / 0.63 / 0.91 | 0.44 / 0.60 / 0.87 |
+| **start delay for gapless playback** | **125-130 / 176-182 / 558-663 ms** | **127-133 / 173-179 / 481-526 ms** | **118-124 / 162-169 / 406-429 ms** |
+| structural model, long-sentence RTF: nothing overlapped / `wmode 2` / `wmode 3` (optimistic; central; pessimistic) | 0.66, 0.78, 0.96-0.97 / 0.59, 0.69-0.70, 0.86-0.87 / 0.54-0.55, 0.64, 0.77-0.78 | 0.64, 0.75, 0.91-0.92 / 0.58, 0.68, 0.82 / 0.54, 0.62, 0.74 | 0.61, 0.71, 0.87 / 0.55, 0.64, 0.78 / 0.51, 0.59, 0.70 |
+
+What this says, without rounding in our favour:
+- **int4 buys memory, not instructions**: with the PIE unpack the critical path grows by about 1 % and the weight traffic falls by a fifth, so set 1 is a little slower than set 0 when the board is CPU-bound (optimistic 0.45-0.48 against 0.43-0.47) and clearly faster when it is PSRAM-bound (pessimistic 0.92-0.93 against 0.97-0.99). With the C unpack
+  (before the PIE kernel) set 1 was no faster than set 0 even in the pessimistic column.
+- **The light set buys another 4-5 %**: one block fewer is about 6 % fewer instructions and 5 % less traffic than set 1. In the pessimistic column it is the only set below 0.9 (0.88) and the only one whose gapless delay is under half a second for every test sentence.
+- **None of this makes the pessimistic column comfortable.** There, with a 0.85 target, the boot would find no set at or below it, keep the light set as `MARGINAL` (0.88), and plan a start delay of about 410 ms. A board that is more than about 8 % slower than the pessimistic assumption would measure the light set at 0.95 or more and report `degraded`.
+  In the structural model, which hides PSRAM time behind compute the way `wmode 3` is built to, even set 0 is at 0.77-0.78 in the pessimistic column.
+
+| if the board behaves like the ... column, the boot would | optimistic | central | pessimistic |
+|---|---|---|---|
+| measure (sets 0 / 1 / 2, whole sentences) | 0.43-0.47 | 0.63-0.66 | 0.97-0.99 / 0.92-0.93 / 0.88 |
+| keep | set 0 | set 0 | set 2, `MARGINAL` (nothing reaches 0.85) |
+| plan a gapless start delay of | 125-130 ms | 176-182 ms | 406-429 ms |
+
+
 
 Reading this honestly:
 - **Time to first audio is not the same as gapless speech, so the engine now starts with a ramp.** Every chunk costs one pass over the weights plus about
@@ -173,11 +206,11 @@ Reading this honestly:
   24-frame chunk behind it needs about 180 ms more: the speech has a gap of about 150 ms (the version of 2 October needed a 340 ms start delay
   against it). The shipped schedule instead makes the first chunk 10 frames (125 ms of audio), then 11, 12, 14, 18 and 24, with the text side advancing in 8-token
   steps meanwhile (one 24-token step would make a single chunk 65 ms slower than its neighbours): each chunk is then ready before the audio of
-  the chunks before it has played out, so playback can start with the first chunk. The cost is a later first sound (171-175 ms central instead of 125-126). In the
-  central case the speech is gapless from 176-179 ms after the text arrived (the first chunk plus 3-5 ms, spent on the chunks that carry a text step);
+  the chunks before it has played out, so playback can start with the first chunk. The cost is a later first sound (171-180 ms central instead of 125-129). In the
+  central case the speech is gapless from 176-182 ms after the text arrived (the first chunk plus 2-5 ms, spent on the chunks that carry a text step);
   `delay <ms>` holds playback for that long. In the optimistic case the first chunk is already gapless. In the pessimistic case the whole-sentence RTF is 0.97-0.99 for
-  sentences of 84-175 tokens and 1.05 for the 25-token one (the ramp is a larger share of a short sentence), so the start delay is 560-660 ms and a very slow board would still have gaps.
-  `first 2` restores the old lowest-latency start (first sound at 125-126 ms central, with the gap). The audio is bit-identical for every schedule (host test G, QEMU).
+  sentences of 84-175 tokens and 1.05 for the 25-token one (the ramp is a larger share of a short sentence), so the start delay is 560-660 ms and a very slow board would still have gaps (§4c replaces this assumption with a measurement).
+  `first 2` restores the old lowest-latency start (first sound at 125-129 ms central, with the gap). The audio is bit-identical for every schedule (host test G, QEMU).
 - **The pessimistic case is only just under real time.** At 40 MB/s of PSRAM bandwidth with no overlap and CPI 1.6 the estimate is RTF 0.96 (long sentences; it was 1.14 with the 256-wide vocoder),
   and 0.97-0.99 for whole sentences with the ramp. That is not a margin. The CPU alone is 0.46 / 0.52 / 0.57 of real time (optimistic / central / pessimistic); the PSRAM bandwidth assumption decides the rest. This column is defined as
   "nothing overlapped", so no change to the staging can improve it; only fewer weight bytes or fewer instructions can.
@@ -187,14 +220,14 @@ Reading this honestly:
 
   | long-sentence RTF (24-frame chunks) | optimistic (CPI 1.3, 80 MB/s) | central (1.45, 60) | pessimistic (1.6, 40) |
   |---|---|---|---|
-  | nothing overlapped | 0.66 | 0.78 | 0.96 |
-  | GDMA double buffer inside each GEMM call (`wmode 2`, the staging of the version of 2 October) | 0.59 | 0.69 | 0.87 |
-  | **plus cross-call prefetch (`wmode 3`)**: the engine announces the next call's weights, which are fetched during the float work in between | **0.55** | **0.64** | **0.78** |
+  | nothing overlapped | 0.66 | 0.78 | 0.96-0.97 |
+  | GDMA double buffer inside each GEMM call (`wmode 2`, the staging of the version of 2 October) | 0.59 | 0.69-0.70 | 0.86-0.87 |
+  | **plus cross-call prefetch (`wmode 3`)**: the engine announces the next call's weights, which are fetched during the float work in between | **0.54-0.55** | **0.64** | **0.77-0.78** |
 
   (Recomputed for the 192-wide vocoder with `tools/trace_table.py` on the 175-token sentence; the same script on the 3 October log reproduces the earlier 0.78 / 0.92 / 1.14, 0.67 / 0.80 / 1.01, 0.63 / 0.74 / 0.91.)
 
   So the central column's assumption (half hidden) is about what `wmode 3` reaches (RTF 0.64 against the column's 0.65); `wmode 2` hides less (RTF 0.69). With the prefetch the gapless
-  start delay is 167-170 ms central and the time to first audio the same (same model; 143-146 ms for both, optimistic). The same model says the bus, not the CPU, limits the GEMM calls (the two cores together ask
+  start delay is 167-175 ms central and the time to first audio the same (same model; 143-150 ms for both, optimistic). The same model says the bus, not the CPU, limits the GEMM calls (the two cores together ask
   for about 110 MB/s while computing a tile), and that 4 KB tiles lose about 2 % of the central chunk time (and about 12 ms of start delay) against 10 KB ones. If the DMA does not behave like this on the chip, the board benchmark
   chooses another mode; it also compares the audio of every mode with the direct one and drops a mode that differs.
 - **What changed on 3 October.** Cross-call weight prefetch (`wmode 3`), the start-up ramp with small text steps, 12-row passes for the two 1202-wide layers
