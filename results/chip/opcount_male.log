@@ -1,0 +1,20 @@
+per sentence: executed int8 GEMM MACs and non-GEMM work (seeded noise, chunk 8 frames, 8-bit activations)
+  golden 0: 84 tokens, 5.72 s | before the first chunk: 69.7 M int8 MACs, 0.37 M f32 MACs, non-GEMM ~5.0 M cycles, 5.66 MB of weights read | whole: 1491.5 M int8, non-GEMM ~142.9 M cycles, 161.5 MB weights (28.2 MB/s of audio)
+  golden 1: 125 tokens, 8.20 s | before the first chunk: 69.7 M int8 MACs, 0.37 M f32 MACs, non-GEMM ~5.0 M cycles, 5.66 MB of weights read | whole: 2143.6 M int8, non-GEMM ~206.3 M cycles, 231.6 MB weights (28.2 MB/s of audio)
+  golden 2: 96 tokens, 6.21 s | before the first chunk: 69.7 M int8 MACs, 0.37 M f32 MACs, non-GEMM ~5.0 M cycles, 5.66 MB of weights read | whole: 1626.1 M int8, non-GEMM ~155.6 M cycles, 175.7 MB weights (28.3 MB/s of audio)
+
+per second of audio (20.14 s total):
+  int8 GEMM MACs executed    261.26 M
+  f32 MACs (non-GEMM)          0.98 M
+  weights read by the GEMM    28.25 MB
+  expf                                  52219 /s   (assumed 40 cycles each)
+  logf                                  12219 /s   (assumed 50 cycles each)
+  sincosf                               78277 /s   (assumed 45 cycles each)
+  erf (GELU)                                0 /s   (assumed 90 cycles each)
+    of which |x|<=1 series                  0 /s   (assumed -55 cycles each)
+  activation quantise (elements)       603846 /s   (assumed 8 cycles each)
+  LayerNorm (elements)                 196573 /s   (assumed 8 cycles each)
+  FFT (600-point complex)                 160 /s   (assumed 37000 cycles each)
+  Gaussian noise samples                24000 /s   (assumed 120 cycles each)
+  source samples                        24000 /s   (assumed 70 cycles each)
+  ESTIMATED non-GEMM work: 25.1 M cycles per second of audio = 0.10 of one 240 MHz core (float work runs on core 0 only)

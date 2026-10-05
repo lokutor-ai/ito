@@ -11,8 +11,8 @@ Two voices, both distilled from StyleTTS 2 conditioned on a LibriTTS-R speaker (
 
 | voice | speaker | PyTorch file (Python package) | chip file (firmware, `esp32/host`, `chip_wav.py`) |
 |---|---|---|---|
-| **female** (default) | LibriTTS-R 4970 | `ito_female.pt` (18 MB) | `ito_female_esp32s3.bin` (4.9 MB) |
-| **male** | LibriTTS-R 5105 | `ito_male.pt` (18 MB) | `ito_male_esp32s3.bin` (4.9 MB) |
+| **female** (default) | LibriTTS-R 4970 | `ito_female.pt` (14 MB) | `ito_female_esp32s3.bin` (3.8 MB) |
+| **male** | LibriTTS-R 5105 | `ito_male.pt` (13 MB) | `ito_male_esp32s3.bin` (3.8 MB) |
 
 Choose the voice with `ito-tts --voice male`, `Ito.load(voice="male")`, `chip_wav.py --voice male`, or `VOICE=male` for the
 shell tools (`fetch_weights.sh`, `flash.sh`, `run_qemu.sh`, `make test`). The default is the female voice. The older short names `d` and `g` still work.

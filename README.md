@@ -5,18 +5,19 @@
 *Click the animation to watch the 50-second video **with sound** (the GIF is silent). Every voice in it is Ito's own output from the chip engine.*
 
 Ito is English text-to-speech that runs entirely on an **ESP32-S3** (240 MHz dual-core Xtensa LX7, 8 MB PSRAM, 16 MB
-flash), with no cloud and no neural accelerator. It streams: audio starts after a short first chunk (25 ms) is ready, and the work
-before it does not grow with the sentence length. The voice is distilled from a large open TTS model into 4.4 M parameters. Built by
+flash), with no cloud and no neural accelerator. It streams: audio starts after a short first chunk (125 ms) is ready, and the work
+before it does not grow with the sentence length. The voice is distilled from a large open TTS model into 3.3 M parameters. Built by
 [Lokutor](https://lokutor.com), the makers of [Oído](https://github.com/lokutor-ai/oido) (speech recognition on the
 same chip).
 
-> **Status (3 October 2026).** The on-chip engine is verified on a laptop and in Espressif's QEMU emulator: the
+> **Status (5 October 2026).** The on-chip engine is verified on a laptop and in Espressif's QEMU emulator: the
 > firmware's audio is bit-identical to the host build of the engine, and every sample in [`samples/`](samples) is that
 > engine's exact output. **Nothing has run on a physical board yet.** Time to first audio and real-time factor are
 > **estimated** from exact instruction counts (QEMU) and an assumed PSRAM bandwidth. **Real-time playback is not established on silicon:**
-> the optimistic and central estimates are faster than real time (RTF 0.53–0.54 and 0.77–0.80) and the pessimistic one is still slower
-> (1.18–1.27). The engine now starts with a 125 ms first chunk and a short ramp so that speech is gapless from the first chunk
-> (estimated first sound 137–143 / 200–207 / 311–318 ms, optimistic / central / pessimistic). An earlier version of this page claimed 130–210 ms and
+> the optimistic and central estimates are faster than real time (RTF 0.43–0.47 and 0.63–0.66) and the pessimistic one is only just below it
+> (0.97–0.99 for whole sentences, 0.96 for long ones). The vocoder is now 192 wide instead of 256, which is what moved the numbers; in a blind test
+> (#10, one listener) it sounded the same as the 256-wide one. The engine starts with a 125 ms first chunk and a short ramp so that speech is gapless from the first chunk
+> (estimated first sound 124–127 / 171–175 / 251–255 ms, optimistic / central / pessimistic). An earlier version of this page claimed 130–210 ms and
 > real time at 0.5–1 GOPS; that was too optimistic (see [`esp32/README.md`](esp32/README.md) §4). The firmware measures the real numbers at boot;
 > we will publish them here after we run it on boards.
 
@@ -46,8 +47,9 @@ the chip's exact arithmetic:
 | [07.wav](samples/07.wav) | It's about 23 degrees outside, so you probably won't need a jacket. |
 | [08.wav](samples/08.wav) | I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up. |
 
-The float-model clips used in the listening test (sentences 01, 03, 04 and 06 were rated), next to the teacher's, are in
-[`results/blind9/audio/`](results/blind9/audio).
+The float-model clips used in listening test #9 (sentences 01, 03, 04 and 06 were rated), next to the teacher's, are in
+[`results/blind9/audio/`](results/blind9/audio). The clips above are from the 192-wide vocoder that ships now (the earlier release had a 256-wide one;
+the demo video on the project page was made with that one).
 
 ## Listening tests
 
@@ -58,7 +60,7 @@ a question with hard words).
 | System | Parameters | Runs on | Mean score (4 clips) |
 |---|---|---|---|
 | Teacher: StyleTTS 2 (LibriTTS model, reference voice) | large (diffusion, PL-BERT) | GPU / laptop | 4.75 |
-| **Ito**, streaming front (this release) | **4.4 M** | **ESP32-S3** | **4.00** (4/4/4/4) |
+| **Ito**, streaming front (as rated: 256-wide vocoder; the shipped 192-wide one is 3.3 M, see #10) | **4.4 M** | **ESP32-S3** | **4.00** (4/4/4/4) |
 | Ito variant with a bidirectional front (no streaming text side) | 4.5 M | ESP32-S3 | 4.00 |
 | Ito variant with a wider vocoder | 8.2 M | over the chip budget | 3.75 |
 | sanoTTS "amy" | 1.46 M | — | 2.00 |
@@ -70,10 +72,22 @@ Please read these numbers with their limits:
 - **The rated Ito clips are the float PyTorch model**, through the same streaming path as the chip. They used a small
   optional text-to-style predictor. The shipped chip uses a fixed mean style instead, so that the time to first audio
   does not grow with sentence length. In a paired comparison on held-out sentences, the predictor changed the log-mel
-  distance to the reference by only −0.009. The quantised engine scores PESQ 4.52 against the float model. **The exact
-  chip configuration has not been rated in a blind test yet.**
+  distance to the reference by only −0.009. The quantised engine scores PESQ 4.5 against the float model. Test #10 (below) rated the chip engine itself (female voice).
 - All clips were trimmed and loudness-normalised to −20 LUFS at 24 kHz. Ratings, key, sentences and automatic metrics
   are in [`results/blind9/`](results/blind9).
+
+**Blind test #10** (5 October 2026), the lighter vocoder. Female voice, the same four sentences (01, 03, 04, 06), 16 clips in random
+order with the system names hidden, one listener (the same expert), 1–5 naturalness:
+
+| System | Mean score (4 clips) |
+|---|---|
+| Teacher (reference) | 4.25 |
+| Ito with the 256-wide vocoder (the chip engine, int8; shipped until 5 October) | 4.00 |
+| **Ito with the 192-wide vocoder (the chip engine, int8; shipped now)** | **4.00** |
+| Ito with the 192-wide vocoder and int4 weights in the ConvNeXt blocks (int4 emulation) | 4.00 |
+
+He heard no difference between the three Ito systems. One listener and four clips per system: this says "no difference he could hear", not that there is none.
+Automatic checks on 60 held-out utterances agree (mel distance +0.014 / +0.002 for female / male, UTMOS within 0.02). Summary in [`results/blind10/`](results/blind10).
 
 Earlier, **blind test #8** (one listener, four held-out sentences) compared two earlier Ito variants with the teacher.
 The scores were teacher 4.00, variant A 3.25, variant B 3.00. In #6
@@ -97,21 +111,20 @@ UTMOS cannot hear intonation, so treat it as a check, not a verdict. On 60 held-
 
 | | |
 |---|---|
-| Parameters | 4.40 M: acoustic front 1.62 M + vocoder 2.79 M |
-| Chip weights | **4.89 MB** (`ito_female_esp32s3.bin`): int8 mel head and vocoder; int16 pitch path |
-| Flash | 296 KB app + 4.89 MB weights; about 9 MB of the 14 MB weights partition stays free |
-| PSRAM / SRAM | peak 6.5 of 8 MB PSRAM, 346 of 383 KB internal SRAM (QEMU; about 358 KB on the chip with the I2S buffers) |
-| Work before the first audio (125 ms first chunk) | **25.3–26.3 M instructions and 5.1 MB of weights read from PSRAM, for any sentence length** (exact counts from QEMU; 17.2–17.8 M and 4.5 MB for a 25 ms first chunk) |
-| Work per second of audio | about 98 M instructions on the dual-core critical path, 15 MB of weights read from PSRAM (24-frame chunks; exact counts; the conversion to time is an estimate) |
-| Time to first audio | **estimated, not measured:** 137–143 ms optimistic, **200–207 ms central**, 311–318 ms pessimistic. The first chunk is 125 ms of audio and the chunks behind it are sized so that playback can start with it without a gap (the version of 2 October made 25 ms of sound after 145 ms and then fell silent for about 200 ms; `first 2` still does that; the first public version of the engine: 338 / 463 / 672 ms) |
-| Real-time factor | **estimated, not measured:** 0.53–0.54 optimistic, **0.77–0.80 central** (0.76 for long sentences), 1.18–1.27 pessimistic (1.14 for long sentences). Below 1 is faster than real time, so the pessimistic case (40 MB/s PSRAM, nothing overlapped, CPI 1.6) is **still slower than real time** |
-| Start delay for gapless speech | **estimated:** optimistic = the time to first audio (137–143 ms), **central 215–240 ms**, pessimistic 880 ms or more (the real-time factor is above 1 there, so the delay grows with the sentence: 0.9 s for a 25-token sentence, 2.2 s for 175 tokens). Before 3 October: about 220 ms / 342–346 ms / 850–2700 ms. `delay <ms>` on the serial console holds playback for a chosen time |
+| Parameters | 3.34 M: acoustic front 1.62 M + vocoder 1.72 M (was 4.40 M with a 256-wide vocoder) |
+| Chip weights | **3.81 MB** (`ito_female_esp32s3.bin`; was 4.89 MB): int8 mel head and vocoder; int16 pitch path |
+| Flash | 340 KB app + 3.81 MB weights; about 10 MB of the 14 MB weights partition stays free |
+| PSRAM / SRAM | peak 5.3 of 8 MB PSRAM, 314 of 383 KB internal SRAM (QEMU; about 327 KB on the chip with the I2S buffers) |
+| Work before the first audio (125 ms first chunk) | **23.0–23.5 M instructions and 3.9 MB of weights read from PSRAM, for any sentence length** (exact counts from QEMU; 16.0–16.1 M and 3.45 MB for a 25 ms first chunk) |
+| Work per second of audio | about 85 M instructions on the dual-core critical path, 11 MB of weights read from PSRAM (24-frame chunks; exact counts; the conversion to time is an estimate) |
+| Time to first audio | **estimated, not measured:** 124–127 ms optimistic, **171–175 ms central**, 251–255 ms pessimistic. The first chunk is 125 ms of audio and the chunks behind it are sized so that playback can start with it without a gap (the version of 2 October made 25 ms of sound after 145 ms and then fell silent for about 200 ms; `first 2` still does that; the first public version of the engine: 338 / 463 / 672 ms; the 256-wide vocoder of 3 October: 137–143 / 200–207 / 311–318 ms) |
+| Real-time factor | **estimated, not measured:** 0.43–0.47 optimistic, **0.63–0.66 central** (0.65 for long sentences), 0.97–0.99 pessimistic (0.96 for long sentences; 1.05 for a very short one). Below 1 is faster than real time; the pessimistic case (40 MB/s PSRAM, nothing overlapped, CPI 1.6) is **only just below it, which is not a margin**. With the 256-wide vocoder it was 0.77–0.80 central and 1.18–1.27 pessimistic |
+| Start delay for gapless speech | **estimated:** optimistic = the time to first audio (124–127 ms), **central 176–179 ms**, pessimistic 560–660 ms (short sentences need the most). With the 256-wide vocoder: 137–143 / 215–240 / 880–2200 ms. `delay <ms>` on the serial console holds playback for a chosen time |
 | On a laptop | RTF ≈ 0.01 on an Apple M4 Max CPU, for both the PyTorch model (whole utterance) and the C engine |
 
 All of this is **estimated from exact instruction counts, not measured on silicon.** The open question is the effective PSRAM
-bandwidth and how much of it overlaps compute (GDMA); the pessimistic column is decided by those two assumptions. A weight pass now
-serves 24-frame (300 ms) chunks after a 2-frame (25 ms) first chunk, which halves the weight traffic (38 to 17 MB per second of audio)
-with output bit-identical to the previous engine. The firmware's boot benchmark measures the real numbers and prints `BOARD_SUMMARY`.
+bandwidth and how much of it overlaps compute (GDMA); the pessimistic column is decided by those two assumptions. A weight pass
+serves 24-frame (300 ms) chunks, and the 192-wide vocoder cuts the weight traffic from 15 to 11 MB per second of audio. The firmware's boot benchmark measures the real numbers and prints `BOARD_SUMMARY`.
 The estimate model and full tables are in [`esp32/README.md`](esp32/README.md).
 
 ## How it works
@@ -119,7 +132,7 @@ The estimate model and full tables are in [`esp32/README.md`](esp32/README.md).
 ```
  text ─► espeak-ng phonemes (on the host) ─► token ids ─────────────────────────────────────── over serial to the chip
                                                  │
-   ┌──────────────────────── acoustic front (1.62 M) ────────────────────────┐   ┌────────── vocoder (2.79 M) ─────────┐
+   ┌──────────────────────── acoustic front (1.62 M) ────────────────────────┐   ┌────────── vocoder (1.72 M) ─────────┐
    │ embedding ─► 3 conv layers ─► forward GRU ─► duration head (FiLM style) │   │ [log-mel | log-F0 | voiced]          │
    │      ─► length regulation (80 frames/s)                                 │   │  ─► 7-tap conv + harmonic F0 source  │
    │      ─► prosody net: log-F0, voicing, energy                            │──►│  ─► 5 ConvNeXt blocks                │──► 24 kHz
@@ -217,7 +230,7 @@ esp32/           engine/ (C99 engine), firmware/ (ESP-IDF app), host/ (host buil
                  chip_wav, build, QEMU, estimates), prebuilt/ (app image, code only), README.md
 models/          README.md (how to get the weights from Hugging Face), LICENSE-WEIGHTS, TERMS.md
 samples/         chip-exact output for eight unseen sentences
-results/         blind9/ and blind8/ (listening tests), chip/ (host tests, QEMU log, op profile, estimates)
+results/         blind10/, blind9/ and blind8/ (listening tests), chip/ (host tests, QEMU log, op profile, estimates)
 bench/           benchmark against other small TTS systems (being merged)
 docs/            prior_art.md (being merged)
 ```
@@ -229,7 +242,7 @@ docs/            prior_art.md (being merged)
 - The chip uses one fixed speaking style. Expressiveness comes from the text through the front, but there is no
   per-sentence style control.
 - The pitch range is still slightly narrower than the teacher's (0.94).
-- Requires an ESP32-S3 with 8 MB PSRAM (N16R8 recommended); the weights alone are 4.9 MB.
+- Requires an ESP32-S3 with 8 MB PSRAM (N16R8 recommended); the weights alone are 3.8 MB.
 - Grapheme-to-phoneme runs on the host (espeak-ng), not on the chip.
 - Ito's output is synthetic speech in the voice of a real (LibriTTS-R) speaker. Please disclose that it is synthetic
   (see [`NOTICE`](NOTICE)).

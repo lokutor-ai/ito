@@ -1,0 +1,17 @@
+{
+ "test": "blind #10",
+ "date": "2026-10-05",
+ "listeners": 1,
+ "listener": "one expert listener (Lokutor founder), not a panel",
+ "scale": "1-5 naturalness, 16 clips in random order, system names hidden",
+ "voice": "female",
+ "sentences_rated": ["01", "03", "04", "06"],
+ "note": "4 sentences per system; differences under ~0.5 are within noise for n = 4. Per-clip scores are not part of this summary.",
+ "render": "teacher: StyleTTS 2 reference; the three Ito systems are chip-numerics renders (the C engine for int8, the engine-numerics emulation for int4); trimmed, -20 LUFS, 24 kHz",
+ "summary": {
+  "teacher": {"description": "Teacher (reference model)", "mean": 4.25},
+  "ship256": {"description": "Ito, 256-wide vocoder, int8 (the chip engine; shipped until 5 October)", "mean": 4.00},
+  "c192": {"description": "Ito, 192-wide vocoder, 5 blocks, int8 (the chip engine; shipped from 5 October)", "mean": 4.00},
+  "c192_int4": {"description": "Ito, 192-wide vocoder, int4 weights in the ConvNeXt blocks (int4 emulation)", "mean": 4.00}
+ }
+}

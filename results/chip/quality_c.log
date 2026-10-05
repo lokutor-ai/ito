@@ -1,24 +1,24 @@
 1) audio quality (golden sentences; 'float' = PyTorch v3 float, 'ref' = engine-numerics reference a8)
   golden 0:
-    c_engine_a8 vs float PESQ 4.497 (seg 4.488) log-mel 0.0929, vs ref PESQ 4.612 log-mel 0.0474
-    c_engine_a8_floatdur vs float PESQ 4.497 (seg 4.488) log-mel 0.0929
-    c_engine_a16 vs float PESQ 4.493 (seg 4.486) log-mel 0.0711
-    ref vs float PESQ 4.532
+    c_engine_a8 vs float PESQ 4.556 (seg 4.552) log-mel 0.0869, vs ref PESQ 4.623 log-mel 0.0471
+    c_engine_a8_floatdur vs float PESQ 4.556 (seg 4.552) log-mel 0.0869
+    c_engine_a16 vs float PESQ 4.559 (seg 4.562) log-mel 0.0666
+    ref vs float PESQ 4.559
   golden 1:
-    c_engine_a8 vs float PESQ 4.536 (seg 4.553) log-mel 0.0866, vs ref PESQ 4.588 log-mel 0.0571
-    c_engine_a8_floatdur vs float PESQ 4.536 (seg 4.553) log-mel 0.0866
-    c_engine_a16 vs float PESQ 4.568 (seg 4.589) log-mel 0.0610
-    ref vs float PESQ 4.519
+    c_engine_a8 vs float PESQ 4.365 (seg 4.395) log-mel 0.0877, vs ref PESQ 4.381 log-mel 0.0572
+    c_engine_a8_floatdur vs float PESQ 4.365 (seg 4.395) log-mel 0.0877
+    c_engine_a16 vs float PESQ 4.532 (seg 4.531) log-mel 0.0629
+    ref vs float PESQ 4.512
   golden 2:
-    c_engine_a8 vs float PESQ 4.600 (seg 4.594) log-mel 0.0740, vs ref PESQ 4.620 log-mel 0.0520
-    c_engine_a8_floatdur vs float PESQ 4.600 (seg 4.594) log-mel 0.0740
-    c_engine_a16 vs float PESQ 4.621 (seg 4.628) log-mel 0.0523
-    ref vs float PESQ 4.611
+    c_engine_a8 vs float PESQ 4.515 (seg 4.399) log-mel 0.0797, vs ref PESQ 4.600 log-mel 0.0542
+    c_engine_a8_floatdur vs float PESQ 4.515 (seg 4.399) log-mel 0.0797
+    c_engine_a16 vs float PESQ 4.590 (seg 4.559) log-mel 0.0574
+    ref vs float PESQ 4.533
 
 2) control: engine reference vs itself with 1e-7 relative noise on h (SNR dB, free-running, same durations)
-  eng   golden 0: pred 105.0 | F0 109.6 | mel 53.8 | src 52.4 | spec 39.5 | audio 28.4
-  eng   golden 1: pred 106.9 | F0 113.5 | mel 63.8 | src 55.2 | spec 38.9 | audio 29.7
-  eng   golden 2: pred 101.4 | F0 108.6 | mel 55.9 | src 51.4 | spec 38.7 | audio 28.6
-  eng16 golden 0: pred 105.0 | F0 109.6 | mel 85.7 | src 52.4 | spec 62.7 | audio 52.2
-  eng16 golden 1: pred 106.9 | F0 113.5 | mel 87.3 | src 55.2 | spec 64.5 | audio 55.0
-  eng16 golden 2: pred 101.4 | F0 108.6 | mel 85.5 | src 51.4 | spec 65.3 | audio 57.2
+  eng   golden 0: pred 105.0 | F0 109.6 | mel 53.8 | src 52.4 | spec 39.6 | audio 29.1
+  eng   golden 1: pred 106.9 | F0 113.5 | mel 63.8 | src 55.2 | spec 39.1 | audio 30.2
+  eng   golden 2: pred 101.4 | F0 108.6 | mel 55.9 | src 51.4 | spec 36.3 | audio 26.2
+  eng16 golden 0: pred 105.0 | F0 109.6 | mel 85.7 | src 52.4 | spec 61.9 | audio 51.8
+  eng16 golden 1: pred 106.9 | F0 113.5 | mel 87.3 | src 55.2 | spec 49.5 | audio 45.9
+  eng16 golden 2: pred 101.4 | F0 108.6 | mel 85.5 | src 51.4 | spec 46.8 | audio 50.7

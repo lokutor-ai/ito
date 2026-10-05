@@ -1,128 +1,106 @@
 [     0.0s] ESP-ROM:esp32s3-20210327
 [     0.0s] Build:Mar 27 2021
 [     0.0s] rst:0x1 (POWERON),boot:0x4 (SPI_FLASH_BOOT)
-[     0.0s] SPIWP:0xee
-[     0.0s] mode:DIO, clock div:1
-[     0.0s] load:0x3fce2820,len:0xd64
+[     0.1s] SPIWP:0xee
+[     0.1s] mode:DIO, clock div:1
+[     0.1s] load:0x3fce2820,len:0xd64
 [     0.1s] load:0x403c8700,len:0xb14
 [     0.1s] load:0x403cb700,len:0x2cac
 [     0.1s] entry 0x403c8894
-[     0.2s] W (196) rtcinit: o_code calibration fail
+[     0.2s] W (180) rtcinit: o_code calibration fail
 [     0.2s] 
-[     0.2s] I (102) esp_psram: Found 8MB PSRAM device
-[     0.2s] I (102) esp_psram: Speed: 80MHz
-[     0.2s] I (103) cpu_start: Multicore app
-[     0.2s] I (113) cpu_start: Pro cpu start user code
-[     0.2s] I (113) cpu_start: cpu freq: 240000000 Hz
-[     0.2s] I (113) app_init: Application information:
-[     0.2s] I (113) app_init: Project name:     itofs
-[     0.2s] I (113) app_init: App version:      ito-3.0.0
-[     0.2s] I (113) app_init: Compile time:     Oct  3 2026 00:44:13
-[     0.2s] I (113) app_init: ELF file SHA256:  b3508057d...
-[     0.2s] I (113) app_init: ESP-IDF:          v5.5.1
-[     0.2s] I (113) efuse_init: Min chip rev:     v0.0
-[     0.2s] I (113) efuse_init: Max chip rev:     v0.99 
-[     0.2s] I (113) efuse_init: Chip rev:         v0.3
-[     0.2s] I (113) heap_init: Initializing. RAM available for dynamic allocation:
-[     0.3s] I (113) heap_init: At 3FC98DC8 len 00050948 (322 KiB): RAM
-[     0.3s] I (113) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
-[     0.3s] I (113) heap_init: At 600FE000 len 00001FE8 (7 KiB): RTCRAM
-[     0.3s] I (114) esp_psram: Adding pool of 8192K of PSRAM memory to heap allocator
-[     0.3s] I (115) spi_flash: detected chip: issi
-[     0.3s] I (115) spi_flash: flash io: dio
-[     0.3s] I (115) sleep_gpio: Configure to isolate all GPIO pins in sleep state
-[     0.3s] I (115) sleep_gpio: Enable automatic switching of GPIO sleep configuration
-[     0.3s] I (116) main_task: Started on CPU0
-[     0.3s] I (121) esp_psram: Reserving pool of 32K of internal memory for DMA/internal allocations
-[     0.3s] I (121) main_task: Calling app_main()
+[     0.2s] I (94) esp_psram: Found 8MB PSRAM device
+[     0.2s] I (94) esp_psram: Speed: 80MHz
+[     0.2s] I (94) cpu_start: Multicore app
+[     0.2s] I (105) cpu_start: Pro cpu start user code
+[     0.2s] I (105) cpu_start: cpu freq: 240000000 Hz
+[     0.2s] I (105) app_init: Application information:
+[     0.2s] I (105) app_init: Project name:     itofs
+[     0.2s] I (105) app_init: App version:      ito-3.0.0
+[     0.2s] I (105) app_init: Compile time:     Oct  2 2026 19:10:12
+[     0.2s] I (105) app_init: ELF file SHA256:  8f4dd3309...
+[     0.2s] I (105) app_init: ESP-IDF:          v5.5.1
+[     0.2s] I (105) efuse_init: Min chip rev:     v0.0
+[     0.2s] I (105) efuse_init: Max chip rev:     v0.99 
+[     0.2s] I (105) efuse_init: Chip rev:         v0.3
+[     0.2s] I (105) heap_init: Initializing. RAM available for dynamic allocation:
+[     0.2s] I (105) heap_init: At 3FC99188 len 00050588 (321 KiB): RAM
+[     0.2s] I (105) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+[     0.2s] I (105) heap_init: At 600FE000 len 00001FE8 (7 KiB): RTCRAM
+[     0.2s] I (105) esp_psram: Adding pool of 8192K of PSRAM memory to heap allocator
+[     0.2s] I (106) spi_flash: detected chip: issi
+[     0.2s] I (107) spi_flash: flash io: dio
+[     0.2s] I (107) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+[     0.2s] I (107) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+[     0.3s] I (108) main_task: Started on CPU0
+[     0.3s] I (114) esp_psram: Reserving pool of 32K of internal memory for DMA/internal allocations
+[     0.3s] I (114) main_task: Calling app_main()
 [     0.3s] 
 [     0.3s] ==== ItoFS TTS on ESP32-S3 ====
-[     0.8s] weights: 4892708 bytes copied flash -> PSRAM in 467 ms
-[     0.8s] model: arch 3 (ItoFS v3: mel front + mel vocoder), 3424816 int8 + 543936 int16 + 90726 f32 params, text 128, GRU 96 forward (incremental text side), prosody 96, mel head 176 x4 -> 100, decoder 256/768 x5, n_fft 1200, hop 300 (80 fps), 24000 Hz, 1 styles, style table
-[     0.8s] QEMU build: I2S disabled (audio is generated and discarded)
-[     0.8s] internal SRAM before the hot arena: largest free block 264 KB, free 330 KB
-[     0.8s] arena: hot 243660 bytes in internal SRAM, bulk 1394448 bytes in PSRAM; chunk 24 frames = 7200 samples; 8-bit activations
-[     0.8s] kernels: PIE int8 dot (esp-nn), dual core; staging tiles ok (4096 B x 2 per core in internal SRAM); GDMA EMULATED in software (QEMU)
-[     0.8s] demos: 3 sentences from the weight blob
-[     0.8s] MEM boot: peak PSRAM used 6204 / 8192 KB, peak internal SRAM used 317 / 384 KB
-[     0.9s] I (702) main_task: Returned from app_main()
-[     2.4s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 a7d804ab (host a7d804ab) -> PASS
-[     2.4s] TIMING selftest(no playback): 84 tokens, style 0, 5.59 s audio | first chunk 97.6 ms (begin 2.2 ms; incremental text side, 8 tokens final at first chunk) | compute 1574.4 ms, RTF 0.282 | underruns 0 (start delay 0 ms) | weight staging direct: 2911 GEMM calls, 0 announced ahead, 0 not
-[     2.4s] MEM selftest(no playback): peak PSRAM used 6484 / 8192 KB, peak internal SRAM used 340 / 384 KB
-[     5.9s] PCMEND 134100
+[     0.6s] weights: 3806628 bytes copied flash -> PSRAM in 358 ms
+[     0.6s] model: arch 3 (ItoFS v3: mel front + mel vocoder), 2365104 int8 + 543936 int16 + 84134 f32 params, text 128, GRU 96 forward (incremental text side), prosody 96, mel head 176 x4 -> 100, decoder 192/576 x5, n_fft 1200, hop 300 (80 fps), 24000 Hz, 1 styles, style table
+[     0.6s] QEMU build: I2S disabled (audio is generated and discarded)
+[     0.6s] internal SRAM before the hot arena: largest free block 264 KB, free 329 KB
+[     0.7s] arena: hot 191532 bytes in internal SRAM, bulk 1312272 bytes in PSRAM; chunk 24 frames = 7200 samples; 8-bit activations
+[     0.9s] kernels: PIE int8 dot (esp-nn), dual core; staging tiles ok (10240 B x 2 per core in internal SRAM); GDMA PSRAM->SRAM unavailable (self-test failed or no channel)
+[     0.9s] demos: 3 sentences from the weight blob
+[     0.9s] MEM boot: peak PSRAM used 5043 / 8192 KB, peak internal SRAM used 291 / 383 KB
+[     0.9s] I (793) main_task: Returned from app_main()
+[     2.3s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 023bd6b1 (host 023bd6b1) -> PASS
+[     2.3s] TIMING selftest(no playback): 84 tokens, style 0, 5.59 s audio | first chunk 84.7 ms (begin 3.4 ms; incremental text side, 8 tokens final at first chunk) | compute 1404.7 ms, RTF 0.251 | underruns 0
+[     2.3s] MEM selftest(no playback): peak PSRAM used 5323 / 8192 KB, peak internal SRAM used 314 / 383 KB
+[     5.7s] PCMEND 134100
 PCM COMPARE vs host C engine: firmware 134100 samples (reported 134100), host 134100, differing samples 0 -> BIT-IDENTICAL
-[     5.9s] SAY demo 0: "LJ009-0076: wiː kˈʌm tə ðə sˈɜːmən ."
-[     6.5s] TIMING demo: 25 tokens, style 0, 2.09 s audio | first chunk 78.0 ms (begin 1.9 ms; incremental text side, 8 tokens final at first chunk) | compute 587.8 ms, RTF 0.282 | underruns 10 (start delay 0 ms) | weight staging direct: 1164 GEMM calls, 0 announced ahead, 0 not
-[     6.5s] MEM demo: peak PSRAM used 6484 / 8192 KB, peak internal SRAM used 340 / 384 KB
-[     6.5s] SAY demo 1: "LJ018-0098: ænd ɹˈɛkəɡnˌaɪzd æz wˈʌn ʌvðə fɹˈiːkwɛntɚz ʌvðə bˈoʊɡəs lˈɔː stˈeɪʃənɚz . hɪz ɚɹˈɛst lˈɛd tə ðæt ʌv ˈʌðɚz ."
-[     8.5s] TIMING demo: 108 tokens, style 0, 7.17 s audio | first chunk 75.7 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1985.6 ms, RTF 0.277 | underruns 26 (start delay 0 ms) | weight staging direct: 3667 GEMM calls, 0 announced ahead, 0 not
-[     8.5s] MEM demo: peak PSRAM used 6484 / 8192 KB, peak internal SRAM used 340 / 384 KB
-[     8.5s] SAY demo 2: "LJ004-0152: ɔːlðˈoʊ æt mˈɪstɚ . bˈʌkstənz vˈɪzɪt ɐ nˈuː dʒˈeɪl wʌz ɪn pɹˈɑːsɛs ʌv ɪɹˈɛkʃən , ðə fˈɜːst stˈɛp təwˈɔːɹdz ɹᵻfˈɔːɹm sˈɪns hˈaʊɚdz vˌɪzɪtˈeɪʃən ɪn sˈɛvəntˌiːn sˈɛvənti fˈoːɹ ."
-[    11.4s] TIMING demo: 175 tokens, style 0, 10.46 s audio | first chunk 75.6 ms (begin 0.4 ms; incremental text side, 8 tokens final at first chunk) | compute 2908.9 ms, RTF 0.278 | underruns 37 (start delay 0 ms) | weight staging direct: 5284 GEMM calls, 0 announced ahead, 0 not
-[    11.4s] MEM demo: peak PSRAM used 6484 / 8192 KB, peak internal SRAM used 340 / 384 KB
-[    11.4s] READY (BOOT button = demos, serial: say <ids> | style <k> | demo [k] | test | stats | help)
->>> wmode 3
-[    11.4s] OK weight staging gdma+prefetch
-[    11.4s] READY
->>> test
-[    13.0s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 a7d804ab (host a7d804ab) -> PASS
-[    13.0s] TIMING selftest(no playback): 84 tokens, style 0, 5.59 s audio | first chunk 78.3 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1566.2 ms, RTF 0.280 | underruns 0 (start delay 0 ms) | weight staging gdma+prefetch: 2911 GEMM calls, 2911 announced ahead, 0 not
-[    13.0s] MEM selftest(no playback): peak PSRAM used 6484 / 8192 KB, peak internal SRAM used 340 / 384 KB
-[    16.5s] PCMEND 134100
-PCM COMPARE vs host C engine: firmware 134100 samples (reported 134100), host 134100, differing samples 0 -> BIT-IDENTICAL
-[    18.9s] SELFTEST single-core, 8-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 a7d804ab (host a7d804ab) -> PASS
-[    21.2s] SELFTEST dual-core, 16-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 c6d37a89 (host c6d37a89) -> PASS
-[    21.2s] TIMING selftest(no playback): 84 tokens, style 0, 5.59 s audio | first chunk 104.1 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 2332.4 ms, RTF 0.417 | underruns 0 (start delay 0 ms) | weight staging gdma+prefetch: 4142 GEMM calls, 4142 announced ahead, 0 not
-[    21.2s] MEM selftest(no playback): peak PSRAM used 6484 / 8192 KB, peak internal SRAM used 340 / 384 KB
-[    21.2s] READY
->>> wmode 2
-[    21.3s] OK weight staging gdma
-[    21.3s] READY
->>> test
-[    22.9s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 a7d804ab (host a7d804ab) -> PASS
-[    22.9s] TIMING selftest(no playback): 84 tokens, style 0, 5.59 s audio | first chunk 76.1 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1563.8 ms, RTF 0.280 | underruns 0 (start delay 0 ms) | weight staging gdma: 2911 GEMM calls, 0 announced ahead, 2911 not
-[    22.9s] MEM selftest(no playback): peak PSRAM used 6484 / 8192 KB, peak internal SRAM used 340 / 384 KB
-[    26.3s] PCMEND 134100
-PCM COMPARE vs host C engine: firmware 134100 samples (reported 134100), host 134100, differing samples 0 -> BIT-IDENTICAL
-[    28.8s] SELFTEST single-core, 8-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 a7d804ab (host a7d804ab) -> PASS
-[    31.1s] SELFTEST dual-core, 16-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 c6d37a89 (host c6d37a89) -> PASS
-[    31.1s] TIMING selftest(no playback): 84 tokens, style 0, 5.59 s audio | first chunk 103.5 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 2330.4 ms, RTF 0.417 | underruns 0 (start delay 0 ms) | weight staging gdma: 4142 GEMM calls, 0 announced ahead, 4142 not
-[    31.1s] MEM selftest(no playback): peak PSRAM used 6484 / 8192 KB, peak internal SRAM used 340 / 384 KB
-[    31.1s] READY
+[     5.7s] SAY demo 0: "LJ009-0076: wiː kˈʌm tə ðə sˈɜːmən ."
+[     6.2s] TIMING demo: 25 tokens, style 0, 2.09 s audio | first chunk 48.6 ms (begin 1.8 ms; incremental text side, 8 tokens final at first chunk) | compute 490.9 ms, RTF 0.235 | underruns 8
+[     6.2s] MEM demo: peak PSRAM used 5323 / 8192 KB, peak internal SRAM used 314 / 383 KB
+[     6.2s] SAY demo 1: "LJ018-0098: ænd ɹˈɛkəɡnˌaɪzd æz wˈʌn ʌvðə fɹˈiːkwɛntɚz ʌvðə bˈoʊɡəs lˈɔː stˈeɪʃənɚz . hɪz ɚɹˈɛst lˈɛd tə ðæt ʌv ˈʌðɚz ."
+[     7.9s] TIMING demo: 108 tokens, style 0, 7.17 s audio | first chunk 47.6 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1729.2 ms, RTF 0.241 | underruns 24
+[     7.9s] MEM demo: peak PSRAM used 5323 / 8192 KB, peak internal SRAM used 314 / 383 KB
+[     7.9s] SAY demo 2: "LJ004-0152: ɔːlðˈoʊ æt mˈɪstɚ . bˈʌkstənz vˈɪzɪt ɐ nˈuː dʒˈeɪl wʌz ɪn pɹˈɑːsɛs ʌv ɪɹˈɛkʃən , ðə fˈɜːst stˈɛp təwˈɔːɹdz ɹᵻfˈɔːɹm sˈɪns hˈaʊɚdz vˌɪzɪtˈeɪʃən ɪn sˈɛvəntˌiːn sˈɛvənti fˈoːɹ ."
+[    10.4s] TIMING demo: 175 tokens, style 0, 10.46 s audio | first chunk 47.9 ms (begin 0.4 ms; incremental text side, 8 tokens final at first chunk) | compute 2532.6 ms, RTF 0.242 | underruns 35
+[    10.4s] MEM demo: peak PSRAM used 5323 / 8192 KB, peak internal SRAM used 314 / 383 KB
+[    10.4s] READY (BOOT button = demos, serial: say <ids> | style <k> | demo [k] | test | stats | help)
 >>> wmode 1
-[    31.1s] OK weight staging copy
-[    31.1s] READY
+[    10.4s] OK weight staging copy
+[    10.4s] READY
 >>> test
-[    32.7s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 a7d804ab (host a7d804ab) -> PASS
-[    32.7s] TIMING selftest(no playback): 84 tokens, style 0, 5.59 s audio | first chunk 75.0 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1539.4 ms, RTF 0.276 | underruns 0 (start delay 0 ms) | weight staging copy: 2911 GEMM calls, 0 announced ahead, 0 not
-[    32.7s] MEM selftest(no playback): peak PSRAM used 6484 / 8192 KB, peak internal SRAM used 340 / 384 KB
-[    36.2s] PCMEND 134100
+[    11.8s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 023bd6b1 (host 023bd6b1) -> PASS
+[    11.8s] TIMING selftest(no playback): 84 tokens, style 0, 5.59 s audio | first chunk 52.4 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1365.2 ms, RTF 0.244 | underruns 0
+[    11.8s] MEM selftest(no playback): peak PSRAM used 5323 / 8192 KB, peak internal SRAM used 314 / 383 KB
+[    15.2s] PCMEND 134100
 PCM COMPARE vs host C engine: firmware 134100 samples (reported 134100), host 134100, differing samples 0 -> BIT-IDENTICAL
-[    38.6s] SELFTEST single-core, 8-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 a7d804ab (host a7d804ab) -> PASS
-[    40.9s] SELFTEST dual-core, 16-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 c6d37a89 (host c6d37a89) -> PASS
-[    40.9s] TIMING selftest(no playback): 84 tokens, style 0, 5.59 s audio | first chunk 101.8 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 2287.9 ms, RTF 0.409 | underruns 0 (start delay 0 ms) | weight staging copy: 4142 GEMM calls, 0 announced ahead, 0 not
-[    40.9s] MEM selftest(no playback): peak PSRAM used 6484 / 8192 KB, peak internal SRAM used 340 / 384 KB
-[    40.9s] READY
->>> wmode 0
-[    40.9s] OK weight staging direct
-[    40.9s] READY
+[    17.2s] SELFTEST single-core, 8-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 023bd6b1 (host 023bd6b1) -> PASS
+[    19.1s] SELFTEST dual-core, 16-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 9666bb9e (host 9666bb9e) -> PASS
+[    19.1s] TIMING selftest(no playback): 84 tokens, style 0, 5.59 s audio | first chunk 60.7 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1935.2 ms, RTF 0.346 | underruns 0
+[    19.1s] MEM selftest(no playback): peak PSRAM used 5323 / 8192 KB, peak internal SRAM used 314 / 383 KB
+[    19.1s] READY
+>>> wmode 2
+[    19.1s] ERROR weight staging mode 2 unavailable
+[    19.1s] READY
 >>> test
-[    42.5s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 a7d804ab (host a7d804ab) -> PASS
-[    42.5s] TIMING selftest(no playback): 84 tokens, style 0, 5.59 s audio | first chunk 75.5 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1550.4 ms, RTF 0.277 | underruns 0 (start delay 0 ms) | weight staging direct: 2911 GEMM calls, 0 announced ahead, 0 not
-[    42.5s] MEM selftest(no playback): peak PSRAM used 6484 / 8192 KB, peak internal SRAM used 340 / 384 KB
-[    46.0s] PCMEND 134100
+[    20.5s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 023bd6b1 (host 023bd6b1) -> PASS
+[    20.5s] TIMING selftest(no playback): 84 tokens, style 0, 5.59 s audio | first chunk 53.8 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1394.2 ms, RTF 0.250 | underruns 0
+[    20.5s] MEM selftest(no playback): peak PSRAM used 5323 / 8192 KB, peak internal SRAM used 314 / 383 KB
+[    24.0s] PCMEND 134100
 PCM COMPARE vs host C engine: firmware 134100 samples (reported 134100), host 134100, differing samples 0 -> BIT-IDENTICAL
-[    48.3s] SELFTEST single-core, 8-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 a7d804ab (host a7d804ab) -> PASS
-[    50.6s] SELFTEST dual-core, 16-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 c6d37a89 (host c6d37a89) -> PASS
-[    50.6s] TIMING selftest(no playback): 84 tokens, style 0, 5.59 s audio | first chunk 102.5 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 2309.9 ms, RTF 0.413 | underruns 0 (start delay 0 ms) | weight staging direct: 4142 GEMM calls, 0 announced ahead, 0 not
-[    50.6s] MEM selftest(no playback): peak PSRAM used 6484 / 8192 KB, peak internal SRAM used 340 / 384 KB
-[    50.6s] READY
+[    26.0s] SELFTEST single-core, 8-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 023bd6b1 (host 023bd6b1) -> PASS
+[    27.9s] SELFTEST dual-core, 16-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 9666bb9e (host 9666bb9e) -> PASS
+[    27.9s] TIMING selftest(no playback): 84 tokens, style 0, 5.59 s audio | first chunk 56.1 ms (begin 0.2 ms; incremental text side, 8 tokens final at first chunk) | compute 1889.1 ms, RTF 0.338 | underruns 0
+[    27.9s] MEM selftest(no playback): peak PSRAM used 5323 / 8192 KB, peak internal SRAM used 314 / 383 KB
+[    27.9s] READY
 >>> wmode 3
-[    50.7s] OK weight staging gdma+prefetch
-[    50.7s] READY
->>> demo 1
-[    50.7s] SAY demo 1: "LJ018-0098: ænd ɹˈɛkəɡnˌaɪzd æz wˈʌn ʌvðə fɹˈiːkwɛntɚz ʌvðə bˈoʊɡəs lˈɔː stˈeɪʃənɚz . hɪz ɚɹˈɛst lˈɛd tə ðæt ʌv ˈʌðɚz ."
-[    52.7s] TIMING demo: 108 tokens, style 0, 7.17 s audio | first chunk 76.6 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1997.5 ms, RTF 0.278 | underruns 26 (start delay 0 ms) | weight staging gdma+prefetch: 3667 GEMM calls, 3667 announced ahead, 0 not
-[    52.7s] MEM demo: peak PSRAM used 6484 / 8192 KB, peak internal SRAM used 340 / 384 KB
-[    52.7s] READY
+[    27.9s] ERROR weight staging mode 3 unavailable
+[    27.9s] READY
+>>> test
+[    29.3s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 023bd6b1 (host 023bd6b1) -> PASS
+[    29.3s] TIMING selftest(no playback): 84 tokens, style 0, 5.59 s audio | first chunk 48.9 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1320.5 ms, RTF 0.236 | underruns 0
+[    29.3s] MEM selftest(no playback): peak PSRAM used 5323 / 8192 KB, peak internal SRAM used 314 / 383 KB
+[    32.6s] PCMEND 134100
+PCM COMPARE vs host C engine: firmware 134100 samples (reported 134100), host 134100, differing samples 0 -> BIT-IDENTICAL
+[    34.5s] SELFTEST single-core, 8-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 023bd6b1 (host 023bd6b1) -> PASS
+[    36.4s] SELFTEST dual-core, 16-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 9666bb9e (host 9666bb9e) -> PASS
+[    36.4s] TIMING selftest(no playback): 84 tokens, style 0, 5.59 s audio | first chunk 56.1 ms (begin 0.2 ms; incremental text side, 8 tokens final at first chunk) | compute 1877.5 ms, RTF 0.336 | underruns 0
+[    36.4s] MEM selftest(no playback): peak PSRAM used 5323 / 8192 KB, peak internal SRAM used 314 / 383 KB
+[    36.4s] READY
 CLIENT DONE
