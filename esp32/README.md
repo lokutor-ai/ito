@@ -58,6 +58,8 @@ python3 esp32/tools/chip_wav.py "Any English text." out.wav    # text -> WAV wit
 esp32/tools/build_fw.sh && esp32/tools/qemu/run_qemu.sh       # the real firmware in Espressif QEMU (>= 9.2.2)
 ```
 
+`make test_sched` runs the boot-calibration and start-delay policy (`engine/itofs_sched.c`, §4b) against a model of the speaker with simulated timings; it needs no weights.
+
 `make test` checks the C engine against an engine-numerics PyTorch reference stored in `host/golden/` (male voice:
 `make test VOICE=male`, references in `host/golden/g/`; `VOICE=male esp32/tools/qemu/run_qemu.sh` runs the male voice in QEMU). It checks
 durations, the SNR of every stage, and that streaming output is bit-identical to whole-utterance output. It runs for
@@ -213,6 +215,19 @@ BOARD_SUMMARY ... best_wmode=... mean first chunk, mean RTF, GEMM GMAC/s per mod
 ```
 
 These lines give the effective G, the real float-work time, the PSRAM bandwidth and the time to first audio directly.
+
+## 4b. Boot calibration and start-delay policy
+
+`engine/itofs_sched.c` is the policy that turns **measured** chunk times into decisions. It has no clock of its own: the firmware feeds it microseconds, the tests feed it simulated ones.
+- *Measured RTF of a trace* (one representative sentence synthesised chunk by chunk with the shipped schedule): the larger of the median full-chunk figure and the whole-trace figure (ramp included).
+- *Choice among weight sets* (best quality first): the first whose measured RTF is <= 0.85; otherwise the lowest, reported as marginal (0.85 to 0.95) or **degraded** (>= 0.95).
+- *Start delay per utterance* (an adaptive jitter pre-buffer): a model of the speaker and of the 6 PCM buffers, driven by the measured chunk times times a 1.25 safety factor (a trace's own chunks, then its steady median, and a fixed-plus-per-frame fit for the short last chunk),
+  returns the smallest delay with no predicted underrun and never less than the first chunk's production time; the chunk times actually seen in the utterance replace the model's as they arrive.
+
+`make test_sched` (host) checks it with simulated timings against an independent discrete-event model of the speaker (true chunk times of a *different* sentence with its own jitter): the weight-set choice at the exact thresholds and with missing sets;
+**8,640 random sentences** (RTF 0.30 to 0.85, three splits of fixed and per-frame cost, 3 to 400 tokens, +-4 % jitter per chunk and +-4 % sentence-to-sentence cost between calibration and playback) with **0 underruns**; the first audio released with no extra wait on a fast board;
+a board slower than real time reported infeasible rather than hidden; slower-than-calibrated chunks seen early raising the delay. Outside the margin (+-8 % and +-8 %) 4 of 2,880 sentences underrun, which the test reports as information, not a guarantee.
+Nothing here runs on a board yet; the firmware integration is the next section of this README.
 
 ## 5. Numerics, and what was verified
 

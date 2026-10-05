@@ -25,6 +25,7 @@ esp32/host/host_test_v3_asan
 esp32/host/gen_selftest
 esp32/host/opcount_v3
 esp32/host/w4_dump
+esp32/host/host_test_sched
 esp32/host/*.dSYM/
 esp32/host/asan.log
 esp32/host/golden/*.wav
