@@ -11,8 +11,11 @@ Two voices, both distilled from StyleTTS 2 conditioned on a LibriTTS-R speaker (
 
 | voice | speaker | PyTorch file (Python package) | chip file (firmware, `esp32/host`, `chip_wav.py`) |
 |---|---|---|---|
-| **female** (default) | LibriTTS-R 4970 | `ito_female.pt` (14 MB) | `ito_female_esp32s3.bin` (3.8 MB) |
-| **male** | LibriTTS-R 5105 | `ito_male.pt` (13 MB) | `ito_male_esp32s3.bin` (3.8 MB) |
+| **female** (default) | LibriTTS-R 4970 | `ito_female.pt` (14 MB) | `ito_female_esp32s3.bin` (3.8 MB), `_int4.bin` (3.2 MB), `_light.bin` (3.1 MB) |
+| **male** | LibriTTS-R 5105 | `ito_male.pt` (13 MB) | `ito_male_esp32s3.bin` (3.8 MB), `_int4.bin` (3.2 MB), `_light.bin` (3.1 MB) |
+
+Each voice has three chip files, which the board flashes to three partitions and chooses between at boot by measuring them: the main set (`ito_<voice>_esp32s3.bin`, int8), the same model with int4 blocks (`_int4`),
+and a light set with one block fewer (`_light`, int4). The host build, `chip_wav.py` and the QEMU scripts need only the first. See [`esp32/README.md`](../esp32/README.md) §4c.
 
 Choose the voice with `ito-tts --voice male`, `Ito.load(voice="male")`, `chip_wav.py --voice male`, or `VOICE=male` for the
 shell tools (`fetch_weights.sh`, `flash.sh`, `run_qemu.sh`, `make test`). The default is the female voice. The older short names `d` and `g` still work.

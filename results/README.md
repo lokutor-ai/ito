@@ -41,6 +41,7 @@ Two earlier Ito variants against the reference (teacher) model; one listener, fo
 - `host_test_a8.log`, `host_test_a16.log`: the C engine against the engine-numerics reference, stage by stage, with
   8- and 16-bit activations. Streaming is bit-identical to whole-utterance output.
 - `qemu_rtf_female.log`, `qemu_rtf_male.log`: the firmware in QEMU with the 192-wide blobs, all four weight-staging modes, PCM bit-identical to the host. `qemu_icprof_*.log.xz` and `estimates_5oct.txt`: exact instruction counts and the resulting estimates (`estimates_3oct.txt`: the 256-wide vocoder).
+- `qemu_sets_*.log`, `qemu_modes_*.log`, `host_test_sched.log`, `int4/`: the weight sets (main int8, main int4, light) and the boot self-calibration: the firmware in QEMU with all three sets of a voice in flash (selection with injected timings, PCM of every set bit-identical in all staging modes, C and PIE int4 unpack), the host test of the start-delay policy, and the int4 exactness checks and quality logs.
 - `qemu_v3.log`: an earlier run of the firmware in Espressif QEMU 9.2.2, built from this repository. The self-test passes, and its PCM is
   bit-identical to the host build (1 and 2 cores, 8- and 16-bit activations, two weight-staging modes). Its timing
   lines are emulator wall-clock times, not chip times.

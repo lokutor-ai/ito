@@ -30,6 +30,7 @@
 #include "driver/i2s_std.h"
 #endif
 #include "itofs.h"
+#include "itofs_sched.h"
 #include "kernels_s3.h"
 #include "demo_sentences.h"
 
@@ -43,7 +44,8 @@
 #define STEADY_FRAMES 24             // frames per chunk once the start-up ramp is over (24 frames = 300 ms): every chunk reads each weight
                                      // matrix once from PSRAM, so bigger chunks mean less weight traffic per second of audio
 #endif
-#define NBUF 4                       // PCM chunk buffers between synthesis and I2S (PSRAM, 14 KB each): with a start delay the player waits while synthesis keeps going
+#define NBUF 6                       // PCM chunk buffers between synthesis and I2S (PSRAM, 14 KB each): with a start delay the player waits while synthesis keeps going
+                                     // (the start-delay planner models this pool: production of chunk k waits for the buffer of chunk k - NBUF)
 // Start-up schedule (gapless speech from the first chunk). Time to first audio is the time of chunk 0; for playback never to starve, every later chunk
 // must be ready before the audio of the chunks before it has played, and each chunk costs a fixed weight pass plus about 6.5 ms (central) per frame.
 // A first chunk of 2 frames is out after about 145 ms (central) but its 25 ms of audio is gone long before the 24-frame chunk after it (about 230 ms
@@ -62,8 +64,7 @@
                                      // lowest-latency start (about 145 ms central) but not gapless
 #endif
 #ifndef START_DELAY_MS
-#define START_DELAY_MS 0             // start playback this many ms after the text (0 = with the first chunk, which is gapless if the estimates hold; set it from
-                                     // the underruns the TIMING line reports: the delay that is just enough is the gapless start delay of this board)
+#define START_DELAY_MS -1            // -1: the start delay is planned per utterance from the boot calibration (itofs_sched.h); >= 0 fixes it in ms (the `delay <ms>` command does the same at run time)
 #endif
 #ifndef ITOFS_ACT_BITS
 #define ITOFS_ACT_BITS 8             // activations of the int8-weight layers: 8 (one int8 plane, default) or 16; `act` command
@@ -100,7 +101,11 @@ typedef struct { int16_t *pcm; int n; } buf_t;      // n = samples, 0 = end of u
 static QueueHandle_t s_free_q, s_full_q, s_req_q, s_done_q;
 static volatile int s_underruns, s_playing;
 static volatile int64_t s_utt_t0;       // esp_timer time (us) at which the current utterance was handed to the engine
-static int s_start_delay_ms = START_DELAY_MS;   // hold the DAC until this long after the text arrived (0: start with the first chunk); `delay <ms>`
+static int s_delay_override_ms = START_DELAY_MS;   // >= 0: hold the DAC until this long after the text arrived, whatever the plan says (`delay <ms>`); -1: use the plan (`delay auto`)
+static volatile int64_t s_cur_delay_us;            // the planned start delay of the current utterance (from its text arrival); raised while the player waits if the chunks come slower than calibrated
+static int s_active = -1, s_selected = -1, s_degraded;   // weight set in use / chosen by the boot calibration / degraded flag (see the weight-set section)
+#define PLAN_MAX_DELAY_US 4000000.0
+static double s_obs_us[ITOFS_SCHED_MAXCH];         // production times of the chunks of the current utterance so far
 
 typedef struct { int kind; int n; int16_t tok[MAX_TOKENS]; } req_t;   // 0 say, 1 demos, 2 self-test, 3 style, 4 act bits, 5 bench, 6 wmode, 7 icprof, 8 first
 static req_t s_req_tmp;
@@ -152,9 +157,13 @@ static void play_task(void *arg)
             xQueueReceive(s_full_q, &b, portMAX_DELAY);
         }
         if (b.n == 0) { s_playing = 0; xQueueSend(s_done_q, &b, portMAX_DELAY); continue; }
-        if (!s_playing && s_start_delay_ms > 0) {          // pre-roll: the first chunk waits for the delay, later chunks keep arriving meanwhile
-            const int64_t wait = s_utt_t0 + (int64_t)s_start_delay_ms * 1000 - esp_timer_get_time();
-            if (wait > 1000) vTaskDelay(pdMS_TO_TICKS((wait + 999) / 1000));
+        if (!s_playing) {                                  // pre-roll: the first chunk waits for the delay, later chunks keep arriving meanwhile
+            for (;;) {                                     // (re-read in <= 10 ms steps: the synthesis task may raise the planned delay)
+                const int64_t d = s_delay_override_ms >= 0 ? (int64_t)s_delay_override_ms * 1000 : s_cur_delay_us;
+                const int64_t wait = s_utt_t0 + d - esp_timer_get_time();
+                if (wait <= 1000) break;
+                vTaskDelay(pdMS_TO_TICKS((wait > 10000 ? 10000 : wait + 999) / 1000));
+            }
         }
         s_playing = 1;
 #ifndef ITOFS_QEMU
@@ -174,12 +183,14 @@ static void play_task(void *arg)
 // ------------------------------------------------------------------------------------------------------------------
 // synthesis
 // ------------------------------------------------------------------------------------------------------------------
-typedef struct { double ttfa_ms, begin_ms, compute_ms, audio_s; int frames, tok_first; } stats_t;
+typedef struct { double ttfa_ms, begin_ms, compute_ms, audio_s; int frames, tok_first; double plan_delay_ms; int plan_underruns, plan_feasible; } stats_t;
 
 // Synthesise tokens; stream chunks to the player (play=1) or into out[] (play=0).
+static int tier_plan(int n_tok, int nobs, itofs_plan_t *pl);       // below: start-delay plan from the active weight set's calibration
 static int speak(const int *tok, int n, int style, uint32_t seed, int play, int16_t *out, long out_max, stats_t *S)
 {
-    S->tok_first = 0;
+    S->tok_first = 0; S->plan_delay_ms = -1; S->plan_underruns = 0; S->plan_feasible = 1;
+    s_cur_delay_us = 0;
     int64_t t0 = esp_timer_get_time();
     s_utt_t0 = t0;
     s3_stats_reset();
@@ -204,7 +215,17 @@ static int speak(const int *tok, int n, int style, uint32_t seed, int play, int1
         if (got <= 0) { if (play) xQueueSend(s_free_q, &b, portMAX_DELAY); break; }
         if (ttfa < 0) { ttfa = e - t0; S->tok_first = s_ctx.n_done; }
         pos += got;
-        if (play) { b.n = got; xQueueSend(s_full_q, &b, portMAX_DELAY); }
+        if (play) {
+            if (kch - 1 < ITOFS_SCHED_MAXCH) s_obs_us[kch - 1] = (double)(e - a);
+            if (!s_playing) {          // adaptive pre-buffer: plan (kch == 1) or re-plan the start delay with the chunk times actually seen in this utterance
+                itofs_plan_t pl;
+                if (tier_plan(n, kch < ITOFS_SCHED_MAXCH ? kch : ITOFS_SCHED_MAXCH, &pl)) {
+                    s_cur_delay_us = (int64_t)pl.start_delay_us;
+                    S->plan_delay_ms = pl.start_delay_us / 1e3; S->plan_underruns = pl.underruns; S->plan_feasible = pl.feasible;
+                }
+            }
+            b.n = got; xQueueSend(s_full_q, &b, portMAX_DELAY);
+        }
     }
     if (play) {
         buf_t end = { NULL, 0 };
@@ -220,9 +241,10 @@ static int speak(const int *tok, int n, int style, uint32_t seed, int play, int1
 static void print_timing(const char *what, const stats_t *S, int n_tok, int style)
 {
     printf("TIMING %s: %d tokens, style %d, %.2f s audio | first chunk %.1f ms (begin %.1f ms; %s text side, %d tokens final at first chunk) | "
-           "compute %.1f ms, RTF %.3f | underruns %d (start delay %d ms) | weight staging %s: %ld GEMM calls, %ld announced ahead, %ld not\n",
+           "compute %.1f ms, RTF %.3f | underruns %d (start delay %s %.0f ms%s) | weight set %d | weight staging %s: %ld GEMM calls, %ld announced ahead, %ld not\n",
            what, n_tok, style, S->audio_s, S->ttfa_ms, S->begin_ms, s_ctx.text_incr ? "incremental" : "whole-sentence", S->tok_first,
-           S->compute_ms, S->compute_ms / 1000.0 / S->audio_s, s_underruns, s_start_delay_ms, s3_wmode_name(s3_wmode),
+           S->compute_ms, S->compute_ms / 1000.0 / S->audio_s, s_underruns, s_delay_override_ms >= 0 ? "fixed" : "planned",
+           s_delay_override_ms >= 0 ? (double)s_delay_override_ms : S->plan_delay_ms, s_delay_override_ms >= 0 || S->plan_feasible ? "" : ", model predicts underruns", s_active, s3_wmode_name(s3_wmode),
            s3_stats.calls, s3_stats.pf_hit, s3_stats.pf_miss + s3_stats.pf_free);
     mem_report(what);
 }
@@ -269,6 +291,7 @@ static void demo_tokens(int k, int *dst)
 // The blob's self-test record: golden sentence 0 with a fixed seed, and the fnv32 hash of the int16 PCM the HOST C
 // engine produced for it. The engine is deterministic IEEE float plus an exact int8 GEMM, so the chip must reproduce
 // it bit for bit. `both`: also run with the second core disabled (the dual-core GEMM split must not change a bit).
+static int s_tested, s_selftest_ok = 1;     // the active weight set has passed its self-test / result of the last self-test
 static void self_test_one(const int32_t *s_st, int both, int dump)
 {
     const int n = s_st[1], style = s_st[2], nref = s_st[4], act = s_st[6], act_saved = s_ctx.act_bits;
@@ -284,6 +307,7 @@ static void self_test_one(const int32_t *s_st, int both, int dump)
         uint32_t h = 2166136261u;
         for (int i = 0; i < got; i++) { h ^= (uint16_t)pcm[i]; h *= 16777619u; }
         const int ok = got == nref && h == href;
+        if (!ok) s_selftest_ok = 0;
         printf("SELFTEST %s, %d-bit activations: golden sentence 0 vs host C engine: %d samples (host %d), fnv32 %08lx (host %08lx) -> %s\n",
                pass == 0 ? "dual-core" : "single-core", act, got, nref, (unsigned long)h, (unsigned long)href, ok ? "PASS" : "FAIL");
         if (pass == 0) print_timing("selftest(no playback)", &S, n, style);
@@ -305,9 +329,11 @@ static void self_test_one(const int32_t *s_st, int both, int dump)
 
 static void self_test(int both)
 {
-    if (!s_st) { printf("SELFTEST skipped: this weight blob has no self-test record\n"); return; }
+    s_selftest_ok = 1;
+    if (!s_st) { printf("SELFTEST skipped: this weight blob has no self-test record\n"); s_tested = 1; return; }
     self_test_one(s_st, both, 1);
     if (both && s_st16) self_test_one(s_st16, 0, 0);
+    s_tested = 1;
 }
 
 static void play_demos(int only)
@@ -604,15 +630,244 @@ static void board_bench(void)
     printf("BENCH end\n");
 }
 
+// ------------------------------------------------------------------------------------------------------------------
+// weight sets ("tiers") and the boot self-calibration
+//
+// Up to three ItoFS blobs sit in flash, best quality first: `weights` (main, int8), `weights_b` (main, int4 blocks), `weights_c` (light: 4 blocks, int4).
+// Only one is in PSRAM at a time. At boot the firmware activates them in that order, synthesises a representative sentence (the blob's self-test sentence)
+// without playback with the shipped chunk schedule, records the real time of every chunk (compute plus weight fetch from PSRAM), turns that into a measured
+// real-time factor, and keeps the first set whose RTF is <= 0.85 (itofs_sched.h). If none is, it keeps the fastest and says so; if that one is still
+// >= 0.95 it prints a WARNING line and sets the degraded flag instead of silently stuttering. The same measured chunk times plan, per utterance, the
+// playback start delay (an adaptive jitter pre-buffer: the first audio is released as soon as the model says the speaker cannot run dry).
+// `simtime a b c` replaces the measured chunk times by modelled ones (RTF a, b, c for the three sets) so the whole logic can be exercised in QEMU.
+// ------------------------------------------------------------------------------------------------------------------
+#define MAX_TIERS 3
+typedef struct {
+    const esp_partition_t *p; size_t ext; int valid;
+    int calibrated; double rtf, rtf_steady, rtf_whole; itofs_cal_t cal;
+    int blocks; long n_int4; char desc[48];
+} tier_t;
+static tier_t s_tier[MAX_TIERS];
+static const char *const s_tier_label[MAX_TIERS] = { "weights", "weights_b", "weights_c" };
+static itofs_tier_status_t s_tstatus = ITOFS_TIER_OK;
+static uint8_t *s_wbuf;                       // PSRAM copy of the active set (NULL: running memory-mapped from flash)
+static esp_partition_mmap_handle_t s_map_h; static int s_mapped;
+static void *s_hot, *s_bulk; static size_t s_hb, s_bb;
+static itofs_limits_t s_lim;
+static int s_sim; static double s_sim_rtf[MAX_TIERS] = { 0.9, 0.8, 0.7 };
+
+static int tier_ext(const esp_partition_t *p, size_t *ext, int quiet)
+{
+    uint8_t hdr[16];
+    if (esp_partition_read(p, 0, hdr, sizeof hdr) != ESP_OK || memcmp(hdr, "ITF1", 4)) {
+        if (!quiet) printf("ERROR weights partition '%s' is empty or not an ItoFS blob (flash the itofs_weights_*.bin at its offset)\n", p->label);
+        return -1;
+    }
+    uint32_t cfg_len; memcpy(&cfg_len, hdr + 8, 4);
+    uint32_t nt;
+    if (esp_partition_read(p, 12 + cfg_len, &nt, 4) != ESP_OK || nt > 4096) { printf("ERROR bad blob header in '%s'\n", p->label); return -1; }
+    size_t e = 0;
+    for (uint32_t i = 0; i < nt; i++) {
+        uint8_t ent[104];
+        if (esp_partition_read(p, 16 + cfg_len + (size_t)i * 104, ent, sizeof ent) != ESP_OK) return -1;
+        uint32_t off, nb, so, dt, out;
+        memcpy(&dt, ent + 64, 4); memcpy(&out, ent + 76, 4); memcpy(&off, ent + 88, 4); memcpy(&nb, ent + 92, 4); memcpy(&so, ent + 96, 4);
+        if (off + nb > e) e = off + nb;
+        if ((dt == 1 || dt == 3 || dt == 4) && so + 4 * out > e) e = so + 4 * out;
+    }
+    if (e > p->size) { printf("ERROR blob in '%s' larger than its partition\n", p->label); return -1; }
+    *ext = e;
+    return 0;
+}
+
+// dimensions of a set from the flash mapping (no copy): arena sizes, hop, sample rate
+static int tier_dims(int i, size_t *hb, size_t *bb, int *hop, int *sr)
+{
+    const tier_t *T = &s_tier[i];
+    esp_partition_mmap_handle_t h; const void *map;
+    if (esp_partition_mmap(T->p, 0, (T->ext + 0xFFFF) & ~(size_t)0xFFFF, ESP_PARTITION_MMAP_DATA, &map, &h) != ESP_OK) { printf("ERROR mmap '%s'\n", T->p->label); return -1; }
+    itofs_model_t *m = &s_model;                          // (the global one, used as scratch before the first activation: the struct is far larger than the main task's stack margin)
+    int e = itofs_model_init(m, map, T->ext);
+    if (!e) { itofs_arena_bytes(m, &s_lim, hb, bb); *hop = m->hop; *sr = m->sr; }
+    else printf("ERROR model in '%s': %s\n", T->p->label, itofs_strerror(e));
+    esp_partition_munmap(h);
+    return e ? -1 : 0;
+}
+
+// make set i the active one: weights into PSRAM (or the flash mapping), model parsed, engine context initialised over the shared arenas
+static int activate_tier(int i)
+{
+    tier_t *T = &s_tier[i];
+    s3_stream_reset();                                    // weight staging idle before the weights under it change
+    const void *blob;
+    int64_t t0 = esp_timer_get_time();
+    if (s_mapped) { esp_partition_munmap(s_map_h); s_mapped = 0; }
+    if (s_wbuf) {
+        for (size_t o = 0; o < T->ext; o += 65536) {      // flash read API in 64 KB pieces
+            size_t n = T->ext - o < 65536 ? T->ext - o : 65536;
+            if (esp_partition_read(T->p, o, s_wbuf + o, n) != ESP_OK) { printf("ERROR reading weights '%s'\n", T->p->label); return -1; }
+        }
+        memset(s_wbuf + T->ext, 0, 64);
+        esp_cache_msync(s_wbuf, (T->ext + 64 + 63) & ~(size_t)63, ESP_CACHE_MSYNC_FLAG_DIR_C2M);   // GDMA staging reads PSRAM directly
+        blob = s_wbuf;
+        printf("weights: set %d ('%s'): %u bytes copied flash -> PSRAM in %.0f ms\n", i, T->p->label, (unsigned)T->ext, ms(esp_timer_get_time() - t0));
+    } else {
+        const void *map;
+        if (esp_partition_mmap(T->p, 0, (T->ext + 0xFFFF) & ~(size_t)0xFFFF, ESP_PARTITION_MMAP_DATA, &map, &s_map_h) != ESP_OK) { printf("ERROR mmap weights\n"); return -1; }
+        s_mapped = 1; blob = map;
+        printf("weights: set %d ('%s'): %u bytes run memory-mapped from flash (PSRAM too small for a copy)\n", i, T->p->label, (unsigned)T->ext);
+    }
+    int e = itofs_model_init(&s_model, blob, T->ext);
+    if (e) { printf("ERROR model: %s\n", itofs_strerror(e)); return -1; }
+    if ((e = itofs_init(&s_ctx, &s_model, &s_lim, s_hot, s_hb, s_bulk, s_bb))) { printf("ERROR engine init: %s\n", itofs_strerror(e)); return -1; }
+    s_ctx.qgemm = s3_qgemm;
+    s_ctx.qgemm4 = s3_qgemm4;
+    s_ctx.par = s3_par;                                   // row-parallel float work on both cores (bit-identical to one core)
+    s_ctx.qnext = s3_wmode == 3 ? s3_prefetch : NULL;
+#ifdef ITOFS_ICPROF
+    itofs_prof_clock = ic_clock;
+#endif
+    s_blob = blob; s_blob_size = T->ext;
+    T->blocks = s_model.dec_blocks; T->n_int4 = s_model.n_int4_params;
+    snprintf(T->desc, sizeof T->desc, "vocoder %d/%d x%d, %s", s_model.dec_dim, s_model.dec_inter, s_model.dec_blocks, s_model.n_int4_params ? "int4 blocks" : "int8");
+    printf("model: arch %d (%s), %ld int8 + %ld int4 + %ld int16 + %ld f32 params, text %d, GRU %d %s, prosody %d, mel head %d x%d -> %d, "
+           "decoder %d/%d x%d, n_fft %d, hop %d (%d fps), %d Hz, %d styles%s, blob format %d\n", s_model.arch, s_model.arch == 3 ? "ItoFS v3: mel front + mel vocoder" : "ItoFS v2",
+           s_model.n_int8_params, s_model.n_int4_params, s_model.n_int16_params, s_model.n_f32_params, s_model.text_dim, s_model.rnn_hidden,
+           s_model.rnn_bidir ? "bidirectional (whole-sentence text side)" : "forward (incremental text side)", s_model.pros_dim,
+           s_model.mel_dim, s_model.mel_layers, s_model.n_mels, s_model.dec_dim, s_model.dec_inter,
+           s_model.dec_blocks, s_model.n_fft, s_model.hop, s_model.fps, s_model.sr, s_model.n_styles, s_model.style_table ? ", style table" : "", s_model.format);
+    s_st = s_st16 = NULL;
+    {
+        const void *d; size_t nb; int dt;
+        if (!itofs_blob_find(blob, T->ext, "selftest", &d, &nb, &dt) && dt == 2 && nb >= 28 && ((const int32_t *)d)[0] == 0x32525453) s_st = d;        // 'STR2'
+        if (!itofs_blob_find(blob, T->ext, "selftest_a16", &d, &nb, &dt) && dt == 2 && nb >= 28 && ((const int32_t *)d)[0] == 0x32525453) s_st16 = d;
+    }
+    s_ndemo = 0; s_demo_from_blob = 0;
+    load_demos(blob, T->ext);
+    if (s_ndemo) s_style = s_demo_style[0];
+    s_active = i; s_tested = 0;
+    return 0;
+}
+
+// real chunk times of the active set: the self-test sentence, no playback, the shipped schedule
+static void calibrate_tier(int i)
+{
+    tier_t *T = &s_tier[i];
+    itofs_cal_t *c = &T->cal;
+    memset(c, 0, sizeof *c);
+    T->calibrated = 0; T->rtf = -1;
+    int n = 0, style = s_style; uint32_t seed = 1;
+    if (s_st) { n = s_st[1]; style = s_st[2]; seed = (uint32_t)s_st[3]; for (int k = 0; k < n; k++) s_tok_buf[k] = s_st[7 + k]; }
+    else if (s_ndemo) { n = s_demo_len[0]; style = s_demo_style[0]; demo_tokens(0, s_tok_buf); }
+    if (n <= 0) { printf("CALIB set %d: no representative sentence in this blob\n", i); return; }
+    int16_t *pcm = heap_caps_malloc(sizeof(int16_t) * (size_t)s_chunk_samples, MALLOC_CAP_SPIRAM);
+    if (!pcm) { printf("CALIB ERROR: no memory\n"); return; }
+    c->hop = s_hop; c->sr = s_sr; c->steady_frames = s_chunk_frames; c->n_tok = n;
+    s3_stats_reset();
+    const int act_saved = s_ctx.act_bits;
+    if (s_st) s_ctx.act_bits = s_st[6];
+    int64_t t0 = esp_timer_get_time();
+    const int Tfr = itofs_begin(&s_ctx, s_tok_buf, n, style, seed);
+    int64_t t1 = esp_timer_get_time();
+    if (Tfr < 0) { printf("CALIB ERROR itofs_begin: %s\n", itofs_strerror(Tfr)); s_ctx.act_bits = act_saved; heap_caps_free(pcm); return; }
+    c->begin_us = (double)(t1 - t0);
+    int kc = 0;
+    for (;;) {
+        s_ctx.text_step = text_step_for(kc);
+        const int want = chunk_frames_for(kc) * s_hop;
+        const int64_t a = esp_timer_get_time();
+        const int got = itofs_next_chunk(&s_ctx, pcm, want);
+        const int64_t e = esp_timer_get_time();
+        if (got <= 0) break;
+        if (kc < ITOFS_SCHED_MAXCH) { c->frames[kc] = got / s_hop; c->t_us[kc] = (double)(e - a); kc++; } else break;
+    }
+    s_ctx.text_step = 0; s_ctx.act_bits = act_saved;
+    c->n = kc;
+    if (s_sim) {          // timing injection: modelled chunk times for an RTF of s_sim_rtf[i] (a fixed share of 35 % per chunk, the rest per frame)
+        const double t24 = s_sim_rtf[i] * c->steady_frames * s_hop / (double)s_sr * 1e6;
+        for (int k = 0; k < kc; k++) c->t_us[k] = t24 * (0.35 + 0.65 * c->frames[k] / (double)c->steady_frames);
+        c->begin_us = 6000.0;
+    }
+    double steady = 0, whole = 0;
+    T->rtf = itofs_cal_rtf(c, &steady, &whole);
+    T->rtf_steady = steady > 0 ? steady / (c->steady_frames * (double)s_hop / s_sr * 1e6) : -1; T->rtf_whole = whole;
+    T->calibrated = T->rtf >= 0;
+    printf("CALIB set %d ('%s', %s)%s: %d tokens, %d chunks | first chunk %.1f ms (begin %.1f ms) | steady chunk %.1f ms of %.0f ms audio: RTF steady %.3f, whole %.3f -> measured RTF %.3f | weight staging %s\n",
+           i, T->p->label, T->desc, s_sim ? " [SIMULATED TIMES]" : "", n, kc, kc ? c->t_us[0] / 1e3 : 0.0, c->begin_us / 1e3, steady / 1e3,
+           c->steady_frames * (double)s_hop / s_sr * 1e3, T->rtf_steady, whole, T->rtf, s3_wmode_name(s3_wmode));
+    heap_caps_free(pcm);
+}
+
+static int tier_plan(int n_tok, int nobs, itofs_plan_t *pl)
+{
+    if (s_delay_override_ms >= 0 || s_active < 0 || !s_tier[s_active].calibrated || s_tier[s_active].cal.n < 2) return 0;   // fixed delay, or nothing measured: no plan
+    itofs_sched_plan(&s_tier[s_active].cal, n_tok, 0, NBUF, ITOFS_SCHED_SAFETY, PLAN_MAX_DELAY_US, s_obs_us, nobs, pl);
+    return 1;
+}
+
+static void self_test(int both);
+static void tiers_select(void)
+{
+    double rtf[MAX_TIERS];
+    itofs_tier_status_t st = ITOFS_TIER_OK;
+    int pick = -1;
+    for (int attempt = 0; attempt < MAX_TIERS; attempt++) {
+        for (int i = 0; i < MAX_TIERS; i++) rtf[i] = -1;
+        for (int i = 0; i < MAX_TIERS; i++) {                 // best quality first; stop at the first set that meets the target
+            if (!s_tier[i].valid) continue;
+            if (s_active != i && activate_tier(i)) { s_tier[i].valid = 0; continue; }
+            calibrate_tier(i);
+            rtf[i] = s_tier[i].rtf;
+            if (rtf[i] >= 0 && rtf[i] <= ITOFS_RTF_TARGET) break;
+        }
+        pick = itofs_sched_pick(rtf, MAX_TIERS, ITOFS_RTF_TARGET, ITOFS_RTF_DEGRADED, &st);
+        if (pick < 0) { printf("TIER_SELECT ERROR: no weight set could be measured\n"); s_degraded = 1; return; }
+        if (pick != s_active && activate_tier(pick)) { s_tier[pick].valid = 0; continue; }
+        if (!s_tested) {                                      // the chosen set must reproduce the host engine's PCM bit for bit
+            self_test(0);
+            if (!s_selftest_ok) { printf("TIER_SELECT: weight set %d FAILED its self-test and is excluded\n", pick); s_tier[pick].valid = 0; s_tested = 0; continue; }
+        }
+        break;
+    }
+    s_selected = pick; s_tstatus = st; s_degraded = st == ITOFS_TIER_DEGRADED;
+    printf("TIER_SELECT chosen=%d ('%s', %s) measured_rtf=%.3f target=%.2f status=%s degraded=%d%s | measured:", pick, s_tier[pick].p->label, s_tier[pick].desc, rtf[pick],
+           ITOFS_RTF_TARGET, st == ITOFS_TIER_OK ? "OK" : st == ITOFS_TIER_MARGINAL ? "MARGINAL" : "DEGRADED", s_degraded, s_sim ? " (SIMULATED TIMES)" : "");
+    for (int i = 0; i < MAX_TIERS; i++) { if (rtf[i] >= 0) printf(" set%d %.3f", i, rtf[i]); else if (s_tier[i].valid) printf(" set%d not needed", i); else printf(" set%d absent", i); }
+    printf("\n");
+    if (st == ITOFS_TIER_MARGINAL)
+        printf("NOTE: no weight set reaches RTF %.2f; the best (set %d) measures %.3f. Speech is planned with a start delay (gapless if the measurement holds), but there is little margin.\n", ITOFS_RTF_TARGET, pick, rtf[pick]);
+    if (s_degraded)
+        printf("WARNING: DEGRADED: even the fastest weight set runs at RTF %.3f (>= %.2f). Speech may stutter or fall behind on long sentences; the start delay grows with the sentence (capped at %.0f s). The firmware exposes this as degraded=1 in TIER_SELECT and `status`.\n",
+               rtf[pick], ITOFS_RTF_DEGRADED, PLAN_MAX_DELAY_US / 1e6);
+}
+
+static void tier_status(void)
+{
+    printf("STATUS active_set=%d selected_set=%d degraded=%d status=%s start_delay=%s%s", s_active, s_selected, s_degraded,
+           s_tstatus == ITOFS_TIER_OK ? "OK" : s_tstatus == ITOFS_TIER_MARGINAL ? "MARGINAL" : "DEGRADED", s_delay_override_ms >= 0 ? "fixed" : "planned", s_sim ? " SIMULATED_TIMES" : "");
+    for (int i = 0; i < MAX_TIERS; i++) {
+        if (!s_tier[i].valid) { printf(" | set%d ('%s'): absent", i, s_tier_label[i]); continue; }
+        printf(" | set%d ('%s'): %u bytes", i, s_tier_label[i], (unsigned)s_tier[i].ext);
+        if (s_tier[i].calibrated) printf(", measured RTF %.3f", s_tier[i].rtf); else printf(", not measured");
+    }
+    printf("\n");
+}
+
+static void halt(void);
 static void synth_task(void *arg)
 {
     (void)arg;
+    int first = -1;
+    for (int i = 0; i < MAX_TIERS && first < 0; i++) if (s_tier[i].valid) first = i;
+    if (first < 0 || activate_tier(first)) { printf("ERROR no usable weight set\n"); halt(); }
     self_test(0);
+    if (!s_selftest_ok) { printf("WARNING: the first weight set FAILED its self-test and is excluded; the other sets are tried below\n"); s_tier[first].valid = 0; }
 #ifndef ITOFS_QEMU
     board_bench();                   // hardware: measure, keep the fastest weight-staging mode (QEMU: `bench` command)
 #endif
+    tiers_select();
     play_demos(-1);
-    printf("READY (BOOT button = demos, serial: say <ids> | style <k> | demo [k] | test | stats | help)\n");
+    printf("READY (BOOT button = demos, serial: say <ids> | style <k> | demo [k] | test | stats | tier [k] | status | help)\n");
     for (;;) {
         xQueueReceive(s_req_q, &s_req_tmp, portMAX_DELAY);
         if (s_req_tmp.kind == 0) {
@@ -635,11 +890,22 @@ static void synth_task(void *arg)
         } else if (s_req_tmp.kind == 8) {
             s_first = s_req_tmp.n;
             printf("OK first chunk %d frames%s\n", s_first, s_first >= s_chunk_frames || s_first <= 0 ? " (= a full chunk)" : "");
-        } else if (s_req_tmp.kind == 12) {
-            ;
         } else if (s_req_tmp.kind == 6) {
             if (set_wmode(s_req_tmp.n)) printf("ERROR weight staging mode %d unavailable\n", s_req_tmp.n);
             else printf("OK weight staging %s\n", s3_wmode_name(s3_wmode));
+        } else if (s_req_tmp.kind == 9) {            // tier [k]: activate weight set k (its self-test follows); no argument: status
+            const int k = s_req_tmp.n;
+            if (k < 0) tier_status();
+            else if (k >= MAX_TIERS || !s_tier[k].valid) printf("ERROR weight set %d is absent\n", k);
+            else if (activate_tier(k)) printf("ERROR could not activate set %d\n", k);
+            else { s_selected = k; printf("OK weight set %d active\n", k); self_test(0); }
+        } else if (s_req_tmp.kind == 10) {           // recal: measure again and re-select (with simulated times if `simtime` is on)
+            for (int i = 0; i < MAX_TIERS; i++) s_tier[i].calibrated = 0;
+            tiers_select();
+        } else if (s_req_tmp.kind == 11) {
+            tier_status();
+        } else if (s_req_tmp.kind == 13) {
+            ;
         } else {
             s_ctx.act_bits = s_req_tmp.n;
             printf("OK %d-bit activations for the int8-weight layers\n", s_ctx.act_bits);
@@ -698,24 +964,48 @@ static void handle_line(char *line)
         s_in_req.kind = 7; s_in_req.n = atoi(line + 6);     // "icprof q" would be 0; "icprof 1" = quick (schedule 0 only: 1 core + 2 cores serialised)
         xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
 #endif
+    } else if (!strncmp(line, "tier", 4)) {          // tier: status; tier <k>: activate weight set k
+        const char *a = line + 4;
+        while (*a == ' ') a++;
+        s_in_req.kind = 9; s_in_req.n = *a ? atoi(a) : -1;
+        xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
+    } else if (!strncmp(line, "status", 6)) {
+        s_in_req.kind = 11;
+        xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
+    } else if (!strncmp(line, "recal", 5)) {
+        s_in_req.kind = 10;
+        xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
+    } else if (!strncmp(line, "simtime", 7)) {       // simtime off | simtime <rtf set0> <rtf set1> <rtf set2>: timing injection for the next `recal`
+        const char *a = line + 7;
+        while (*a == ' ') a++;
+        s_in_req.kind = 13;                         // no-op request: only so that the console client sees READY
+        if (!strncmp(a, "off", 3)) { s_sim = 0; printf("OK simulated timing off (the next recal measures)\n"); xQueueSend(s_req_q, &s_in_req, portMAX_DELAY); }
+        else {
+            char *e1, *e2; double r0 = strtod(a, &e1), r1 = strtod(e1, &e2), r2 = strtod(e2, NULL);
+            if (e1 == a || r0 <= 0 || r1 <= 0 || r2 <= 0) { printf("ERROR simtime needs three positive RTFs: simtime 0.9 0.8 0.7\n"); return; }
+            s_sim = 1; s_sim_rtf[0] = r0; s_sim_rtf[1] = r1; s_sim_rtf[2] = r2;
+            printf("OK simulated timing on: set RTFs %.3f %.3f %.3f (the next recal uses them instead of the clock)\n", r0, r1, r2);
+            xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
+        }
     } else if (!strncmp(line, "unpack", 6)) {       // unpack pie | c: int4 row unpack by the PIE kernel or the C code (same results; for measurement)
         const char *a = line + 6;
         while (*a == ' ') a++;
         if (!strncmp(a, "c", 1)) { s3_w4_pie = 0; printf("OK int4 unpack: C code\n"); }
         else { s3_w4_pie = 1; printf("OK int4 unpack: PIE kernel (unchecked if the boot check failed!)\n"); }
-        s_in_req.kind = 12; xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
+        s_in_req.kind = 13; xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
     } else if (!strncmp(line, "first", 5)) {
         s_in_req.kind = 8; s_in_req.n = atoi(line + 5);
         xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
     } else if (!strncmp(line, "delay", 5)) {
-        s_start_delay_ms = atoi(line + 5);
-        printf("OK start delay %d ms\n", s_start_delay_ms);
+        if (!strncmp(line + 5, " auto", 5)) { s_delay_override_ms = -1; printf("OK start delay planned per utterance\n"); }
+        else { s_delay_override_ms = atoi(line + 5); printf("OK start delay fixed at %d ms\n", s_delay_override_ms); }
+        s_in_req.kind = 13; xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
     } else if (!strncmp(line, "wmode", 5)) {
         s_in_req.kind = 6; s_in_req.n = atoi(line + 5);
         xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
     } else if (line[0]) {
         printf("commands: say <comma-separated token ids> | style <0-%d> | act <8|16> | demo [0-%d] | test | stats | bench | "
-               "wmode <0 direct|1 copy|2 gdma|3 gdma+prefetch> | first <frames of the first chunk> | delay <ms before playback starts>\n", s_model.n_styles - 1, s_ndemo - 1);
+               "wmode <0 direct|1 copy|2 gdma|3 gdma+prefetch> | first <frames of the first chunk> | delay <ms before playback starts | auto> | tier [k] | status | recal | simtime <rtf0 rtf1 rtf2 | off>\n", s_model.n_styles - 1, s_ndemo - 1);
     }
 }
 
@@ -758,134 +1048,64 @@ static void button_task(void *arg)
 // ------------------------------------------------------------------------------------------------------------------
 // boot
 // ------------------------------------------------------------------------------------------------------------------
-static const esp_partition_t *s_wpart;
-static esp_partition_mmap_handle_t s_wmap_h;
-
-// Map the weight blob (only its extent) from the flash partition; returns the mapping and the blob size.
-static const void *map_weights(size_t *size)
-{
-    const esp_partition_t *p = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, 0x40, "weights");
-    if (!p) { printf("ERROR no 'weights' partition\n"); return NULL; }
-    s_wpart = p;
-    uint8_t hdr[16];
-    if (esp_partition_read(p, 0, hdr, sizeof hdr) != ESP_OK || memcmp(hdr, "ITF1", 4)) {
-        printf("ERROR weights partition is empty or not an ItoFS blob (flash itofs_weights_*.bin at 0x200000)\n"); return NULL;
-    }
-    uint32_t cfg_len; memcpy(&cfg_len, hdr + 8, 4);
-    uint32_t nt;
-    if (esp_partition_read(p, 12 + cfg_len, &nt, 4) != ESP_OK || nt > 4096) { printf("ERROR bad blob header\n"); return NULL; }
-    size_t ext = 0;
-    for (uint32_t i = 0; i < nt; i++) {
-        uint8_t e[104];
-        if (esp_partition_read(p, 16 + cfg_len + (size_t)i * 104, e, sizeof e) != ESP_OK) return NULL;
-        uint32_t off, nb, so, dt, out;
-        memcpy(&dt, e + 64, 4); memcpy(&out, e + 76, 4); memcpy(&off, e + 88, 4); memcpy(&nb, e + 92, 4); memcpy(&so, e + 96, 4);
-        if (off + nb > ext) ext = off + nb;
-        if ((dt == 1 || dt == 3) && so + 4 * out > ext) ext = so + 4 * out;
-    }
-    if (ext > p->size) { printf("ERROR blob larger than partition\n"); return NULL; }
-    *size = ext;
-    const void *map;
-    const size_t mlen = (ext + 0xFFFF) & ~(size_t)0xFFFF;
-    if (esp_partition_mmap(p, 0, mlen, ESP_PARTITION_MMAP_DATA, &map, &s_wmap_h) != ESP_OK) { printf("ERROR mmap weights\n"); return NULL; }
-    return map;
-}
-
-// Copy the blob to PSRAM if it fits next to the bulk arena (+ margin for the self-test buffer); else keep the mapping.
-static const void *place_weights(const void *map, size_t ext, size_t bulk_bytes)
-{
-    const size_t need = ext + 64 + bulk_bytes + 320 * 1024;
-    uint8_t *ps = NULL;
-    if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) > need)
-        ps = heap_caps_aligned_alloc(64, ext + 64, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!ps) {
-        printf("weights: %u bytes do not fit in PSRAM next to the arenas: running them memory-mapped from flash\n", (unsigned)ext);
-        return map;
-    }
-    int64_t t0 = esp_timer_get_time();
-    for (size_t o = 0; o < ext; o += 65536) {     // flash read API in 64 KB pieces
-        size_t n = ext - o < 65536 ? ext - o : 65536;
-        if (esp_partition_read(s_wpart, o, ps + o, n) != ESP_OK) { printf("ERROR reading weights\n"); heap_caps_free(ps); return map; }
-    }
-    memset(ps + ext, 0, 64);
-    esp_cache_msync(ps, (ext + 64 + 63) & ~(size_t)63, ESP_CACHE_MSYNC_FLAG_DIR_C2M);   // GDMA staging reads PSRAM directly
-    esp_partition_munmap(s_wmap_h);
-    printf("weights: %u bytes copied flash -> PSRAM in %.0f ms\n", (unsigned)ext, ms(esp_timer_get_time() - t0));
-    return ps;
-}
-
 static void halt(void) { for (;;) vTaskDelay(1000); }
 
 void app_main(void)
 {
     printf("\n==== ItoFS TTS on ESP32-S3 ====\n");
-    size_t bs = 0;
-    const void *blob = map_weights(&bs);
-    if (!blob) halt();
-    int e = itofs_model_init(&s_model, blob, bs);
-    if (e) { printf("ERROR model: %s\n", itofs_strerror(e)); halt(); }
-    {
-        itofs_limits_t l0 = { .max_tokens = MAX_TOKENS, .chunk_frames = STEADY_FRAMES, .act_bits = ITOFS_ACT_BITS };
-        size_t h0, b0;
-        itofs_arena_bytes(&s_model, &l0, &h0, &b0);
-        const void *placed = place_weights(blob, bs, b0);
-        if (placed != blob) {
-            blob = placed;
-            if ((e = itofs_model_init(&s_model, blob, bs))) { printf("ERROR model: %s\n", itofs_strerror(e)); halt(); }
-        }
+    int nvalid = 0, first = -1;
+    size_t max_ext = 0;
+    for (int i = 0; i < MAX_TIERS; i++) {
+        tier_t *T = &s_tier[i];
+        T->p = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, (esp_partition_subtype_t)(0x40 + i), s_tier_label[i]);
+        if (!T->p) { if (i == 0) printf("ERROR no 'weights' partition\n"); continue; }
+        if (tier_ext(T->p, &T->ext, i > 0)) continue;
+        T->valid = 1; nvalid++;
+        if (first < 0) first = i;
+        if (T->ext > max_ext) max_ext = T->ext;
     }
-    s_hop = s_model.hop; s_sr = s_model.sr;
+    if (!nvalid) halt();
+    printf("weight sets in flash:");
+    for (int i = 0; i < MAX_TIERS; i++) printf(" %d '%s' %s;", i, s_tier_label[i], s_tier[i].valid ? "present" : "absent");
+    printf("\n");
+    s_lim = (itofs_limits_t){ .max_tokens = MAX_TOKENS, .chunk_frames = STEADY_FRAMES, .act_bits = ITOFS_ACT_BITS };
+    s_hb = s_bb = 0;
+    for (int i = 0; i < MAX_TIERS; i++) {                // arena sizes: the largest over the sets (they share the arenas)
+        if (!s_tier[i].valid) continue;
+        size_t hb = 0, bb = 0; int hop = 0, sr = 0;
+        if (tier_dims(i, &hb, &bb, &hop, &sr)) { s_tier[i].valid = 0; continue; }
+        if (hb > s_hb) s_hb = hb;
+        if (bb > s_bb) s_bb = bb;
+        s_hop = hop; s_sr = sr;
+    }
+    // the active set's weights live in PSRAM next to the arenas (+ margin for the self-test buffer); else they run memory-mapped from flash (slow)
+    {
+        const size_t need = max_ext + 64 + s_bb + 320 * 1024;
+        if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) > need) s_wbuf = heap_caps_aligned_alloc(64, max_ext + 64, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!s_wbuf) printf("weights: %u bytes do not fit in PSRAM next to the arenas: the active set will run memory-mapped from flash\n", (unsigned)max_ext);
+    }
     s_chunk_frames = STEADY_FRAMES;
     s_chunk_samples = s_chunk_frames * s_hop;
     s_style = demo_style[0];   // replaced by the first blob demo's style once the demos are loaded
-    printf("model: arch %d (%s), %ld int8/int4 + %ld int16 + %ld f32 params, text %d, GRU %d %s, prosody %d, mel head %d x%d -> %d, "
-           "decoder %d/%d x%d, n_fft %d, hop %d (%d fps), %d Hz, %d styles%s\n", s_model.arch, s_model.arch == 3 ? "ItoFS v3: mel front + mel vocoder" : "ItoFS v2",
-           s_model.n_int8_params + s_model.n_int4_params, s_model.n_int16_params, s_model.n_f32_params, s_model.text_dim, s_model.rnn_hidden,
-           s_model.rnn_bidir ? "bidirectional (whole-sentence text side)" : "forward (incremental text side)", s_model.pros_dim,
-           s_model.mel_dim, s_model.mel_layers, s_model.n_mels, s_model.dec_dim, s_model.dec_inter,
-           s_model.dec_blocks, s_model.n_fft, s_hop, s_model.fps, s_sr, s_model.n_styles, s_model.style_table ? ", style table" : "");
-    {
-        const void *d; size_t nb; int dt;
-        if (!itofs_blob_find(blob, bs, "selftest", &d, &nb, &dt) && dt == 2 && nb >= 28 && ((const int32_t *)d)[0] == 0x32525453)
-            s_st = d;            // 'STR2': n, style, seed, n_samples, fnv32, act_bits, tokens
-        if (!itofs_blob_find(blob, bs, "selftest_a16", &d, &nb, &dt) && dt == 2 && nb >= 28 && ((const int32_t *)d)[0] == 0x32525453)
-            s_st16 = d;
-    }
 #ifndef ITOFS_QEMU
     i2s_setup();                     // before the arenas: DMA buffers must get internal RAM first
 #else
     printf("QEMU build: I2S disabled (audio is generated and discarded)\n");
 #endif
-    itofs_limits_t lim = { .max_tokens = MAX_TOKENS, .chunk_frames = s_chunk_frames, .act_bits = ITOFS_ACT_BITS };
-    size_t hb, bb;
-    itofs_arena_bytes(&s_model, &lim, &hb, &bb);
     // leave room in internal RAM for the task stacks, the staging tiles and the I2S slice (about 24 KB more than the arena itself)
-    void *hot = NULL;
     const char *hot_where = "internal SRAM";
     printf("internal SRAM before the hot arena: largest free block %u KB, free %u KB\n", (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) >> 10),
            (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) >> 10));
     // the arena needs one block of its size; what is left must still hold the task stacks, the 16 KB of staging tiles and the I2S slice
-    if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) >= hb + 4 * 1024 && heap_caps_get_free_size(MALLOC_CAP_INTERNAL) >= hb + 56 * 1024)
-        hot = heap_caps_aligned_alloc(16, hb, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (!hot) { hot = heap_caps_aligned_alloc(16, hb, MALLOC_CAP_SPIRAM); hot_where = "PSRAM (internal SRAM too small)"; }
-    void *bulk = heap_caps_aligned_alloc(16, bb, MALLOC_CAP_SPIRAM);
-    if (!hot || !bulk || (e = itofs_init(&s_ctx, &s_model, &lim, hot, hb, bulk, bb))) {
-        printf("ERROR arena alloc/init (hot %u, bulk %u): %s\n", (unsigned)hb, (unsigned)bb, itofs_strerror(e));
-        halt();
-    }
-    printf("arena: hot %u bytes in %s, bulk %u bytes in PSRAM; chunk %d frames = %d samples; %d-bit activations\n", (unsigned)hb, hot_where,
-           (unsigned)bb, s_chunk_frames, s_chunk_samples, s_ctx.act_bits);
+    if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) >= s_hb + 4 * 1024 && heap_caps_get_free_size(MALLOC_CAP_INTERNAL) >= s_hb + 56 * 1024)
+        s_hot = heap_caps_aligned_alloc(16, s_hb, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!s_hot) { s_hot = heap_caps_aligned_alloc(16, s_hb, MALLOC_CAP_SPIRAM); hot_where = "PSRAM (internal SRAM too small)"; }
+    s_bulk = heap_caps_aligned_alloc(16, s_bb, MALLOC_CAP_SPIRAM);
+    if (!s_hot || !s_bulk) { printf("ERROR arena alloc (hot %u, bulk %u)\n", (unsigned)s_hb, (unsigned)s_bb); halt(); }
+    printf("arena: hot %u bytes in %s, bulk %u bytes in PSRAM; chunk %d frames = %d samples; %d-bit activations\n", (unsigned)s_hb, hot_where,
+           (unsigned)s_bb, s_chunk_frames, s_chunk_samples, s_lim.act_bits ? s_lim.act_bits : 8);
     s3_kernels_init();
-    s_ctx.qgemm = s3_qgemm;
-    s_ctx.qgemm4 = s3_qgemm4;           // int4-weight layers (blob format 2): unpacked once per output channel into the aligned scratch row, then the same PIE dot
-    s_ctx.par = s3_par;              // row-parallel float work on both cores (bit-identical to one core)
-#ifdef ITOFS_ICPROF
-    itofs_prof_clock = ic_clock;
-#endif
-    s_blob = blob; s_blob_size = bs;
-    load_demos(blob, bs);
-    if (s_ndemo) s_style = s_demo_style[0];
-    printf("demos: %d sentences from %s\n", s_ndemo, s_demo_from_blob ? "the weight blob" : "main/demo_sentences.h");
+    (void)first;
 
     s_free_q = xQueueCreate(NBUF, sizeof(buf_t));
     s_full_q = xQueueCreate(NBUF + 1, sizeof(buf_t));
@@ -899,7 +1119,7 @@ void app_main(void)
     uart_driver_install(UART_NUM_0, 4096, 0, 0, NULL, 0);
     mem_report("boot");
     xTaskCreatePinnedToCore(play_task, "itofs_play", 4096, NULL, 12, NULL, 1);
-    xTaskCreatePinnedToCore(synth_task, "itofs_synth", 8192, NULL, 5, NULL, 0);
+    xTaskCreatePinnedToCore(synth_task, "itofs_synth", 12288, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(console_task, "itofs_con", 4096, NULL, 4, NULL, 0);
     xTaskCreatePinnedToCore(button_task, "itofs_btn", 4096, NULL, 4, NULL, 0);
 }

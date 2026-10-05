@@ -42,3 +42,9 @@ rescale and the audio are those of the equivalent int8 blob, bit for bit (`esp32
 The unpack (`itofs_w4_unpack_row`, and the firmware's copy of it on 32-bit words): for the 4 weights in one byte lane of a word,
 `((word & 0x0F0F0F0F) * m + (128 - zp * m) * 0x01010101) ^ 0x80808080` (low nibbles) and the same on `(word >> 4) & 0x0F0F0F0F` (high nibbles): every
 byte is `q * m + 128 - zp * m` in 23..233, so there is no carry between bytes, and the XOR turns the biased byte into the two's-complement `w8`.
+
+## Weight sets in flash
+
+The firmware has three partitions for blobs (`firmware/partitions.csv`): `weights` at 0x200000 (the main set, int8), `weights_b` at 0x680000 (the main set with int4 ConvNeXt
+blocks) and `weights_c` at 0xB00000 (the light set: 4 blocks, int4), each 4.5 MB. Each is a complete blob with its own self-test record and demo sentences.
+A partition without the `ITF1` magic is skipped. The files on Hugging Face: `ito_<voice>_esp32s3.bin`, `ito_<voice>_esp32s3_int4.bin`, `ito_<voice>_esp32s3_light.bin`.

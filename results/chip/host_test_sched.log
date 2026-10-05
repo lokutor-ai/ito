@@ -1,0 +1,18 @@
+pick main already fine                  -> set 0 status 0 ok
+pick second set fits                    -> set 1 status 0 ok
+pick light set fits                     -> set 2 status 0 ok
+pick none fits, best is marginal        -> set 2 status 1 ok
+pick none fits, best >= 0.95: degraded  -> set 2 status 2 ok
+pick exactly 0.95 is degraded           -> set 2 status 2 ok
+pick exactly 0.85 is accepted           -> set 0 status 0 ok
+pick a missing set is skipped           -> set 2 status 0 ok
+pick nothing measured                   -> set -1 status 0 ok
+pick lowest of three marginal sets      -> set 2 status 1 ok
+RTF of a trace built at rho 0.60: steady/whole max 0.670 (whole 0.670) ok
+accepted sets (rho <= 0.85), jitter +-4%, sentence cost +-4%: 8640 sentences played, 0 with an underrun; longest start delay 880 ms; mean wait beyond the first chunk 152 ms -> ok
+jitter +-8% and sentence cost +-8% (outside the 25% margin in the worst case): 4/2880 sentences with an underrun (information, not a guarantee)
+rho 0.40: first chunk ready at 98 ms, start delay 98 ms (no extra wait needed) ok
+rho 1.15, 175 tokens: feasible 0, predicted underruns 21, delay 1690 ms (capped 4000) ok
+marginal board rho 0.93 (+-2% jitter): 0/200 sentences with an underrun (information, not a guarantee)
+observed first chunks 50% slower than calibrated: start delay 376 -> 482 ms ok
+PASS (0 failures)

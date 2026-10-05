@@ -1,0 +1,190 @@
+[     0.0s] ESP-ROM:esp32s3-20210327
+[     0.0s] Build:Mar 27 2021
+[     0.0s] rst:0x1 (POWERON),boot:0x4 (SPI_FLASH_BOOT)
+[     0.0s] SPIWP:0xee
+[     0.0s] mode:DIO, clock div:1
+[     0.0s] load:0x3fce2820,len:0xd64
+[     0.0s] load:0x403c8700,len:0xb14
+[     0.1s] load:0x403cb700,len:0x2cac
+[     0.1s] entry 0x403c8894
+[     0.2s] W (207) rtcinit: o_code calibration fail
+[     0.2s] 
+[     0.2s] I (108) esp_psram: Found 8MB PSRAM device
+[     0.2s] I (108) esp_psram: Speed: 80MHz
+[     0.2s] I (109) cpu_start: Multicore app
+[     0.3s] I (119) cpu_start: Pro cpu start user code
+[     0.3s] I (119) cpu_start: cpu freq: 240000000 Hz
+[     0.3s] I (119) app_init: Application information:
+[     0.3s] I (119) app_init: Project name:     itofs
+[     0.3s] I (119) app_init: App version:      ito-3.0.0
+[     0.3s] I (119) app_init: Compile time:     Oct  5 2026 17:13:36
+[     0.3s] I (119) app_init: ELF file SHA256:  01613b4ef...
+[     0.3s] I (119) app_init: ESP-IDF:          v5.5.1
+[     0.3s] I (120) efuse_init: Min chip rev:     v0.0
+[     0.3s] I (120) efuse_init: Max chip rev:     v0.99 
+[     0.3s] I (120) efuse_init: Chip rev:         v0.3
+[     0.3s] I (120) heap_init: Initializing. RAM available for dynamic allocation:
+[     0.3s] I (120) heap_init: At 3FC99EA0 len 0004F870 (318 KiB): RAM
+[     0.3s] I (120) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+[     0.3s] I (120) heap_init: At 600FE000 len 00001FE8 (7 KiB): RTCRAM
+[     0.3s] I (120) esp_psram: Adding pool of 8192K of PSRAM memory to heap allocator
+[     0.3s] I (121) spi_flash: detected chip: issi
+[     0.3s] I (121) spi_flash: flash io: dio
+[     0.3s] I (121) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+[     0.3s] I (122) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+[     0.3s] I (122) main_task: Started on CPU0
+[     0.3s] I (126) esp_psram: Reserving pool of 32K of internal memory for DMA/internal allocations
+[     0.3s] I (126) main_task: Calling app_main()
+[     0.3s] 
+[     0.3s] ==== ItoFS TTS on ESP32-S3 ====
+[     0.3s] weight sets in flash: 0 'weights' present; 1 'weights_b' present; 2 'weights_c' present;
+[     0.3s] QEMU build: I2S disabled (audio is generated and discarded)
+[     0.3s] internal SRAM before the hot arena: largest free block 264 KB, free 326 KB
+[     0.3s] arena: hot 210764 bytes in internal SRAM, bulk 1312272 bytes in PSRAM; chunk 24 frames = 7200 samples; 8-bit activations
+[     0.4s] kernels: int4 unpack by the PIE kernel (PIE kernel reproduces the C unpack on 7168 groups, every (m, zp))
+[     0.4s] kernels: PIE int8 dot (esp-nn), dual core; staging tiles ok (4096 B x 2 per core in internal SRAM); GDMA EMULATED in software (QEMU)
+[     0.4s] MEM boot: peak PSRAM used 5092 / 8192 KB, peak internal SRAM used 285 / 379 KB
+[     0.7s] weights: set 0 ('weights'): 3806628 bytes copied flash -> PSRAM in 374 ms
+[     0.8s] model: arch 3 (ItoFS v3: mel front + mel vocoder), 2365104 int8 + 0 int4 + 543936 int16 + 84134 f32 params, text 128, GRU 96 forward (incremental text side), prosody 96, mel head 176 x4 -> 100, decoder 192/576 x5, n_fft 1200, hop 300 (80 fps), 24000 Hz, 1 styles, style table, blob format 1
+[     0.8s] I (652) main_task: Returned from app_main()
+[     2.0s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 137400 samples (host 137400), fnv32 35f96c0b (host 35f96c0b) -> PASS
+[     2.0s] TIMING selftest(no playback): 84 tokens, style 0, 5.72 s audio | first chunk 83.3 ms (begin 2.0 ms; incremental text side, 8 tokens final at first chunk) | compute 1231.3 ms, RTF 0.215 | underruns 0 (start delay planned -1 ms) | weight set 0 | weight staging direct: 2946 GEMM calls, 0 announced ahead, 0 not
+[     2.0s] MEM selftest(no playback): peak PSRAM used 5380 / 8192 KB, peak internal SRAM used 320 / 379 KB
+[     5.5s] PCMEND 137400
+PCM COMPARE vs host C engine: firmware 137400 samples (reported 137400), host 137400, differing samples 0 -> BIT-IDENTICAL
+[     6.7s] CALIB set 0 ('weights', vocoder 192/576 x5, int8): 84 tokens, 22 chunks | first chunk 61.1 ms (begin 0.3 ms) | steady chunk 56.5 ms of 300 ms audio: RTF steady 0.188, whole 0.208 -> measured RTF 0.208 | weight staging direct
+[     6.7s] TIER_SELECT chosen=0 ('weights', vocoder 192/576 x5, int8) measured_rtf=0.208 target=0.85 status=OK degraded=0 | measured: set0 0.208 set1 not needed set2 not needed
+[     6.7s] SAY demo 0: "LJ009-0076: wiː kˈʌm tə ðə sˈɜːmən ."
+[     7.2s] TIMING demo: 25 tokens, style 0, 2.15 s audio | first chunk 60.3 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 453.4 ms, RTF 0.211 | underruns 10 (start delay planned 60 ms) | weight set 0 | weight staging direct: 1196 GEMM calls, 0 announced ahead, 0 not
+[     7.2s] MEM demo: peak PSRAM used 5380 / 8192 KB, peak internal SRAM used 320 / 379 KB
+[     7.2s] SAY demo 1: "LJ018-0098: ænd ɹˈɛkəɡnˌaɪzd æz wˈʌn ʌvðə fɹˈiːkwɛntɚz ʌvðə bˈoʊɡəs lˈɔː stˈeɪʃənɚz . hɪz ɚɹˈɛst lˈɛd tə ðæt ʌv ˈʌðɚz ."
+[     8.8s] TIMING demo: 108 tokens, style 0, 7.26 s audio | first chunk 63.9 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1565.6 ms, RTF 0.216 | underruns 26 (start delay planned 64 ms) | weight set 0 | weight staging direct: 3700 GEMM calls, 0 announced ahead, 0 not
+[     8.8s] MEM demo: peak PSRAM used 5380 / 8192 KB, peak internal SRAM used 320 / 379 KB
+[     8.8s] SAY demo 2: "LJ004-0152: ɔːlðˈoʊ æt mˈɪstɚ . bˈʌkstənz vˈɪzɪt ɐ nˈuː dʒˈeɪl wʌz ɪn pɹˈɑːsɛs ʌv ɪɹˈɛkʃən , ðə fˈɜːst stˈɛp təwˈɔːɹdz ɹᵻfˈɔːɹm sˈɪns hˈaʊɚdz vˌɪzɪtˈeɪʃən ɪn sˈɛvəntˌiːn sˈɛvənti fˈoːɹ ."
+[    10.9s] TIMING demo: 175 tokens, style 0, 10.21 s audio | first chunk 59.7 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 2144.3 ms, RTF 0.210 | underruns 36 (start delay planned 60 ms) | weight set 0 | weight staging direct: 5175 GEMM calls, 0 announced ahead, 0 not
+[    10.9s] MEM demo: peak PSRAM used 5380 / 8192 KB, peak internal SRAM used 320 / 379 KB
+[    10.9s] READY (BOOT button = demos, serial: say <ids> | style <k> | demo [k] | test | stats | tier [k] | status | help)
+>>> simtime 0.9 0.8 0.7
+[    10.9s] OK simulated timing on: set RTFs 0.900 0.800 0.700 (the next recal uses them instead of the clock)
+[    10.9s] READY
+>>> recal
+[    12.2s] CALIB set 0 ('weights', vocoder 192/576 x5, int8) [SIMULATED TIMES]: 84 tokens, 22 chunks | first chunk 167.6 ms (begin 6.0 ms) | steady chunk 270.0 ms of 300 ms audio: RTF steady 0.900, whole 0.948 -> measured RTF 0.948 | weight staging direct
+[    12.5s] weights: set 1 ('weights_b'): 3196068 bytes copied flash -> PSRAM in 309 ms
+[    12.5s] model: arch 3 (ItoFS v3: mel front + mel vocoder), 891312 int8 + 1473792 int4 + 543936 int16 + 84134 f32 params, text 128, GRU 96 forward (incremental text side), prosody 96, mel head 176 x4 -> 100, decoder 192/576 x5, n_fft 1200, hop 300 (80 fps), 24000 Hz, 1 styles, style table, blob format 2
+[    13.8s] CALIB set 1 ('weights_b', vocoder 192/576 x5, int4 blocks) [SIMULATED TIMES]: 84 tokens, 22 chunks | first chunk 149.0 ms (begin 6.0 ms) | steady chunk 240.0 ms of 300 ms audio: RTF steady 0.800, whole 0.843 -> measured RTF 0.843 | weight staging direct
+[    15.0s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 137400 samples (host 137400), fnv32 b46d58de (host b46d58de) -> PASS
+[    15.0s] TIMING selftest(no playback): 84 tokens, style 0, 5.72 s audio | first chunk 62.0 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1237.3 ms, RTF 0.216 | underruns 0 (start delay planned -1 ms) | weight set 1 | weight staging direct: 2946 GEMM calls, 0 announced ahead, 0 not
+[    15.0s] MEM selftest(no playback): peak PSRAM used 5380 / 8192 KB, peak internal SRAM used 320 / 379 KB
+[    18.5s] PCMEND 137400
+PCM COMPARE vs host C engine: firmware 137400 samples (reported 137400), host 137400, differing samples 0 -> BIT-IDENTICAL
+[    18.5s] TIER_SELECT chosen=1 ('weights_b', vocoder 192/576 x5, int4 blocks) measured_rtf=0.843 target=0.85 status=OK degraded=0 (SIMULATED TIMES) | measured: set0 0.948 set1 0.843 set2 not needed
+[    18.5s] READY
+>>> test
+[    19.8s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 137400 samples (host 137400), fnv32 b46d58de (host b46d58de) -> PASS
+[    19.8s] TIMING selftest(no playback): 84 tokens, style 0, 5.72 s audio | first chunk 61.4 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1227.6 ms, RTF 0.214 | underruns 0 (start delay planned -1 ms) | weight set 1 | weight staging direct: 2946 GEMM calls, 0 announced ahead, 0 not
+[    19.8s] MEM selftest(no playback): peak PSRAM used 5380 / 8192 KB, peak internal SRAM used 320 / 379 KB
+[    23.4s] PCMEND 137400
+PCM COMPARE vs host C engine: firmware 137400 samples (reported 137400), host 137400, differing samples 0 -> BIT-IDENTICAL
+[    25.3s] SELFTEST single-core, 8-bit activations: golden sentence 0 vs host C engine: 137400 samples (host 137400), fnv32 b46d58de (host b46d58de) -> PASS
+[    27.1s] SELFTEST dual-core, 16-bit activations: golden sentence 0 vs host C engine: 137400 samples (host 137400), fnv32 503c199c (host 503c199c) -> PASS
+[    27.1s] TIMING selftest(no playback): 84 tokens, style 0, 5.72 s audio | first chunk 84.3 ms (begin 0.2 ms; incremental text side, 8 tokens final at first chunk) | compute 1811.7 ms, RTF 0.316 | underruns 0 (start delay planned -1 ms) | weight set 1 | weight staging direct: 4225 GEMM calls, 0 announced ahead, 0 not
+[    27.1s] MEM selftest(no playback): peak PSRAM used 5380 / 8192 KB, peak internal SRAM used 320 / 379 KB
+[    27.1s] READY
+>>> simtime 0.95 0.92 0.9
+[    27.1s] OK simulated timing on: set RTFs 0.950 0.920 0.900 (the next recal uses them instead of the clock)
+[    27.1s] READY
+>>> recal
+[    27.5s] weights: set 0 ('weights'): 3806628 bytes copied flash -> PSRAM in 370 ms
+[    27.6s] model: arch 3 (ItoFS v3: mel front + mel vocoder), 2365104 int8 + 0 int4 + 543936 int16 + 84134 f32 params, text 128, GRU 96 forward (incremental text side), prosody 96, mel head 176 x4 -> 100, decoder 192/576 x5, n_fft 1200, hop 300 (80 fps), 24000 Hz, 1 styles, style table, blob format 1
+[    28.8s] CALIB set 0 ('weights', vocoder 192/576 x5, int8) [SIMULATED TIMES]: 84 tokens, 22 chunks | first chunk 176.9 ms (begin 6.0 ms) | steady chunk 285.0 ms of 300 ms audio: RTF steady 0.950, whole 1.001 -> measured RTF 1.001 | weight staging direct
+[    29.1s] weights: set 1 ('weights_b'): 3196068 bytes copied flash -> PSRAM in 322 ms
+[    29.2s] model: arch 3 (ItoFS v3: mel front + mel vocoder), 891312 int8 + 1473792 int4 + 543936 int16 + 84134 f32 params, text 128, GRU 96 forward (incremental text side), prosody 96, mel head 176 x4 -> 100, decoder 192/576 x5, n_fft 1200, hop 300 (80 fps), 24000 Hz, 1 styles, style table, blob format 2
+[    30.4s] CALIB set 1 ('weights_b', vocoder 192/576 x5, int4 blocks) [SIMULATED TIMES]: 84 tokens, 22 chunks | first chunk 171.3 ms (begin 6.0 ms) | steady chunk 276.0 ms of 300 ms audio: RTF steady 0.920, whole 0.969 -> measured RTF 0.969 | weight staging direct
+[    30.7s] weights: set 2 ('weights_c'): 3054628 bytes copied flash -> PSRAM in 293 ms
+[    30.8s] model: arch 3 (ItoFS v3: mel front + mel vocoder), 891312 int8 + 1252608 int4 + 543936 int16 + 80486 f32 params, text 128, GRU 96 forward (incremental text side), prosody 96, mel head 176 x4 -> 100, decoder 192/576 x4, n_fft 1200, hop 300 (80 fps), 24000 Hz, 1 styles, style table, blob format 2
+[    31.9s] CALIB set 2 ('weights_c', vocoder 192/576 x4, int4 blocks) [SIMULATED TIMES]: 84 tokens, 22 chunks | first chunk 167.6 ms (begin 6.0 ms) | steady chunk 270.0 ms of 300 ms audio: RTF steady 0.900, whole 0.948 -> measured RTF 0.948 | weight staging direct
+[    33.0s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 137400 samples (host 137400), fnv32 a14d1c89 (host a14d1c89) -> PASS
+[    33.0s] TIMING selftest(no playback): 84 tokens, style 0, 5.72 s audio | first chunk 56.1 ms (begin 0.2 ms; incremental text side, 8 tokens final at first chunk) | compute 1128.7 ms, RTF 0.197 | underruns 0 (start delay planned -1 ms) | weight set 2 | weight staging direct: 2872 GEMM calls, 0 announced ahead, 0 not
+[    33.0s] MEM selftest(no playback): peak PSRAM used 5380 / 8192 KB, peak internal SRAM used 320 / 379 KB
+[    36.5s] PCMEND 137400
+PCM COMPARE vs host C engine: firmware 137400 samples (reported 137400), host 137400, differing samples 0 -> BIT-IDENTICAL
+[    36.5s] TIER_SELECT chosen=2 ('weights_c', vocoder 192/576 x4, int4 blocks) measured_rtf=0.948 target=0.85 status=MARGINAL degraded=0 (SIMULATED TIMES) | measured: set0 1.001 set1 0.969 set2 0.948
+[    36.5s] NOTE: no weight set reaches RTF 0.85; the best (set 2) measures 0.948. Speech is planned with a start delay (gapless if the measurement holds), but there is little margin.
+[    36.5s] READY
+>>> simtime 1.1 1.05 0.97
+[    36.5s] OK simulated timing on: set RTFs 1.100 1.050 0.970 (the next recal uses them instead of the clock)
+[    36.5s] READY
+>>> recal
+[    36.9s] weights: set 0 ('weights'): 3806628 bytes copied flash -> PSRAM in 363 ms
+[    37.0s] model: arch 3 (ItoFS v3: mel front + mel vocoder), 2365104 int8 + 0 int4 + 543936 int16 + 84134 f32 params, text 128, GRU 96 forward (incremental text side), prosody 96, mel head 176 x4 -> 100, decoder 192/576 x5, n_fft 1200, hop 300 (80 fps), 24000 Hz, 1 styles, style table, blob format 1
+[    38.2s] CALIB set 0 ('weights', vocoder 192/576 x5, int8) [SIMULATED TIMES]: 84 tokens, 22 chunks | first chunk 204.9 ms (begin 6.0 ms) | steady chunk 330.0 ms of 300 ms audio: RTF steady 1.100, whole 1.159 -> measured RTF 1.159 | weight staging direct
+[    38.5s] weights: set 1 ('weights_b'): 3196068 bytes copied flash -> PSRAM in 317 ms
+[    38.6s] model: arch 3 (ItoFS v3: mel front + mel vocoder), 891312 int8 + 1473792 int4 + 543936 int16 + 84134 f32 params, text 128, GRU 96 forward (incremental text side), prosody 96, mel head 176 x4 -> 100, decoder 192/576 x5, n_fft 1200, hop 300 (80 fps), 24000 Hz, 1 styles, style table, blob format 2
+[    39.8s] CALIB set 1 ('weights_b', vocoder 192/576 x5, int4 blocks) [SIMULATED TIMES]: 84 tokens, 22 chunks | first chunk 195.6 ms (begin 6.0 ms) | steady chunk 315.0 ms of 300 ms audio: RTF steady 1.050, whole 1.106 -> measured RTF 1.106 | weight staging direct
+[    40.1s] weights: set 2 ('weights_c'): 3054628 bytes copied flash -> PSRAM in 289 ms
+[    40.1s] model: arch 3 (ItoFS v3: mel front + mel vocoder), 891312 int8 + 1252608 int4 + 543936 int16 + 80486 f32 params, text 128, GRU 96 forward (incremental text side), prosody 96, mel head 176 x4 -> 100, decoder 192/576 x4, n_fft 1200, hop 300 (80 fps), 24000 Hz, 1 styles, style table, blob format 2
+[    41.3s] CALIB set 2 ('weights_c', vocoder 192/576 x4, int4 blocks) [SIMULATED TIMES]: 84 tokens, 22 chunks | first chunk 180.7 ms (begin 6.0 ms) | steady chunk 291.0 ms of 300 ms audio: RTF steady 0.970, whole 1.022 -> measured RTF 1.022 | weight staging direct
+[    42.4s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 137400 samples (host 137400), fnv32 a14d1c89 (host a14d1c89) -> PASS
+[    42.4s] TIMING selftest(no playback): 84 tokens, style 0, 5.72 s audio | first chunk 56.0 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1131.8 ms, RTF 0.198 | underruns 0 (start delay planned -1 ms) | weight set 2 | weight staging direct: 2872 GEMM calls, 0 announced ahead, 0 not
+[    42.4s] MEM selftest(no playback): peak PSRAM used 5380 / 8192 KB, peak internal SRAM used 320 / 379 KB
+[    45.9s] PCMEND 137400
+PCM COMPARE vs host C engine: firmware 137400 samples (reported 137400), host 137400, differing samples 0 -> BIT-IDENTICAL
+[    46.0s] TIER_SELECT chosen=2 ('weights_c', vocoder 192/576 x4, int4 blocks) measured_rtf=1.022 target=0.85 status=DEGRADED degraded=1 (SIMULATED TIMES) | measured: set0 1.159 set1 1.106 set2 1.022
+[    46.0s] WARNING: DEGRADED: even the fastest weight set runs at RTF 1.022 (>= 0.95). Speech may stutter or fall behind on long sentences; the start delay grows with the sentence (capped at 4 s). The firmware exposes this as degraded=1 in TIER_SELECT and `status`.
+[    46.0s] READY
+>>> status
+[    46.0s] STATUS active_set=2 selected_set=2 degraded=1 status=DEGRADED start_delay=planned SIMULATED_TIMES | set0 ('weights'): 3806628 bytes, measured RTF 1.159 | set1 ('weights_b'): 3196068 bytes, measured RTF 1.106 | set2 ('weights_c'): 3054628 bytes, measured RTF 1.022
+[    46.0s] READY
+>>> tier 0
+[    46.4s] weights: set 0 ('weights'): 3806628 bytes copied flash -> PSRAM in 373 ms
+[    46.4s] model: arch 3 (ItoFS v3: mel front + mel vocoder), 2365104 int8 + 0 int4 + 543936 int16 + 84134 f32 params, text 128, GRU 96 forward (incremental text side), prosody 96, mel head 176 x4 -> 100, decoder 192/576 x5, n_fft 1200, hop 300 (80 fps), 24000 Hz, 1 styles, style table, blob format 1
+[    46.4s] OK weight set 0 active
+[    47.7s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 137400 samples (host 137400), fnv32 35f96c0b (host 35f96c0b) -> PASS
+[    47.7s] TIMING selftest(no playback): 84 tokens, style 0, 5.72 s audio | first chunk 66.4 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1227.7 ms, RTF 0.214 | underruns 0 (start delay planned -1 ms) | weight set 0 | weight staging direct: 2946 GEMM calls, 0 announced ahead, 0 not
+[    47.7s] MEM selftest(no playback): peak PSRAM used 5380 / 8192 KB, peak internal SRAM used 320 / 379 KB
+[    51.2s] PCMEND 137400
+PCM COMPARE vs host C engine: firmware 137400 samples (reported 137400), host 137400, differing samples 0 -> BIT-IDENTICAL
+[    51.2s] READY
+>>> tier 1
+[    51.6s] weights: set 1 ('weights_b'): 3196068 bytes copied flash -> PSRAM in 311 ms
+[    51.6s] model: arch 3 (ItoFS v3: mel front + mel vocoder), 891312 int8 + 1473792 int4 + 543936 int16 + 84134 f32 params, text 128, GRU 96 forward (incremental text side), prosody 96, mel head 176 x4 -> 100, decoder 192/576 x5, n_fft 1200, hop 300 (80 fps), 24000 Hz, 1 styles, style table, blob format 2
+[    51.6s] OK weight set 1 active
+[    52.8s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 137400 samples (host 137400), fnv32 b46d58de (host b46d58de) -> PASS
+[    52.8s] TIMING selftest(no playback): 84 tokens, style 0, 5.72 s audio | first chunk 62.3 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1217.1 ms, RTF 0.213 | underruns 0 (start delay planned -1 ms) | weight set 1 | weight staging direct: 2946 GEMM calls, 0 announced ahead, 0 not
+[    52.8s] MEM selftest(no playback): peak PSRAM used 5380 / 8192 KB, peak internal SRAM used 320 / 379 KB
+[    56.4s] PCMEND 137400
+PCM COMPARE vs host C engine: firmware 137400 samples (reported 137400), host 137400, differing samples 0 -> BIT-IDENTICAL
+[    56.4s] READY
+>>> tier 2
+[    56.7s] weights: set 2 ('weights_c'): 3054628 bytes copied flash -> PSRAM in 323 ms
+[    56.8s] model: arch 3 (ItoFS v3: mel front + mel vocoder), 891312 int8 + 1252608 int4 + 543936 int16 + 80486 f32 params, text 128, GRU 96 forward (incremental text side), prosody 96, mel head 176 x4 -> 100, decoder 192/576 x4, n_fft 1200, hop 300 (80 fps), 24000 Hz, 1 styles, style table, blob format 2
+[    56.8s] OK weight set 2 active
+[    58.0s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 137400 samples (host 137400), fnv32 a14d1c89 (host a14d1c89) -> PASS
+[    58.0s] TIMING selftest(no playback): 84 tokens, style 0, 5.72 s audio | first chunk 61.8 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1199.5 ms, RTF 0.210 | underruns 0 (start delay planned -1 ms) | weight set 2 | weight staging direct: 2872 GEMM calls, 0 announced ahead, 0 not
+[    58.0s] MEM selftest(no playback): peak PSRAM used 5380 / 8192 KB, peak internal SRAM used 320 / 379 KB
+[    61.6s] PCMEND 137400
+PCM COMPARE vs host C engine: firmware 137400 samples (reported 137400), host 137400, differing samples 0 -> BIT-IDENTICAL
+[    61.6s] READY
+>>> simtime off
+[    61.6s] OK simulated timing off (the next recal measures)
+[    61.6s] READY
+>>> recal
+[    62.0s] weights: set 0 ('weights'): 3806628 bytes copied flash -> PSRAM in 370 ms
+[    62.0s] model: arch 3 (ItoFS v3: mel front + mel vocoder), 2365104 int8 + 0 int4 + 543936 int16 + 84134 f32 params, text 128, GRU 96 forward (incremental text side), prosody 96, mel head 176 x4 -> 100, decoder 192/576 x5, n_fft 1200, hop 300 (80 fps), 24000 Hz, 1 styles, style table, blob format 1
+[    63.3s] CALIB set 0 ('weights', vocoder 192/576 x5, int8): 84 tokens, 22 chunks | first chunk 61.6 ms (begin 0.3 ms) | steady chunk 58.4 ms of 300 ms audio: RTF steady 0.195, whole 0.219 -> measured RTF 0.219 | weight staging direct
+[    64.5s] SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 137400 samples (host 137400), fnv32 35f96c0b (host 35f96c0b) -> PASS
+[    64.5s] TIMING selftest(no playback): 84 tokens, style 0, 5.72 s audio | first chunk 60.8 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 1231.7 ms, RTF 0.215 | underruns 0 (start delay planned -1 ms) | weight set 0 | weight staging direct: 2946 GEMM calls, 0 announced ahead, 0 not
+[    64.5s] MEM selftest(no playback): peak PSRAM used 5380 / 8192 KB, peak internal SRAM used 320 / 379 KB
+[    68.2s] PCMEND 137400
+PCM COMPARE vs host C engine: firmware 137400 samples (reported 137400), host 137400, differing samples 0 -> BIT-IDENTICAL
+[    68.2s] TIER_SELECT chosen=0 ('weights', vocoder 192/576 x5, int8) measured_rtf=0.219 target=0.85 status=OK degraded=0 | measured: set0 0.219 set1 not needed set2 not needed
+[    68.2s] READY
+>>> status
+[    68.2s] STATUS active_set=0 selected_set=0 degraded=0 status=OK start_delay=planned | set0 ('weights'): 3806628 bytes, measured RTF 0.219 | set1 ('weights_b'): 3196068 bytes, not measured | set2 ('weights_c'): 3054628 bytes, not measured
+[    68.2s] READY
+>>> say 0,50,83,54,156,57,135,16,5,16,81,102,61,16,102,68,16,156
+[    68.2s] OK 56 tokens queued
+[    69.1s] TIMING say: 56 tokens, style 0, 4.28 s audio | first chunk 59.5 ms (begin 0.3 ms; incremental text side, 8 tokens final at first chunk) | compute 888.1 ms, RTF 0.208 | underruns 16 (start delay planned 60 ms) | weight set 0 | weight staging direct: 2226 GEMM calls, 0 announced ahead, 0 not
+[    69.1s] MEM say: peak PSRAM used 5380 / 8192 KB, peak internal SRAM used 320 / 379 KB
+[    69.1s] READY
+CLIENT DONE

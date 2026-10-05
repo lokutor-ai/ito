@@ -19,9 +19,9 @@ Wiring for an I2S DAC or amplifier:
 ```bash
 pip install esptool pyserial phonemizer espeakng-loader nltk huggingface_hub
 huggingface-cli login                                  # once, after accepting the terms at huggingface.co/lokutor-ai/ito
-esp32/tools/fetch_weights.sh                           # -> models/ito_female_esp32s3.bin (flash.sh runs it if needed)
-esp32/tools/flash.sh /dev/ttyUSB0                     # prebuilt app at 0x0 + the voice model at 0x200000 (female voice)
-VOICE=male esp32/tools/flash.sh /dev/ttyUSB0           # or the male voice: ito_male_esp32s3.bin at 0x200000
+esp32/tools/fetch_weights.sh                           # -> models/ito_female_esp32s3{,_int4,_light}.bin (flash.sh runs it if needed)
+esp32/tools/flash.sh /dev/ttyUSB0                     # prebuilt app at 0x0 + the voice's three weight sets at 0x200000 / 0x680000 / 0xB00000 (female voice)
+VOICE=male esp32/tools/flash.sh /dev/ttyUSB0           # or the male voice
 python -m serial.tools.miniterm /dev/ttyUSB0 115200   # press RST and wait for READY (the boot benchmark takes 1-2 min)
 python esp32/tools/say.py "Good morning! The coffee is ready." --port /dev/ttyUSB0
 ```
@@ -31,19 +31,26 @@ and try again.
 
 | file | what |
 |---|---|
-| `prebuilt/ito_app_merged.bin` (420 KB) | bootloader + partition table + app (ESP-IDF 5.5.1, octal PSRAM, QIO flash, I2S on). Flash at 0x0. |
-| `ito_female_esp32s3.bin` (3.81 MB, from [Hugging Face](https://huggingface.co/lokutor-ai/ito), see [`models/README.md`](../models/README.md)) | female voice, with a self-test record and three demo sentences. Flash at 0x200000. **CC BY-NC-SA 4.0 + [`models/TERMS.md`](../models/TERMS.md): non-commercial.** |
-| `ito_male_esp32s3.bin` (3.81 MB, same place and license) | male voice, same format and size. Flash it at 0x200000 **instead of** the female voice (`VOICE=male esp32/tools/flash.sh PORT`, or `flash.sh PORT models/ito_male_esp32s3.bin`). The app is the same for both voices. |
+| `prebuilt/ito_app_merged.bin` (444 KB) | bootloader + partition table + app (ESP-IDF 5.5.1, octal PSRAM, QIO flash, I2S on). Flash at 0x0. |
+| `ito_female_esp32s3.bin` (3.81 MB, from [Hugging Face](https://huggingface.co/lokutor-ai/ito), see [`models/README.md`](../models/README.md)) | female voice, **main set** (int8), with a self-test record and three demo sentences. Flash at 0x200000. **CC BY-NC-SA 4.0 + [`models/TERMS.md`](../models/TERMS.md): non-commercial.** |
+| `ito_female_esp32s3_int4.bin` (3.20 MB, same place and license) | the same voice with int4 weights in the ConvNeXt blocks (§3b). Flash at 0x680000 (optional). |
+| `ito_female_esp32s3_light.bin` (3.05 MB, same place and license) | the same voice's **light set**: one ConvNeXt block fewer, int4. Flash at 0xB00000 (optional). |
+| `ito_male_esp32s3{,_int4,_light}.bin` (same sizes, place and license) | the male voice's three sets, flashed to the same three offsets **instead of** the female voice's (`VOICE=male esp32/tools/flash.sh PORT`). The app is the same for both voices. |
 
-At boot the board does four things, in order:
-1. It copies the weights to PSRAM and runs the **self-test**: it synthesizes a golden sentence and compares the hash of
+`flash.sh` erases the two optional partitions first and writes the sets it finds in `models/`; with only the main set the board behaves as before (no fallback). Flash layout: app 0x10000 (2 MB slot), then three 4.5 MB weight partitions
+(`weights` 0x200000, `weights_b` 0x680000, `weights_c` 0xB00000; [`BLOB_FORMAT.md`](BLOB_FORMAT.md)).
+
+At boot the board does these things, in order:
+1. It copies the main set to PSRAM and runs the **self-test**: it synthesizes a golden sentence and compares the hash of
    its PCM with the host C engine's. It must print `PASS`.
 2. It runs the **board benchmark** (§4) and keeps the fastest weight-staging mode.
-3. It speaks three demo sentences.
-4. It prints `READY`.
+3. It runs the **self-calibration** (§4b): it measures the real time of every chunk of a representative sentence with each weight set in turn (main, main-int4, light), keeps the first set whose measured RTF is <= 0.85
+   (self-testing it), prints `CALIB` and `TIER_SELECT` lines, and warns and sets a `degraded` flag if even the fastest set measures >= 0.95.
+4. It speaks three demo sentences, with the playback start delay planned from the measured chunk times.
+5. It prints `READY`.
 
 Serial commands (115200 baud): `say <ids>`, `demo [k]`, `test`, `bench`, `act 8|16`, `wmode 0|1|2|3` (direct, copy, gdma, gdma + prefetch),
-`first <frames>` (frames of the first chunk), `delay <ms>` (hold playback until this long after the text arrived), `unpack pie|c` (int4 weight rows: PIE kernel or C code, same bytes), `stats`, `help`.
+`first <frames>` (frames of the first chunk), `delay <ms|auto>` (hold playback until this long after the text arrived; `auto` = the planned delay, the default), `tier [k]` (status, or activate weight set k and self-test it), `status`, `recal` (measure and select again), `simtime <rtf0> <rtf1> <rtf2>|off` (replace the measured chunk times by modelled ones for the next `recal`: timing injection for tests), `unpack pie|c` (int4 weight rows: PIE kernel or C code, same bytes), `stats`, `help`.
 The BOOT button repeats the demos. Every `say`/`demo` prints a `TIMING` line with the time to the first chunk, the RTF, the number of **underruns**
 (gaps in the speech) and how many GEMM calls had their weights announced ahead (mode 3).
 
@@ -71,7 +78,7 @@ and per second of audio.
 | | |
 |---|---|
 | Weights | 3.81 MB blob: 2.37 M int8 + 0.54 M int16 + 0.08 M f32 parameters (the style FiLM is precomputed into a table). The vocoder is 192 wide (576 inner, 5 ConvNeXt blocks); the 4.89 MB blob of 3 October had a 256/768 vocoder (blind test #10: no audible difference, see the root README) |
-| Flash | app 340 KB in a 2 MB slot at 0x10000; weights in a 14 MB slot at 0x200000 |
+| Flash | app 379 KB in a 2 MB slot at 0x10000; three 4.5 MB weight partitions at 0x200000 / 0x680000 / 0xB00000 (main 3.81 MB, main-int4 3.20 MB, light 3.05 MB per voice) |
 | PSRAM | **peak 5.3 of 8 MB** (weights copied to PSRAM + stage ring buffers + PCM chunk buffers + text buffers for 400 tokens; QEMU; 6.5 MB with the 256-wide vocoder) |
 | Internal SRAM | **peak 314 of 384 KB in QEMU, about 327 KB on the chip with the I2S DMA buffers** (192 KB hot scratch for 24-frame chunks, 12-row wide layers + 4 weight-staging tiles of 4 KB + stacks; was 340 of 384 KB with a 238 KB scratch for the 256-wide vocoder). The firmware checks at boot that the scratch fits in one block with room left over and falls back to PSRAM (slow) if not: look for `internal SRAM before the hot arena` in the boot log |
 | Work before the first audio | **23.0-23.5 M instructions and 3.9 MB of weights from PSRAM for the shipped 10-frame (125 ms) first chunk; 16.0-16.1 M and 3.45 MB for a 2-frame one (`first 2`). The same for any sentence length** (forward GRU, fixed style: the text side runs incrementally) |
@@ -227,7 +234,46 @@ These lines give the effective G, the real float-work time, the PSRAM bandwidth 
 `make test_sched` (host) checks it with simulated timings against an independent discrete-event model of the speaker (true chunk times of a *different* sentence with its own jitter): the weight-set choice at the exact thresholds and with missing sets;
 **8,640 random sentences** (RTF 0.30 to 0.85, three splits of fixed and per-frame cost, 3 to 400 tokens, +-4 % jitter per chunk and +-4 % sentence-to-sentence cost between calibration and playback) with **0 underruns**; the first audio released with no extra wait on a fast board;
 a board slower than real time reported infeasible rather than hidden; slower-than-calibrated chunks seen early raising the delay. Outside the margin (+-8 % and +-8 %) 4 of 2,880 sentences underrun, which the test reports as information, not a guarantee.
-Nothing here runs on a board yet; the firmware integration is the next section of this README.
+Nothing here runs on a board yet; the firmware integration is §4c.
+
+## 4c. Weight sets and the boot guarantee
+
+The board carries up to three weight sets per voice, best quality first, each a complete blob in its own flash partition (`firmware/partitions.csv`, [`BLOB_FORMAT.md`](BLOB_FORMAT.md)):
+
+| set | flash | what | file (Hugging Face) |
+|---|---|---|---|
+| 0, main | `weights` at 0x200000 | 192/576 vocoder, 5 blocks, int8 (the reference-quality set; bit-exact with the PyTorch emulation) | `ito_<voice>_esp32s3.bin` |
+| 1, main-int4 | `weights_b` at 0x680000 | the same model with int4 weights in the ConvNeXt blocks, `harm_proj` and the decoder embed | `ito_<voice>_esp32s3_int4.bin` |
+| 2, light | `weights_c` at 0xB00000 | 192/576 vocoder with 4 blocks (one block fewer, fine-tuned), int4 weights as set 1 | `ito_<voice>_esp32s3_light.bin` |
+
+**What happens at boot.** Only one set is in PSRAM at a time. The firmware activates the sets in that order and, for each, synthesises a representative sentence (the blob's own
+self-test sentence, 84 tokens, about 5.6 s of audio) without playback, with the shipped chunk schedule, and records the **wall time of every chunk** (compute plus the weight fetch from PSRAM).
+From the trace it computes a measured real-time factor (the larger of the median full-chunk figure and the whole-sentence figure, ramp included), and keeps **the first set whose measured RTF is <= 0.85**. If none
+reaches 0.85 it keeps the one with the lowest RTF and prints a `NOTE` (0.85 to 0.95, "marginal") or, if even that one is >= 0.95, a `WARNING: DEGRADED` line and sets a `degraded` flag (also shown by `status`). The chosen set is
+then self-tested against the host engine's PCM hash like every set (a set that fails is excluded and the next one is tried).
+`TIER_SELECT` is the line to send us:
+
+```
+CALIB set 0 ('weights', vocoder 192/576 x5, int8): 84 tokens, 21 chunks | first chunk 139.0 ms (begin 3.1 ms) | steady chunk 190.2 ms of 300 ms audio: RTF steady 0.634, whole 0.672 -> measured RTF 0.672 | weight staging gdma+prefetch
+TIER_SELECT chosen=0 ('weights', vocoder 192/576 x5, int8) measured_rtf=0.672 target=0.85 status=OK degraded=0 | measured: set0 0.672 set1 not needed set2 not needed
+```
+
+**Start delay, per utterance.** The same measured chunk times drive an **adaptive jitter pre-buffer**: after the first chunk of every utterance the firmware models the speaker (chunk k can start playing when chunk k - 1 has finished and chunk k has
+been produced; production of chunk k waits for the PCM buffer of chunk k - 6) with the measured chunk times times a 1.25 safety factor, and releases the first audio at the smallest delay after which the model predicts no underrun
+(never earlier than the first chunk is ready). While the player waits, the times actually seen in this utterance replace the model's, so a sentence that turns out slower than calibrated raises the delay before playback starts. `delay <ms>` fixes it by hand, `delay auto` returns to the plan.
+The `TIMING` line reports the planned delay and the underruns.
+
+**What this does and does not guarantee.** If the chunk times measured at boot are representative of later sentences (to within the 25 % margin), then for a set with a measured RTF below the target playback is gapless, with the
+smallest start delay the model allows. It is a guarantee **by measurement, on the board that makes it**: the margin, the 0.85 target and the representativeness of the calibration sentence are engineering choices that a real board can contradict
+(a second core busy with something else, a thermal throttle, PSRAM contention from a radio). It cannot make a slow board fast: with no fallback below 0.95 the firmware says so instead of stuttering silently. Nothing here has run on silicon.
+
+**How it is tested without a board.**
+- `make test_sched` (host): the policy (`engine/itofs_sched.c`, no clock of its own) against a discrete-event model of the speaker with **simulated timings**: 10 weight-set choices (thresholds at exactly 0.85 and 0.95, missing sets); 8,640 random sentences
+  (RTF 0.30 to 0.85, three ratios of fixed to per-frame cost, 3 to 400 tokens, +-4 % jitter per chunk and +-4 % sentence-to-sentence cost between calibration and playback): 0 underruns; the first audio is released with no extra wait when the board is fast;
+  a board slower than real time is reported infeasible, not hidden; observed slow chunks raise the delay.
+- QEMU (`simtime <rtf0> <rtf1> <rtf2>` then `recal`): the firmware loads all three sets in turn from flash, runs the real selection with modelled chunk times and the real self-test of every chosen set. Logged
+  in [`results/chip/qemu_sets_female.log`](../results/chip/qemu_sets_female.log) and `_male`: modelled RTFs 0.90 / 0.80 / 0.70 pick set 1 (measured 0.94 / 0.84 including the ramp); 0.95 / 0.92 / 0.90 pick set 2 as `MARGINAL`; 1.10 / 1.05 / 0.97 pick set 2 as `DEGRADED` with the warning and `degraded=1`; switching back to the real (QEMU) clock picks set 0.
+  Nine PCM dumps per run, all bit-identical to the host's. [`qemu_modes_*.log`](../results/chip/): each set in the copy, gdma and gdma + prefetch staging modes and with the C and the PIE int4 unpack, eleven dumps per voice, all bit-identical.
 
 ## 5. Numerics, and what was verified
 
@@ -251,6 +297,8 @@ Nothing here runs on a board yet; the firmware integration is the next section o
 | weight-prefetch hints | host test H: the engine announces the weights of the next GEMM call before the current one, for every call of every test sentence (0 unannounced, 0 mismatched, chunks of 2, 8, 24 frames) and the audio does not change |
 | ASan / UBSan | clean |
 | **QEMU** (Espressif 9.2.2, quad PSRAM, I2S compiled out) | self-test PASS; full PCM bit-identical to the host (female 134100/134100 samples, male 137400/137400) in all four weight-staging modes (direct, copy, gdma, gdma + prefetch; QEMU has no GDMA, so the two GDMA modes run the same control flow with a software copy that is only done when the tile is waited for and poisons the buffer until then); self-test PASS on 1 and 2 cores, 8- and 16-bit activations, both voices ([`female`](../results/chip/qemu_rtf_female.log), [`male`](../results/chip/qemu_rtf_male.log); the earlier direct/copy staging runs are in [`qemu_v3.log`](../results/chip/qemu_v3.log)) |
+| int4 weights (§3b) | `int4_check.py` passes on all four int4 blobs (C GEMM == int64 reference; int4 blob == int8-equivalent blob, bit-identical PCM at 8/16-bit); host test + ASan/UBSan pass; firmware PCM bit-identical in QEMU in all staging modes, both voices ([`results/chip/int4/`](../results/chip/int4)) |
+| weight sets and boot selection (§4c) | QEMU, all three sets of both voices from flash: every set's firmware PCM is bit-identical to the host's, in the four staging modes and with the C and the PIE int4 unpack ([`qemu_modes_*.log`](../results/chip/)); the selection and degraded logic runs with injected timings ([`qemu_sets_*.log`](../results/chip/)); `make test_sched`: 8,640 simulated sentences, 0 underruns |
 
 Timings printed under QEMU are emulator wall-clock times and say nothing about the chip.
 
@@ -260,6 +308,7 @@ Timings printed under QEMU are emulator wall-clock times and say nothing about t
   GDMA: the control flow of `wmode 2` and `wmode 3` is tested there with a software copy, but the real `esp_async_memcpy` branch, its interrupts and the
   two cores sharing the bus are not), I2S output, the BOOT button, and `say.py` over real USB. The boot benchmark runs all four staging modes,
   compares each one's audio with the direct mode's and keeps the fastest that matches.
+- **The boot self-calibration and the start-delay plan on a board:** the policy is tested with simulated timings (host and QEMU), but the claim that the 1.25 margin covers the variation between the calibration sentence and later ones, and the 0.85 target, is untested on silicon. So is the PIE int4 unpack there (QEMU's PIE model is not silicon; the boot check against the C code is the guard).
 - **The hardware build itself** (octal PSRAM, QIO, I2S) was built but never run. QEMU runs the quad-PSRAM, no-I2S build
   of the same sources.
 - The float-work cycle costs behind the estimates are assumptions.
@@ -269,9 +318,9 @@ Timings printed under QEMU are emulator wall-clock times and say nothing about t
 ## Layout
 
 ```
-engine/      itofs.c / itofs.h: portable C99 engine (also reads the older arch-2 blob format and int4 weights); BLOB_FORMAT.md: the weight blob format
-firmware/    ESP-IDF app: main.c (I2S, serial commands, self-test, board benchmark), kernels_s3.c (PIE int8 GEMM via esp-nn)
-host/        Makefile, ito_cli.c, host_test_v3.c, gen_selftest.c, opcount_v3.c, w4_dump.c (int4 GEMM test helper), golden/ (test references)
+engine/      itofs.c / itofs.h: portable C99 engine (also reads the older arch-2 blob format and int4 weights); itofs_sched.c / .h: boot calibration and start-delay policy; BLOB_FORMAT.md: the weight blob format
+firmware/    ESP-IDF app: main.c (I2S, serial commands, self-test, board benchmark, weight sets and boot self-calibration, start-delay planning), kernels_s3.c (PIE int8 GEMM via esp-nn, int4 unpack), partitions.csv (three weight partitions)
+host/        Makefile, ito_cli.c, host_test_v3.c, gen_selftest.c, opcount_v3.c, w4_dump.c (int4 GEMM test helper), host_test_sched.c (policy test with simulated timings), golden/ (test references)
 tools/       fetch_weights.sh, flash.sh, say.py, chip_wav.py, build_fw.sh, int4_check.py, i4_to_i8.py, estimate_v3.py, icount_estimate.py, trace_sim.py, trace_table.py, sched_eval.py, qemu/run_qemu.sh, qemu/icount_profile.sh, qemu/qemu_client.py
 prebuilt/    ito_app_merged.bin
 ```

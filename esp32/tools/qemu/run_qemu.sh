@@ -5,6 +5,9 @@
 #
 #   esp32/tools/qemu/run_qemu.sh [weights.bin] [tag]          (log in esp32/logs/qemu_<tag>.log)
 #   VOICE=male esp32/tools/qemu/run_qemu.sh                male-voice blob from models/
+#   W2=/abs/set1.bin W3=/abs/set2.bin ...                  further weight sets (flash partitions weights_b at 0x680000 and weights_c at 0xB00000)
+#   REF_SETS="/abs/a.bin /abs/b.bin"                       weights whose self-test PCM the firmware's dumps are compared with, in order of the dumps
+#                                                          (default: the first set only; the last entry repeats). GREF = golden reference of the voice.
 #
 # Needs ESP-IDF 5.5 (IDF_PATH, default ~/esp/esp-idf) and Espressif's QEMU >= 9.2.2 for esp32s3 (QEMU_BIN; older
 # builds find no PSRAM). Timings printed under QEMU are emulator wall-clock times, NOT chip times.
@@ -21,8 +24,13 @@ Q=${QEMU_BIN:-$(command -v qemu-system-xtensa || echo "$HOME/esp/qemu/bin/qemu-s
 mkdir -p "$FW/build_qemu/run" "$LOGS"
 # the host C engine's PCM for the blob's self-test sentence (the firmware dumps its own; they must be identical)
 make -s -C "$HOST" gen_selftest
-case "${VOICE:-female}" in g|G|m|M|male) GREF="$HOST/golden/g/ref0_w8a8.bin" ;; *) GREF="$HOST/golden/ref0_w8a8.bin" ;; esac
+case "${VOICE:-female}" in g|G|m|M|male) GREF="${GREF:-$HOST/golden/g/ref0_w8a8.bin}" ;; *) GREF="${GREF:-$HOST/golden/ref0_w8a8.bin}" ;; esac
 "$HOST/gen_selftest" "$W" "$GREF" "$FW/build_qemu/run/selftest_$TAG" 1 8
+REFS="$FW/build_qemu/run/selftest_$TAG.pcm"
+if [ -n "$REF_SETS" ]; then
+    REFS=""; i=0
+    for rw in $REF_SETS; do "$HOST/gen_selftest" "$rw" "$GREF" "$FW/build_qemu/run/selftest_${TAG}_$i" 1 8 > /dev/null; REFS="$REFS $FW/build_qemu/run/selftest_${TAG}_$i.pcm"; i=$((i+1)); done
+fi
 python3 - <<PY
 import sys; sys.path.insert(0, "$IDF/tools")
 from idf_py_actions.qemu_ext import QEMU_TARGETS
@@ -30,7 +38,7 @@ open("$FW/build_qemu/run/qemu_efuse.bin", "wb").write(QEMU_TARGETS["esp32s3"].de
 PY
 python -m esptool --chip esp32s3 merge_bin --fill-flash-size 16MB -o "$FW/build_qemu/run/flash_$TAG.bin" --flash_mode dio --flash_size 16MB \
   0x0 "$FW/build_qemu/bootloader/bootloader.bin" 0x8000 "$FW/build_qemu/partition_table/partition-table.bin" \
-  0x10000 "$FW/build_qemu/itofs.bin" 0x200000 "$W" > /dev/null
+  0x10000 "$FW/build_qemu/itofs.bin" 0x200000 "$W" ${W2:+0x680000 "$W2"} ${W3:+0xB00000 "$W3"} > /dev/null
 PORT=$((5500 + RANDOM % 400))
 "$Q" -M esp32s3 -m 8M $QEMU_EXTRA -nographic -monitor none -nic none \
   -drive file="$FW/build_qemu/run/flash_$TAG.bin",if=mtd,format=raw \
@@ -39,7 +47,7 @@ PORT=$((5500 + RANDOM % 400))
   -serial tcp:127.0.0.1:$PORT,server=on,wait=on > "$FW/build_qemu/run/qemu_$TAG.stdout" 2>&1 &
 QPID=$!
 echo "qemu pid $QPID port $PORT"
-"$HOST_PY" "$ROOT/esp32/tools/qemu/qemu_client.py" 127.0.0.1 $PORT "$LOGS/qemu_$TAG.log" "$FW/build_qemu/run/selftest_$TAG.pcm" || true
+"$HOST_PY" "$ROOT/esp32/tools/qemu/qemu_client.py" 127.0.0.1 $PORT "$LOGS/qemu_$TAG.log" $REFS || true
 kill $QPID 2>/dev/null || true
 wait $QPID 2>/dev/null || true
 [ -f "$LOGS/qemu_$TAG.log" ] || { echo "QEMU run FAILED: no log"; exit 1; }

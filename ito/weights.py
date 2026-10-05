@@ -27,6 +27,18 @@ ALIASES = {"d": "female", "f": "female", "g": "male", "m": "male"}   # "d" and "
 VOICE_NAMES = ("female", "male", "d", "g")
 
 
+# The firmware has up to three weight sets per voice (flash partitions, best quality first): main (int8), main with int4 blocks, light (4 blocks, int4).
+# The first is the only one the host build, `chip_wav.py` and the QEMU scripts need; `flash.sh` writes all that are present.
+CHIP_SETS = {"female": ("ito_female_esp32s3.bin", "ito_female_esp32s3_int4.bin", "ito_female_esp32s3_light.bin"),
+             "male": ("ito_male_esp32s3.bin", "ito_male_esp32s3_int4.bin", "ito_male_esp32s3_light.bin")}
+
+
+def chip_set_files(voice="female"):
+    """(main, int4, light) chip weight files of a voice, in the order of the firmware's flash partitions."""
+    v = (voice or "female").lower()
+    return CHIP_SETS[ALIASES.get(v, v)]
+
+
 def voice_files(voice="female"):
     """(PyTorch file, chip file) for a voice: 'female' (default, alias 'd') or 'male' (alias 'g')."""
     v = (voice or "female").lower()

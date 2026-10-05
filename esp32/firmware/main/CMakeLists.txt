@@ -1,4 +1,4 @@
-idf_component_register(SRCS "main.c" "kernels_s3.c" "dot_rows_s3.S" "../../engine/itofs.c"
+idf_component_register(SRCS "main.c" "kernels_s3.c" "dot_rows_s3.S" "../../engine/itofs.c" "../../engine/itofs_sched.c"
                        INCLUDE_DIRS "." "../../engine"
                        PRIV_REQUIRES esp_timer esp_driver_i2s esp_driver_uart esp_driver_gpio esp_partition
                                      esp_psram heap esp_system spi_flash esp_mm esp_hw_support)

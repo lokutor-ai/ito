@@ -2,7 +2,7 @@
 send `say <ids>` (a sentence phonemised by esp32/tools/say.py --dry), `act 16`, `say`, `act 8` and
 `test` (dual- and single-core self-test at 8-bit activations, plus the 16-bit record), or the ';'-separated commands in
 $QEMU_SCRIPT (the word SAY expands to that say command); compare every PCM the firmware dumps with the host C engine's PCM.
-    python3 esp32/tools/qemu/qemu_client.py <host> <port> <log> <host selftest .pcm>   (run_qemu.sh calls it)"""
+    python3 esp32/tools/qemu/qemu_client.py <host> <port> <log> <host selftest .pcm> [more .pcm: one per later dump]   (run_qemu.sh calls it)"""
 import socket, sys, time
 import numpy as np
 
@@ -10,7 +10,8 @@ SAY = "0,50,83,54,156,57,135,16,5,16,81,102,61,16,102,68,16,156,51,158,125,57,13
 
 
 def main():
-    host, port, logp, pcmp = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+    host, port, logp, pcmps = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4:]      # reference PCM files, one per PCM dump in order (the last repeats)
+    ndump = 0
     for _ in range(100):
         try:
             s = socket.create_connection((host, port)); break
@@ -44,7 +45,7 @@ def main():
             if l.startswith("PCMEND"):
                 n = int(l.split()[1])
                 got = np.array([v - 65536 if v >= 32768 else v for k in sorted(pcm) for v in pcm[k]], np.int16)
-                ref = np.fromfile(pcmp, "<i2")
+                ref = np.fromfile(pcmps[min(ndump, len(pcmps) - 1)], "<i2"); ndump += 1
                 same = len(got) == len(ref) and np.array_equal(got, ref)
                 nd = int((got[:min(len(got), len(ref))] != ref[:min(len(got), len(ref))]).sum())
                 log.write(f"PCM COMPARE vs host C engine: firmware {len(got)} samples (reported {n}), host {len(ref)}, "

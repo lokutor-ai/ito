@@ -2,4 +2,11 @@
 nvs,      data, nvs,     0x9000,   0x6000
 phy_init, data, phy,     0xf000,   0x1000
 factory,  app,  factory, 0x10000,  0x1F0000
-weights,  data, 0x40,    0x200000, 0xE00000
+# Weight sets (ItoFS blobs), best quality first. The boot self-calibration measures them in this order and keeps the first that runs at a real-time factor <= 0.85:
+#   weights    0x200000  main set, int8 (the file every earlier release flashed here)
+#   weights_b  0x680000  main set, int4 weights in the ConvNeXt blocks (optional)
+#   weights_c  0xB00000  light set: 4 blocks, int4 (optional)
+# A partition that is empty (no ITF1 header) is skipped; with only `weights` flashed the firmware behaves as before.
+weights,   data, 0x40,    0x200000, 0x480000
+weights_b, data, 0x41,    0x680000, 0x480000
+weights_c, data, 0x42,    0xB00000, 0x480000
