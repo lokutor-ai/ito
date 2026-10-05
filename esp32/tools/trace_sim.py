@@ -74,7 +74,7 @@ def chunk_time(evs, cpi, bw, policy, ring_bytes, nbuf=2, look=1):
             hs = [e["h0"], e["h1"]] if e["kind"] == 1 else [e["h0"], 0]
             for c in (0, 1):
                 if chans[c]:
-                    for b, share in tiles_for(e["inn"], chans[c]):
+                    for b, share in tiles_for(e["bytes"] // e["out"] if e["bytes"] and e["out"] else e["inn"], chans[c]):     # bytes per weight row (int4 rows are shorter than `in`)
                         tiles[c].append((ncall, b, sec(hs[c]) * share))
             items.append(("gemm", ncall))
             if e["ovh"]:

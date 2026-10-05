@@ -43,7 +43,7 @@ At boot the board does four things, in order:
 4. It prints `READY`.
 
 Serial commands (115200 baud): `say <ids>`, `demo [k]`, `test`, `bench`, `act 8|16`, `wmode 0|1|2|3` (direct, copy, gdma, gdma + prefetch),
-`first <frames>` (frames of the first chunk), `delay <ms>` (hold playback until this long after the text arrived), `stats`, `help`.
+`first <frames>` (frames of the first chunk), `delay <ms>` (hold playback until this long after the text arrived), `unpack pie|c` (int4 weight rows: PIE kernel or C code, same bytes), `stats`, `help`.
 The BOOT button repeats the demos. Every `say`/`demo` prints a `TIMING` line with the time to the first chunk, the RTF, the number of **underruns**
 (gaps in the speech) and how many GEMM calls had their weights announced ahead (mode 3).
 
@@ -75,6 +75,41 @@ and per second of audio.
 | Work before the first audio | **23.0-23.5 M instructions and 3.9 MB of weights from PSRAM for the shipped 10-frame (125 ms) first chunk; 16.0-16.1 M and 3.45 MB for a 2-frame one (`first 2`). The same for any sentence length** (forward GRU, fixed style: the text side runs incrementally) |
 | Work per second of audio | 263 M int8 MACs + 1.2 M f32 MACs + other float work; about 85 M instructions on the dual-core critical path |
 | Weight traffic | 11 MB of weights read from PSRAM per second of audio (one weight pass serves a 24-frame, 300 ms chunk, the two 1202-wide layers two passes; 15 MB with the 256-wide vocoder, 17 MB before that, 38 MB with 8-frame chunks) |
+
+## 3b. int4 weights (blob format 2)
+
+The ConvNeXt blocks (`pw1`, `pw2`), the wide `harm_proj` and the decoder embed can be stored as **int4**: groups of 32 weights along the input axis, each group with an integer multiplier `m` = 1..7 and a zero point `zp`,
+weight `w8 = (q - zp) * m` (the exact layout is in [`BLOB_FORMAT.md`](BLOB_FORMAT.md)). The per-channel float scale is unchanged, so an int4 layer **is** an int8 layer whose weights have this form: same int32 accumulators, same rescale, same audio as the
+equivalent int8 blob. Weights are 0.53 bytes each instead of 1 (the main set goes from 3.81 to 3.20 MB). The quantisation is post-training (GPTQ, Frantar et al. 2023, on held-out sentences; no retraining); the exporter is not part of this repository.
+
+*Unpacking.* A packed row is unpacked once per output channel into the aligned scratch row (exactly where an unaligned int8 row is packed today) and the unchanged PIE dot kernel runs on it, so the cost is shared by the 8 to 24 activation rows of a call. Two implementations
+produce the same bytes: C on 32-bit words (`itofs_w4_unpack_row`, 2.5 instructions per weight) and a PIE kernel (`itofs_s3_w4_unpack` in `dot_rows_s3.S`, 18 instructions per 32 weights: byte-lane AND, three unsigned 8-bit multiplies and two saturating subtracts on Q registers; none of them overflows
+or saturates for the format's value ranges). At boot the firmware compares the PIE kernel with the C code on 7,168 groups covering every `(m, zp)` and uses it only if all bytes agree (`kernels: int4 unpack by the PIE kernel ...`); otherwise it keeps the C code. QEMU's PIE model is not silicon, which is why the check runs on the board too.
+
+**Exactness (all checked, logs in [`results/chip/int4/`](../results/chip/int4)).**
+- `python3 esp32/tools/int4_check.py models/<int4 blob>`: for every int4 tensor the engine's int32 accumulators equal an independent NumPy int64 matmul with the unpacked weights; and the int4 blob rewritten as its int8-equivalent blob (`tools/i4_to_i8.py`) gives **bit-identical** PCM through `ito_cli` at 8- and 16-bit activations (self-test and demo sentences). Passes for both voices, main and light set.
+- The host test (stage-by-stage SNR against the PyTorch emulation of the int4 numerics, streaming == whole utterance, prefetch hints, ASan/UBSan) passes on the int4 blobs: the emulation's int8 tensors are the unpacked int4 values, so it is the same arithmetic.
+- QEMU: the firmware's PCM is bit-identical to the host's in all four weight-staging modes (direct, copy, gdma, gdma + prefetch), one and two cores, 8- and 16-bit activations, both voices.
+
+**Quality** (10 held-out sentences per voice; PESQ-wb against the float PyTorch model; the int4 columns are the main set with int4 blocks):
+
+| | PESQ vs float, int8 | PESQ vs float, int4 | PESQ int4 audio vs int8 audio (mean, min) | log-mel L1 vs float, int8 -> int4 |
+|---|---|---|---|---|
+| female | 4.50 | 4.48 | 4.52 (4.42) | 0.077 -> 0.132 |
+| male | 4.55 | 4.47 | 4.54 (4.47) | 0.071 -> 0.125 |
+
+PESQ moves by 0.02 to 0.08; the mel distance grows by about 75 %, which is large for an objective measure. One listener, in blind test #10 (female, four sentences), rated the int4 emulation 4.00, the same as the int8 engine. The male voice has not been heard.
+
+**Cost, from exact QEMU instruction counts** (female voice, main set, `icprof 2`, same method as §4; the conversion to time is an estimate):
+
+| | before the first chunk (125 ms) | per second of audio, critical path | weights read from PSRAM per second of audio |
+|---|---|---|---|
+| int8 | 23.0-23.9 M instr, 3.91 MB | 76-86 M instr | 10.5-11.2 MB (+4.5 MB of activation rings) |
+| int4, C unpack | 24.8-25.3 M, 3.20 MB | 83-93 M (+8 %) | 8.1-8.8 MB |
+| **int4, PIE unpack (shipped)** | **23.4-23.6 M, 3.20 MB** | **78-88 M (+1 %)** | **8.1-8.8 MB (-21 %)** |
+
+So the saving is in memory, not in instructions: with the PIE unpack the extra instructions are about 1 % and the weight traffic falls by a fifth, which matters only where the board is limited by the PSRAM
+(the pessimistic column of §4: whole-sentence RTF 0.92-0.93 against 0.97-0.98). Where it is limited by the CPU the int4 set is a hair slower than int8 (optimistic 0.47 against 0.46).
 
 ## 4. Estimated time to first audio and real-time factor
 
@@ -219,9 +254,9 @@ Timings printed under QEMU are emulator wall-clock times and say nothing about t
 ## Layout
 
 ```
-engine/      itofs.c / itofs.h: portable C99 engine (also reads the older arch-2 blob format)
+engine/      itofs.c / itofs.h: portable C99 engine (also reads the older arch-2 blob format and int4 weights); BLOB_FORMAT.md: the weight blob format
 firmware/    ESP-IDF app: main.c (I2S, serial commands, self-test, board benchmark), kernels_s3.c (PIE int8 GEMM via esp-nn)
-host/        Makefile, ito_cli.c, host_test_v3.c, gen_selftest.c, opcount_v3.c, golden/ (test references)
-tools/       fetch_weights.sh, flash.sh, say.py, chip_wav.py, build_fw.sh, estimate_v3.py, icount_estimate.py, trace_sim.py, trace_table.py, sched_eval.py, qemu/run_qemu.sh, qemu/icount_profile.sh, qemu/qemu_client.py
+host/        Makefile, ito_cli.c, host_test_v3.c, gen_selftest.c, opcount_v3.c, w4_dump.c (int4 GEMM test helper), golden/ (test references)
+tools/       fetch_weights.sh, flash.sh, say.py, chip_wav.py, build_fw.sh, int4_check.py, i4_to_i8.py, estimate_v3.py, icount_estimate.py, trace_sim.py, trace_table.py, sched_eval.py, qemu/run_qemu.sh, qemu/icount_profile.sh, qemu/qemu_client.py
 prebuilt/    ito_app_merged.bin
 ```

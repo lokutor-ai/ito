@@ -46,7 +46,7 @@ volatile int s3_dma_errors = 0;
 s3_stats_t s3_stats;
 
 #define PACK_BYTES 1280          // one packed weight row: the widest GEMM input is 1202 (80 vectors of 16 B)
-typedef struct { const int8_t *w; int in, out, rows; } pcall_t;     // a GEMM call (the shared weights base, width, output channels, rows)
+typedef struct { const int8_t *w; int in, out, rows, rb; } pcall_t;     // a GEMM call (the shared weights base, width, output channels, rows, bytes per weight row: in for int8, the int4 row size for int4)
 typedef struct { const int8_t *tp; size_t n; const int8_t *src; } slot_t;
 #define MAXQ 3
 typedef struct {
@@ -63,7 +63,7 @@ typedef struct {
 static core_ctx_t g_cc[2];
 static int g_dma_ok, g_tiles_ok;
 
-typedef struct { const int8_t *x; int rows, ldx, in; const int8_t *w; int out; int32_t *acc; int oc0, oc1; int mode; } job_t;
+typedef struct { const int8_t *x; int rows, ldx, in; const int8_t *w; int out; int32_t *acc; int oc0, oc1; int mode; int rb, w4; } job_t;   // rb: bytes per weight row; w4: int4 rows
 
 const char *s3_wmode_name(int m) { return m == 0 ? "direct" : m == 1 ? "copy" : m == 2 ? "gdma" : "gdma+prefetch"; }
 int s3_dma_ok(void) { return g_dma_ok; }
@@ -74,10 +74,41 @@ extern void itofs_s3_dot_rows(const int8_t *x, int ldx, const int8_t *w, int row
 // copy nv16 x 16 bytes from any address into a 16-byte aligned buffer (reads up to 16 bytes past the end)
 extern void itofs_s3_pack_row(int8_t *dst, const int8_t *src, int nv16);
 
-// channels [o0, o1) whose weights start at wt (row stride in)
+extern void itofs_s3_w4_unpack(int8_t *dst, const uint8_t *row, int ng);    // main/dot_rows_s3.S: PIE unpack, 18 instructions per group of 32 weights
+volatile int s3_w4_pie = 0;               // 1: int4 rows are unpacked by the PIE kernel (set at boot if it reproduces the C unpack exactly), 0: by the C code below
+
+// int4 row -> int8 (the engine's itofs_w4_unpack_row on aligned 32-bit words; row and dst 16-byte aligned): a group's 16 packed bytes give
+// 32 weights as  q * m + (128 - zp * m) per byte, x ^ 0x80 = (q - zp) * m  (see itofs.h). Writes ng * 32 bytes.
+static inline void w4_unpack_row(const uint8_t *row, int in, int8_t *dst)
+{
+    const int ng = (in + 31) >> 5;
+    const uint8_t *prm = row + ng * 16;
+    const uint32_t *nb = (const uint32_t *)row;
+    uint32_t *d = (uint32_t *)dst;
+    for (int g = 0; g < ng; g++) {
+        const uint32_t m = prm[g] >> 4, zp = prm[g] & 15u, C = (128u - zp * m) * 0x01010101u;
+        const uint32_t w0 = nb[0], w1 = nb[1], w2 = nb[2], w3 = nb[3];
+        d[0] = (((w0 & 0x0F0F0F0Fu) * m) + C) ^ 0x80808080u; d[1] = (((w1 & 0x0F0F0F0Fu) * m) + C) ^ 0x80808080u;
+        d[2] = (((w2 & 0x0F0F0F0Fu) * m) + C) ^ 0x80808080u; d[3] = (((w3 & 0x0F0F0F0Fu) * m) + C) ^ 0x80808080u;
+        d[4] = ((((w0 >> 4) & 0x0F0F0F0Fu) * m) + C) ^ 0x80808080u; d[5] = ((((w1 >> 4) & 0x0F0F0F0Fu) * m) + C) ^ 0x80808080u;
+        d[6] = ((((w2 >> 4) & 0x0F0F0F0Fu) * m) + C) ^ 0x80808080u; d[7] = ((((w3 >> 4) & 0x0F0F0F0Fu) * m) + C) ^ 0x80808080u;
+        nb += 4; d += 8;
+    }
+}
+
+// channels [o0, o1) whose weights start at wt (row stride in; int4: j->rb bytes per packed row)
 static inline void compute(const job_t *j, const int8_t *wt, int o0, int o1, int8_t *pk)
 {
     const int in = j->in, in16 = in >> 4, r0 = in16 << 4;
+    if (j->w4) {       // each packed row is unpacked once into the aligned scratch row (amortised over every activation row), then the aligned dot kernel runs on it
+        const int nv = (in + 15) >> 4;
+        for (int o = o0; o < o1; o++) {
+            if (s3_w4_pie) itofs_s3_w4_unpack(pk, (const uint8_t *)wt + (size_t)(o - o0) * j->rb, (in + 31) >> 5);
+            else w4_unpack_row((const uint8_t *)wt + (size_t)(o - o0) * j->rb, in, pk);
+            itofs_s3_dot_rows(j->x, j->ldx, pk, (j->rows << 16) | nv, j->acc + o, j->out * 4);
+        }
+        return;
+    }
     if ((in & 15) == 0 && ((uintptr_t)wt & 15) == 0 && j->rows < 65536) {   // every weight row aligned: fast kernel
         for (int o = o0; o < o1; o++)
             itofs_s3_dot_rows(j->x, j->ldx, wt + (size_t)(o - o0) * in, (j->rows << 16) | in16, j->acc + o, j->out * 4);
@@ -165,7 +196,7 @@ static void core_range(const pcall_t *p, int k, int *c0, int *c1)
     const int split = dual ? ((p->out / 2) + TOC - 1) / TOC * TOC : p->out;
     if (k == 0) { *c0 = 0; *c1 = split; } else { *c0 = split; *c1 = dual ? p->out : split; }
 }
-static inline int tile_channels(int in) { const int t = TILE_BYTES / in; return t < 1 ? 1 : t; }    // in <= 1536 always (the engine's widest GEMM input is 1202)
+static inline int tile_channels(int rb) { const int t = TILE_BYTES / rb; return t < 1 ? 1 : t; }    // in <= 1536 always (the engine's widest GEMM input is 1202)
 
 // issue fetches while a buffer is free
 static void pump(int k)
@@ -175,16 +206,16 @@ static void pump(int k)
         int c0 = 0, c1 = 0, nt = 0;
         while (c->gen_i < c->ncq) {
             core_range(&c->cq[c->gen_i], k, &c0, &c1);
-            const int toc = tile_channels(c->cq[c->gen_i].in);
+            const int toc = tile_channels(c->cq[c->gen_i].rb);
             nt = (c1 - c0 + toc - 1) / toc;
             if (c->gen_t < nt) break;
             c->gen_i++; c->gen_t = 0;
         }
         if (c->gen_i >= c->ncq) return;
         const pcall_t *p = &c->cq[c->gen_i];
-        const int toc = tile_channels(p->in), t0 = c0 + c->gen_t * toc, t1 = (t0 + toc < c1) ? t0 + toc : c1;
-        const int8_t *src = p->w + (size_t)t0 * p->in;
-        const size_t n = (size_t)(t1 - t0) * p->in;
+        const int toc = tile_channels(p->rb), t0 = c0 + c->gen_t * toc, t1 = (t0 + toc < c1) ? t0 + toc : c1;
+        const int8_t *src = p->w + (size_t)t0 * p->rb;
+        const size_t n = (size_t)(t1 - t0) * p->rb;
         const uintptr_t a = (uintptr_t)src & ~(uintptr_t)63, e = ((uintptr_t)src + n + 63) & ~(uintptr_t)63;
         slot_t *sl = &c->slot[c->fetched & 1];
         hw_issue(c, c->buf[c->fetched & 1], (const void *)a, e - a);
@@ -210,7 +241,7 @@ static void gemm_stream(const job_t *j, int k)
     const pcall_t *p = &c->cq[0];
     int c0 = 0, c1 = 0;
     core_range(p, k, &c0, &c1);
-    const int in = p->in, toc = tile_channels(in);
+    const int toc = tile_channels(p->rb);
     for (int t0 = c0; t0 < c1; t0 += toc) {
         const int t1 = (t0 + toc < c1) ? t0 + toc : c1;
         pump(k);                                   // this tile and the next one (or the next call's first) in flight
@@ -228,13 +259,13 @@ static void gemm_stream(const job_t *j, int k)
 static void gemm_range(const job_t *j, core_ctx_t *c)
 {
     if (j->oc1 <= j->oc0) return;
-    const int in = j->in;
-    if (j->mode == 0) { compute(j, j->w + (size_t)j->oc0 * in, j->oc0, j->oc1, c->pk); return; }
+    const int rb = j->rb;
+    if (j->mode == 0) { compute(j, j->w + (size_t)j->oc0 * rb, j->oc0, j->oc1, c->pk); return; }
     if (j->mode == 1) {
-        const int toc = tile_channels(in);
+        const int toc = tile_channels(rb);
         for (int t0 = j->oc0; t0 < j->oc1; t0 += toc) {
             const int t1 = (t0 + toc < j->oc1) ? t0 + toc : j->oc1;
-            memcpy(c->buf[0], j->w + (size_t)t0 * in, (size_t)(t1 - t0) * in);
+            memcpy(c->buf[0], j->w + (size_t)t0 * rb, (size_t)(t1 - t0) * rb);
             compute(j, c->buf[0], t0, t1, c->pk);
         }
         return;
@@ -250,7 +281,7 @@ static void stream_pop(int k)
     for (int i = 0; i < c->ncq; i++) c->cq[i] = c->cq[i + 1];
     if (c->gen_i > 0) c->gen_i--; else c->gen_t = 0;
 }
-static inline int same_call(const pcall_t *a, const pcall_t *b) { return a->w == b->w && a->in == b->in && a->out == b->out && a->rows == b->rows; }
+static inline int same_call(const pcall_t *a, const pcall_t *b) { return a->w == b->w && a->in == b->in && a->out == b->out && a->rows == b->rows && a->rb == b->rb; }
 // a staged call starts: its tiles must head the stream (they usually were hinted already); otherwise the stream is flushed
 static void stream_enter(const pcall_t *p)
 {
@@ -263,11 +294,11 @@ static void stream_enter(const pcall_t *p)
     pump(0); pump(1);
 }
 // engine hint (itofs_qnext_fn): a call with these weights follows the running / next one
-void s3_prefetch(const int8_t *w, int in, int out, int rows, void *user)
+void s3_prefetch(const int8_t *w, int in, int out, int rows, int rb, void *user)
 {
     (void)user;
     if (s3_wmode != 3 || !esp_ptr_external_ram(w)) return;
-    const pcall_t p = { w, in, out, rows };
+    const pcall_t p = { w, in, out, rows, rb };
     core_ctx_t *c0 = &g_cc[0];
     if (c0->ncq && same_call(&c0->cq[c0->ncq - 1], &p)) return;        // already queued (the layer's own first call after the previous layer's hint)
     if (c0->ncq >= MAXQ) return;
@@ -341,6 +372,31 @@ static int dma_selftest(core_ctx_t *c)
     return ok;               // on a timeout src is leaked on purpose: a late DMA must not write freed memory
 }
 
+// the PIE unpack must reproduce the C unpack on every (m, zp) the format allows, for arbitrary nibbles; otherwise the C code is used
+static int w4_pie_check(int *ngroups)
+{
+    uint8_t *row = heap_caps_aligned_alloc(16, 160, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    int8_t *a = heap_caps_aligned_alloc(16, 256, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT), *b = heap_caps_aligned_alloc(16, 256, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    int ok = row && a && b, n = 0;
+    uint32_t r = 12345u;
+    for (int m = 1; m <= 7 && ok; m++)
+        for (int zp = 0; zp < 16 && ok; zp++)
+            for (int rep = 0; rep < 8 && ok; rep++) {          // 8 groups per row, each with this (m, zp), random nibbles (the first row of each pair all 0, then all 15)
+                memset(row, 0, 160);
+                for (int g = 0; g < 8; g++) {
+                    for (int i = 0; i < 16; i++) { r = r * 1664525u + 1013904223u; row[g * 16 + i] = rep == 0 ? 0x00 : rep == 1 ? 0xFF : (uint8_t)(r >> 24); }
+                    row[8 * 16 + g] = (uint8_t)((m << 4) | zp);
+                }
+                itofs_s3_w4_unpack(a, row, 8);
+                w4_unpack_row(row, 256, b);
+                if (memcmp(a, b, 256)) ok = 0;
+                n += 8;
+            }
+    heap_caps_free(row); heap_caps_free(a); heap_caps_free(b);
+    *ngroups = n;
+    return ok;
+}
+
 void s3_kernels_init(void)
 {
     g_tiles_ok = 1;
@@ -354,6 +410,12 @@ void s3_kernels_init(void)
         c->pk = heap_caps_aligned_alloc(16, PACK_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);     // packed weight row (see compute())
     }
     g_dma_ok = g_tiles_ok;
+    {
+        int ng = 0;
+        s3_w4_pie = w4_pie_check(&ng);
+        printf("kernels: int4 unpack %s (PIE kernel %s the C unpack on %d groups, every (m, zp))\n", s3_w4_pie ? "by the PIE kernel" : "by C code",
+               s3_w4_pie ? "reproduces" : "FAILED to reproduce", ng);
+    }
 #ifdef ITOFS_EMU_DMA
     printf("kernels: PIE int8 dot (esp-nn), dual core; staging tiles %s (%d B x 2 per core in internal SRAM); GDMA EMULATED in software (QEMU)\n",
            g_tiles_ok ? "ok" : "UNAVAILABLE", TILE_BYTES);
@@ -386,14 +448,24 @@ int s3_set_wmode(int m)
     return 0;
 }
 
+static void qgemm_common(const int8_t *x, int rows, int ldx, int in, const int8_t *w, int rb, int w4, int out, int32_t *acc);
 void s3_qgemm(const int8_t *x, int rows, int ldx, int in, const int8_t *w, int out, int32_t *acc, void *user)
 {
     (void)user;
+    qgemm_common(x, rows, ldx, in, w, in, 0, out, acc);
+}
+void s3_qgemm4(const int8_t *x, int rows, int ldx, int in, const uint8_t *w4, int rs, int out, int32_t *acc, void *user)
+{
+    (void)user;
+    qgemm_common(x, rows, ldx, in, (const int8_t *)w4, rs, 1, out, acc);
+}
+static void qgemm_common(const int8_t *x, int rows, int ldx, int in, const int8_t *w, int rb, int w4, int out, int32_t *acc)
+{
     const int64_t t0 = esp_timer_get_time();
     int mode = s3_wmode;
     if (!esp_ptr_external_ram(w)) mode = 0;      // internal RAM or flash-mapped weights: in place
-    job_t j = { x, rows, ldx, in, w, out, acc, 0, out, mode };
-    if (mode >= 2) { const pcall_t pc = { w, in, out, rows }; stream_enter(&pc); }
+    job_t j = { x, rows, ldx, in, w, out, acc, 0, out, mode, rb, w4 };
+    if (mode >= 2) { const pcall_t pc = { w, in, out, rows, rb }; stream_enter(&pc); }
 #ifdef ITOFS_ICPROF
     const uint32_t ic0 = esp_cpu_get_cycle_count();
 #endif
@@ -403,7 +475,7 @@ void s3_qgemm(const int8_t *x, int rows, int ldx, int in, const int8_t *w, int o
         if (mode >= 2) stream_pop(1);              // core 1 had no part in this call
 #ifdef ITOFS_ICPROF
         s3_ic.single += esp_cpu_get_cycle_count() - ic0; s3_ic.nsingle++;
-        tr_rec(0, ic0, esp_cpu_get_cycle_count() - ic0, 0, 0, (uint32_t)in * out, rows, in, out);
+        tr_rec(0, ic0, esp_cpu_get_cycle_count() - ic0, 0, 0, (uint32_t)rb * out, rows, in, out);
 #endif
     }
 #ifdef ITOFS_ICPROF
@@ -419,7 +491,7 @@ void s3_qgemm(const int8_t *x, int rows, int ldx, int in, const int8_t *w, int o
         const uint32_t h0 = esp_cpu_get_cycle_count() - a, h1 = s_h1;
         s3_ic.h0 += h0; s3_ic.h1 += h1; s3_ic.hmax += h0 > h1 ? h0 : h1; s3_ic.ndual++;
         s3_ic.dual_total += esp_cpu_get_cycle_count() - ic0;
-        tr_rec(1, ic0, h0, h1, esp_cpu_get_cycle_count() - ic0 - h0 - h1, (uint32_t)in * out, rows, in, out);
+        tr_rec(1, ic0, h0, h1, esp_cpu_get_cycle_count() - ic0 - h0 - h1, (uint32_t)rb * out, rows, in, out);
     }
 #endif
     else {
@@ -433,7 +505,7 @@ void s3_qgemm(const int8_t *x, int rows, int ldx, int in, const int8_t *w, int o
     }
     s3_stats.us += esp_timer_get_time() - t0;
     s3_stats.macs += (double)rows * in * out;
-    s3_stats.wbytes += (double)in * out;
+    s3_stats.wbytes += (double)rb * out;
     s3_stats.calls++;
 }
 

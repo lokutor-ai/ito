@@ -1,0 +1,14 @@
+  dec.embed.weight                   K7 out192 in102: C int4 GEMM == int64 reference
+  dec.harm_proj.weight               K1 out192 in1202: C int4 GEMM == int64 reference
+  dec.blocks.0.pw1.weight            K1 out576 in192: C int4 GEMM == int64 reference
+  dec.blocks.0.pw2.weight            K1 out192 in576: C int4 GEMM == int64 reference
+  dec.blocks.1.pw1.weight            K1 out576 in192: C int4 GEMM == int64 reference
+  dec.blocks.1.pw2.weight            K1 out192 in576: C int4 GEMM == int64 reference
+  dec.blocks.2.pw1.weight            K1 out576 in192: C int4 GEMM == int64 reference
+  dec.blocks.2.pw2.weight            K1 out192 in576: C int4 GEMM == int64 reference
+  dec.blocks.3.pw1.weight            K1 out576 in192: C int4 GEMM == int64 reference
+  dec.blocks.3.pw2.weight            K1 out192 in576: C int4 GEMM == int64 reference
+GEMM check: PASS (10 int4 tensors)
+D192_4i4.bin -> <tmp>/eq8.bin: 10 int4 tensors unpacked, 3569984 bytes
+audio check: 4 sentences x 8/16-bit activations: int4 blob vs int8-equivalent blob BIT-IDENTICAL
+int4 check: PASS

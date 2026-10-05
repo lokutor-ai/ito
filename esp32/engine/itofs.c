@@ -413,6 +413,7 @@ typedef struct {
     const uint8_t *b; size_t size;
     const char *cfg; uint32_t cfg_len;
     uint32_t n; const uint8_t *table;
+    uint32_t version;
 } blob_t;
 
 static uint32_t rd32(const uint8_t *p) { return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24); }
@@ -432,7 +433,7 @@ static int find(const blob_t *B, const char *name, tent_t *t)
         tent_at(B, i, t);
         if (strcmp(t->name, name) == 0) {
             if ((size_t)t->off + t->nbytes > B->size) return E_BLOB;
-            if ((t->dtype == 1 || t->dtype == 3) && (size_t)t->soff + 4 * (size_t)t->shape[1] > B->size) return E_BLOB;
+            if ((t->dtype == 1 || t->dtype == 3 || t->dtype == 4) && (size_t)t->soff + 4 * (size_t)t->shape[1] > B->size) return E_BLOB;
             return E_OK;
         }
     }
@@ -455,7 +456,8 @@ static int cfg_int(const blob_t *B, const char *key, int *v)
 static int blob_open(blob_t *B, const void *blob, size_t size)
 {
     B->b = (const uint8_t *)blob; B->size = size;
-    if (size < 16 || rd32(B->b) != ITF_MAGIC || rd32(B->b + 4) != 1) return E_BLOB;
+    if (size < 16 || rd32(B->b) != ITF_MAGIC || (rd32(B->b + 4) != 1 && rd32(B->b + 4) != 2)) return E_BLOB;
+    B->version = rd32(B->b + 4);
     B->cfg_len = rd32(B->b + 8);
     B->cfg = (const char *)(B->b + 12);
     if (16 + (size_t)B->cfg_len > size) return E_BLOB;
@@ -478,7 +480,7 @@ int itofs_blob_find(const void *blob, size_t size, const char *name, const void 
 
 static int g_err;
 static char g_err_name[96];
-static long g_n8, g_n16, g_n32;
+static long g_n8, g_n16, g_n32, g_n4;
 
 static void set_err(int e, const char *name)
 {
@@ -500,13 +502,25 @@ static void getq_named(const blob_t *B, itofs_qlin_t *q, const char *wname, cons
     tent_t t;
     int e = find(B, wname, &t);
     memset(q, 0, sizeof *q);
+    if (!e && t.dtype == 4) {            // int4 groups (format version 2)
+        if (B->version < 2 || t.ndim != 3 || (int)t.shape[0] != K || (int)t.shape[1] != out || (int)t.shape[2] != in ||
+            t.nbytes != (uint32_t)K * out * (uint32_t)itofs_w4_row_bytes(in) || (t.off & 15)) e = E_SHAPE;
+        if (e) { set_err(e, wname); return; }
+        q->w = (const int8_t *)(B->b + t.off);
+        q->sw = (const float *)(B->b + t.soff);
+        q->K = K; q->out = out; q->in = in; q->w4 = 1; q->rb = itofs_w4_row_bytes(in);
+        g_n4 += (long)K * out * in;
+        g_n32 += out;
+        if (bname) q->b = getf(B, bname, out);
+        return;
+    }
     if (!e && ((t.dtype != 1 && t.dtype != 3) || t.ndim != 3 || (int)t.shape[0] != K || (int)t.shape[1] != out || (int)t.shape[2] != in ||
                t.nbytes != (uint32_t)K * out * in * (t.dtype == 3 ? 2u : 1u))) e = E_SHAPE;
     if (e) { set_err(e, wname); return; }
     q->w = (const int8_t *)(B->b + t.off);
     q->w_lo = t.dtype == 3 ? q->w + (size_t)K * out * in : NULL;   // int16: [hi plane][lo plane]
     q->sw = (const float *)(B->b + t.soff);
-    q->K = K; q->out = out; q->in = in;
+    q->K = K; q->out = out; q->in = in; q->rb = in;
     q->act16 = (t.dtype == 1 && (t.reserved & 1u)) ? 1 : 0;
     if (t.dtype == 3) g_n16 += t.nbytes / 2; else g_n8 += t.nbytes;
     g_n32 += out;
@@ -532,7 +546,7 @@ static void get_convln(const blob_t *B, itofs_convln_t *L, const char *prefix, i
         tent_t t;
         char nb[96];
         snprintf(nm, sizeof nm, "%s.film.weight", prefix); snprintf(nb, sizeof nb, "%s.film.bias", prefix);
-        if (!find(B, nm, &t) && (t.dtype == 1 || t.dtype == 3)) { getq_named(B, &L->film_q, nm, nb, 1, 2 * dim, sdim); return; }
+        if (!find(B, nm, &t) && (t.dtype == 1 || t.dtype == 3 || t.dtype == 4)) { getq_named(B, &L->film_q, nm, nb, 1, 2 * dim, sdim); return; }
         L->film_w = getf(B, nm, (long)2 * dim * sdim);
         L->film_b = getf(B, nb, 2 * dim);
     }
@@ -582,7 +596,7 @@ int itofs_model_init(itofs_model_t *m, const void *blob, size_t size)
         m->dec_rpad > m->embed_kernel - 1 || m->n_harm < 1 || m->n_styles < 1)
         return E_CONFIG;
 
-    g_err = 0; g_n8 = 0; g_n16 = 0; g_n32 = 0; g_err_name[0] = 0;
+    g_err = 0; g_n8 = 0; g_n16 = 0; g_n32 = 0; g_n4 = 0; g_err_name[0] = 0;
     char nm[96], nm2[96];
     const int D = m->text_dim, S = m->style_dim, PD = m->pros_dim, DD = m->dec_dim, H = m->rnn_hidden;
     m->stats = getf(&B, "stats", 4);
@@ -614,7 +628,7 @@ int itofs_model_init(itofs_model_t *m, const void *blob, size_t size)
     if (!m->style_table) {
         tent_t tt;
         if (!m->has_sp || !find(&B, "style_bank", &tt)) m->style_bank = getf(&B, "style_bank", (long)m->n_styles * m->style_in);
-        if (!find(&B, "style_proj.weight", &tt) && (tt.dtype == 1 || tt.dtype == 3))
+        if (!find(&B, "style_proj.weight", &tt) && (tt.dtype == 1 || tt.dtype == 3 || tt.dtype == 4))
             getq_named(&B, &m->style_q, "style_proj.weight", "style_proj.bias", 1, S, m->style_in);
         else {
             m->style_w = getf(&B, "style_proj.weight", (long)S * m->style_in);
@@ -667,7 +681,7 @@ int itofs_model_init(itofs_model_t *m, const void *blob, size_t size)
     m->n1_g = getf(&B, "dec.norm1.weight", DD); m->n1_b = getf(&B, "dec.norm1.bias", DD);
     getq(&B, &m->dec_out, "dec.out", 1, m->dec_out_dim, DD);
     m->blob_size = size;
-    m->n_int8_params = g_n8; m->n_int16_params = g_n16; m->n_f32_params = g_n32;
+    m->n_int8_params = g_n8; m->n_int16_params = g_n16; m->n_f32_params = g_n32; m->n_int4_params = g_n4; m->format = (int)B.version;
     if (g_err) { fprintf(stderr, "itofs_model_init: %s: %s\n", itofs_strerror(g_err), g_err_name); return g_err; }
     return E_OK;
 }
@@ -708,6 +722,45 @@ void itofs_qgemm_ref(const int8_t *x, int rows, int ldx, int in, const int8_t *w
             const int8_t *x0 = x + (size_t)r * ldx;
             int32_t a = 0;
             for (int i = 0; i < in; i++) a += (int32_t)x0[i] * w0[i];
+            acc[(size_t)r * out + o] = a;
+        }
+    }
+}
+
+// ---- int4 rows ---------------------------------------------------------------------------------------------------------
+// Unpack with 32-bit lane arithmetic (no multiplies per byte): a group's low nibbles / high nibbles, four weights per word, are
+// q * m + (128 - zp * m) in every byte (always in 23..233: no carry between bytes), and x ^ 0x80 turns the biased byte into the
+// two's-complement w8 = q * m - zp * m. Exact for every (m, zp) the format allows.
+void itofs_w4_unpack_row(const uint8_t *row, int in, int8_t *dst)
+{
+    const int ng = (in + 31) >> 5;
+    const uint8_t *prm = row + ng * 16;
+    for (int g = 0; g < ng; g++) {
+        const uint32_t m = prm[g] >> 4, zp = prm[g] & 15u;
+        const uint32_t C = (128u - zp * m) * 0x01010101u;
+        const uint8_t *nb = row + g * 16;
+        int8_t *d = dst + g * 32;
+        for (int i = 0; i < 16; i += 4) {
+            uint32_t w = (uint32_t)nb[i] | ((uint32_t)nb[i + 1] << 8) | ((uint32_t)nb[i + 2] << 16) | ((uint32_t)nb[i + 3] << 24);
+            const uint32_t lo = (((w & 0x0F0F0F0Fu) * m) + C) ^ 0x80808080u, hi = ((((w >> 4) & 0x0F0F0F0Fu) * m) + C) ^ 0x80808080u;
+            memcpy(d + i, &lo, 4);           // (little-endian byte order is assumed by the blob format, as for the f32 tensors)
+            memcpy(d + 16 + i, &hi, 4);
+        }
+    }
+}
+
+#define W4_MAXIN 1536
+void itofs_qgemm4_ref(const int8_t *x, int rows, int ldx, int in, const uint8_t *w4, int rs, int out, int32_t *acc, void *user)
+{
+    (void)user;
+    int8_t row[W4_MAXIN];
+    if (in > W4_MAXIN) return;
+    for (int o = 0; o < out; o++) {
+        itofs_w4_unpack_row(w4 + (size_t)o * rs, in, row);
+        for (int r = 0; r < rows; r++) {
+            const int8_t *xr = x + (size_t)r * ldx;
+            int32_t a = 0;
+            for (int i = 0; i < in; i++) a += (int32_t)xr[i] * row[i];
             acc[(size_t)r * out + o] = a;
         }
     }
@@ -1019,6 +1072,7 @@ int itofs_init(itofs_ctx_t *c, const itofs_model_t *m, const itofs_limits_t *lim
     memset(c, 0, sizeof *c);
     c->m = m; c->lim = *lim;
     c->qgemm = itofs_qgemm_ref;
+    c->qgemm4 = itofs_qgemm4_ref;
     c->act_bits = lim->act_bits ? lim->act_bits : 8;
     c->act_planes = c->act_bits == 16 ? 2 : 1;
     uintptr_t ha = ((uintptr_t)hot + 15) & ~(uintptr_t)15, ba = ((uintptr_t)bulk + 15) & ~(uintptr_t)15;
@@ -1225,7 +1279,7 @@ static inline void qlin_call(const itofs_qlin_t *L, int tile, int ci, const int8
 {
     const int WP = L->w_lo ? 2 : 1, K = L->K, out = L->out;
     const int p = ci % WP, k = (ci / WP) % K, o0 = (ci / (WP * K)) * tile;
-    *w = (p ? L->w_lo : L->w) + ((size_t)k * out + o0) * L->in;
+    *w = (p ? L->w_lo : L->w) + ((size_t)k * out + o0) * L->rb;
     *ot = imin(tile, out - o0);
 }
 static inline int qP_(const itofs_ctx_t *c, const itofs_qlin_t *L) { return (L->w_lo || L->act16) ? 2 : c->act_planes; }
@@ -1234,11 +1288,11 @@ static inline int qlin_ncalls(const itofs_qlin_t *L, int tile) { return ((L->out
 static void qlin_hint(itofs_ctx_t *c, const itofs_qlin_t *L, int tile, int ci, int n)
 {
     const int8_t *w; int ot;
-    if (ci < qlin_ncalls(L, tile)) { qlin_call(L, tile, ci, &w, &ot); c->qnext(w, L->in, ot, n * qP_(c, L), c->qgemm_user); }
+    if (ci < qlin_ncalls(L, tile)) { qlin_call(L, tile, ci, &w, &ot); c->qnext(w, L->in, ot, n * qP_(c, L), L->rb, c->qgemm_user); }
     else if (c->pf_L && c->pf_n > 0) {
         const itofs_qlin_t *N = c->pf_L;
         qlin_call(N, qlin_tile(c, N, c->pf_n), 0, &w, &ot);
-        c->qnext(w, N->in, ot, c->pf_n * qP_(c, N), c->qgemm_user);
+        c->qnext(w, N->in, ot, c->pf_n * qP_(c, N), N->rb, c->qgemm_user);
     }
 }
 
@@ -1263,10 +1317,11 @@ static void qlin_run_(itofs_ctx_t *c, const itofs_qlin_t *L, const float *X, int
         int32_t *a0 = c->s_acc, *a1 = c->s_acc + (size_t)n * P * ot;
         for (int k = 0; k < K; k++) {
             const int8_t *xq = c->s_q8 + (size_t)k * P * ldq;
-            const size_t woff = ((size_t)k * out + o0) * in;
+            const size_t woff = ((size_t)k * out + o0) * L->rb;
             PROF_T(pg0);
             if (c->qnext) qlin_hint(c, L, tile, ci + 1, n);        // the call after this one (WP == 2: the low plane)
-            c->qgemm(xq, n * P, ldq, in, L->w + woff, ot, a0, c->qgemm_user);
+            if (L->w4) c->qgemm4(xq, n * P, ldq, in, (const uint8_t *)L->w + woff, L->rb, ot, a0, c->qgemm_user);
+            else c->qgemm(xq, n * P, ldq, in, L->w + woff, ot, a0, c->qgemm_user);
             if (WP == 2) {
                 if (c->qnext) qlin_hint(c, L, tile, ci + 2, n);
                 c->qgemm(xq, n * P, ldq, in, L->w_lo + woff, ot, a1, c->qgemm_user);

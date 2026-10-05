@@ -635,6 +635,8 @@ static void synth_task(void *arg)
         } else if (s_req_tmp.kind == 8) {
             s_first = s_req_tmp.n;
             printf("OK first chunk %d frames%s\n", s_first, s_first >= s_chunk_frames || s_first <= 0 ? " (= a full chunk)" : "");
+        } else if (s_req_tmp.kind == 12) {
+            ;
         } else if (s_req_tmp.kind == 6) {
             if (set_wmode(s_req_tmp.n)) printf("ERROR weight staging mode %d unavailable\n", s_req_tmp.n);
             else printf("OK weight staging %s\n", s3_wmode_name(s3_wmode));
@@ -696,6 +698,12 @@ static void handle_line(char *line)
         s_in_req.kind = 7; s_in_req.n = atoi(line + 6);     // "icprof q" would be 0; "icprof 1" = quick (schedule 0 only: 1 core + 2 cores serialised)
         xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
 #endif
+    } else if (!strncmp(line, "unpack", 6)) {       // unpack pie | c: int4 row unpack by the PIE kernel or the C code (same results; for measurement)
+        const char *a = line + 6;
+        while (*a == ' ') a++;
+        if (!strncmp(a, "c", 1)) { s3_w4_pie = 0; printf("OK int4 unpack: C code\n"); }
+        else { s3_w4_pie = 1; printf("OK int4 unpack: PIE kernel (unchecked if the boot check failed!)\n"); }
+        s_in_req.kind = 12; xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
     } else if (!strncmp(line, "first", 5)) {
         s_in_req.kind = 8; s_in_req.n = atoi(line + 5);
         xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
@@ -830,9 +838,9 @@ void app_main(void)
     s_chunk_frames = STEADY_FRAMES;
     s_chunk_samples = s_chunk_frames * s_hop;
     s_style = demo_style[0];   // replaced by the first blob demo's style once the demos are loaded
-    printf("model: arch %d (%s), %ld int8 + %ld int16 + %ld f32 params, text %d, GRU %d %s, prosody %d, mel head %d x%d -> %d, "
+    printf("model: arch %d (%s), %ld int8/int4 + %ld int16 + %ld f32 params, text %d, GRU %d %s, prosody %d, mel head %d x%d -> %d, "
            "decoder %d/%d x%d, n_fft %d, hop %d (%d fps), %d Hz, %d styles%s\n", s_model.arch, s_model.arch == 3 ? "ItoFS v3: mel front + mel vocoder" : "ItoFS v2",
-           s_model.n_int8_params, s_model.n_int16_params, s_model.n_f32_params, s_model.text_dim, s_model.rnn_hidden,
+           s_model.n_int8_params + s_model.n_int4_params, s_model.n_int16_params, s_model.n_f32_params, s_model.text_dim, s_model.rnn_hidden,
            s_model.rnn_bidir ? "bidirectional (whole-sentence text side)" : "forward (incremental text side)", s_model.pros_dim,
            s_model.mel_dim, s_model.mel_layers, s_model.n_mels, s_model.dec_dim, s_model.dec_inter,
            s_model.dec_blocks, s_model.n_fft, s_hop, s_model.fps, s_sr, s_model.n_styles, s_model.style_table ? ", style table" : "");
@@ -869,6 +877,7 @@ void app_main(void)
            (unsigned)bb, s_chunk_frames, s_chunk_samples, s_ctx.act_bits);
     s3_kernels_init();
     s_ctx.qgemm = s3_qgemm;
+    s_ctx.qgemm4 = s3_qgemm4;           // int4-weight layers (blob format 2): unpacked once per output channel into the aligned scratch row, then the same PIE dot
     s_ctx.par = s3_par;              // row-parallel float work on both cores (bit-identical to one core)
 #ifdef ITOFS_ICPROF
     itofs_prof_clock = ic_clock;

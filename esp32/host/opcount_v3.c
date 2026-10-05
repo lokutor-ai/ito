@@ -48,6 +48,12 @@ static void qgemm_count(const int8_t *x, int rows, int ldx, int in, const int8_t
     itofs_qgemm_ref(x, rows, ldx, in, w, out, acc, user);
 }
 
+static void qgemm4_count(const int8_t *x, int rows, int ldx, int in, const uint8_t *w, int rs, int out, int32_t *acc, void *user)
+{
+    g_wbytes += (double)rs * out;
+    itofs_qgemm4_ref(x, rows, ldx, in, w, rs, out, acc, user);
+}
+
 static double sum8(const itofs_ctx_t *c) { double a = 0; for (int g = 0; g < ITOFS_G_N; g++) a += c->macs_exec[g]; return a; }
 static double sumf(const itofs_ctx_t *c) { double a = 0; for (int g = 0; g < ITOFS_G_N; g++) a += c->macs_f32[g]; return a; }
 
@@ -69,7 +75,7 @@ int main(int argc, char **argv)
     size_t hb, bb; itofs_arena_bytes(&m, &lim, &hb, &bb);
     itofs_ctx_t c; void *h = malloc(hb), *b = malloc(bb);
     if (itofs_init(&c, &m, &lim, h, hb, b, bb)) return 1;
-    c.qgemm = qgemm_count;
+    c.qgemm = qgemm_count; c.qgemm4 = qgemm4_count;
     double wb_tot = 0;
     float *pcm = malloc(sizeof(float) * (size_t)chunk * m.hop);
     long long tot[ITOFS_OPC_N] = {0};

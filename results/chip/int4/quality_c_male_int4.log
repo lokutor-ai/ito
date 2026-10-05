@@ -1,0 +1,24 @@
+1) audio quality (golden sentences; 'float' = PyTorch v3 float, 'ref' = engine-numerics reference a8)
+  golden 0:
+    c_engine_a8 vs float PESQ 4.500 (seg 4.516) log-mel 0.1284, vs ref PESQ 4.580 log-mel 0.0554
+    c_engine_a8_floatdur vs float PESQ 4.500 (seg 4.516) log-mel 0.1284
+    c_engine_a16 vs float PESQ 4.521 (seg 4.535) log-mel 0.1141
+    ref vs float PESQ 4.515
+  golden 1:
+    c_engine_a8 vs float PESQ 4.521 (seg 4.523) log-mel 0.1217, vs ref PESQ 4.541 log-mel 0.0499
+    c_engine_a8_floatdur vs float PESQ 4.521 (seg 4.523) log-mel 0.1217
+    c_engine_a16 vs float PESQ 4.533 (seg 4.541) log-mel 0.1086
+    ref vs float PESQ 4.486
+  golden 2:
+    c_engine_a8 vs float PESQ 4.536 (seg 4.513) log-mel 0.1248, vs ref PESQ 4.624 log-mel 0.0521
+    c_engine_a8_floatdur vs float PESQ 4.536 (seg 4.513) log-mel 0.1248
+    c_engine_a16 vs float PESQ 4.570 (seg 4.526) log-mel 0.1159
+    ref vs float PESQ 4.546
+
+2) control: engine reference vs itself with 1e-7 relative noise on h (SNR dB, free-running, same durations)
+  eng   golden 0: pred 104.5 | F0 111.9 | mel 51.7 | src 67.9 | spec 38.0 | audio 27.9
+  eng   golden 1: pred 104.3 | F0 112.0 | mel 55.2 | src 63.4 | spec 38.4 | audio 30.5
+  eng   golden 2: pred 105.0 | F0 110.7 | mel 53.8 | src 49.1 | spec 36.8 | audio 28.7
+  eng16 golden 0: pred 104.5 | F0 111.9 | mel 86.4 | src 67.9 | spec 68.5 | audio 61.6
+  eng16 golden 1: pred 104.3 | F0 112.0 | mel 86.8 | src 63.4 | spec 59.4 | audio 56.6
+  eng16 golden 2: pred 105.0 | F0 110.7 | mel 87.3 | src 49.1 | spec 51.0 | audio 39.9

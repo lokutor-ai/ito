@@ -1,0 +1,9 @@
+PESQ-wb of the int4 sets' audio (C engine, 10 sentences, same text and noise) against the SAME vocoder's int8 audio:
+female 192x5 int4 (main int4 set): int4 blob vs int8-equivalent blob over 10 sentences x act 8/16: BIT-IDENTICAL
+female 192x5 int4 (main int4 set): PESQ-wb of the int4 audio vs the int8 192 audio (C engine, same text and noise), 10 sentences: mean 4.523 min 4.419 per sentence [4.58, 4.56, 4.44, 4.57, 4.43, 4.56, 4.42, 4.57, 4.56, 4.55]
+male 192x5 int4 (main int4 set): int4 blob vs int8-equivalent blob over 10 sentences x act 8/16: BIT-IDENTICAL
+male 192x5 int4 (main int4 set): PESQ-wb of the int4 audio vs the int8 192 audio (C engine, same text and noise), 10 sentences: mean 4.542 min 4.471 per sentence [4.54, 4.56, 4.54, 4.55, 4.5, 4.57, 4.54, 4.56, 4.57, 4.47]
+female 192x4 int4 (light set; vs the 192x4 int8 export): int4 blob vs int8-equivalent blob over 10 sentences x act 8/16: BIT-IDENTICAL
+female 192x4 int4 (light set; vs the 192x4 int8 export): PESQ-wb of the int4 audio vs the int8 192 audio (C engine, same text and noise), 10 sentences: mean 4.475 min 4.010 per sentence [4.53, 4.57, 4.51, 4.57, 4.01, 4.43, 4.55, 4.56, 4.51, 4.51]
+male 192x4 int4 (light set; vs the 192x4 int8 export): int4 blob vs int8-equivalent blob over 10 sentences x act 8/16: BIT-IDENTICAL
+male 192x4 int4 (light set; vs the 192x4 int8 export): PESQ-wb of the int4 audio vs the int8 192 audio (C engine, same text and noise), 10 sentences: mean 4.535 min 4.478 per sentence [4.55, 4.48, 4.54, 4.57, 4.5, 4.56, 4.53, 4.53, 4.54, 4.55]

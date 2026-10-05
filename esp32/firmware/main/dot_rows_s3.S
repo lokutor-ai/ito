@@ -51,3 +51,49 @@ itofs_s3_pack_row:
 .Lpr_end:
     retw.n
     .size   itofs_s3_pack_row, . - itofs_s3_pack_row
+
+// itofs_s3_w4_unpack: one int4 weight row -> int8 (see engine/itofs.h for the format). 18 instructions per group of 32 weights.
+//   a2 dst (16-byte aligned, ng * 32 bytes written), a3 row (16-byte aligned: ng * 16 bytes of nibbles, then ng parameter bytes (m << 4) | zp), a4 ng (>= 1)
+// Per group (all lanes are plain byte lanes):  lo = v & 0x0F,  hi16 = v & 0xF0,  P = broadcast of the parameter byte,
+//   m = ((P & 0xF0) * 1) >> 4,  zp = P & 0x0F,   hi4*m = (hi16 * m) >> 4,   lo4*m = lo * m,   zp*m = zp * m   (unsigned 8-bit multiplies; the SAR shift is applied to the
+//   16-bit product, every result is <= 105 so nothing is truncated),   w8 = q*m - zp*m  (signed saturating subtract; |w8| <= 105, nothing saturates).
+    .align  4
+    .global itofs_s3_w4_unpack
+    .type   itofs_s3_w4_unpack, @function
+itofs_s3_w4_unpack:
+    entry   a1, 32
+    movi    a6, itofs_w4_consts
+    ee.vld.128.ip   q6, a6, 16          // 0x0F
+    ee.vld.128.ip   q7, a6, 16          // 0xF0
+    ee.vld.128.ip   q5, a6, 0           // 0x01
+    slli    a7, a4, 4
+    add     a5, a3, a7                  // parameter bytes
+    loopgtz a4, .Lw4_end
+    ee.vld.128.ip   q0, a3, 16
+    ee.vldbc.8      q3, a5
+    addi    a5, a5, 1
+    ee.andq         q1, q0, q6
+    ee.andq         q2, q0, q7
+    ee.andq         q4, q3, q7
+    ee.andq         q3, q3, q6
+    ssai            4
+    ee.vmul.u8      q4, q4, q5
+    ee.vmul.u8      q2, q2, q4
+    ssai            0
+    ee.vmul.u8      q1, q1, q4
+    ee.vmul.u8      q3, q3, q4
+    ee.vsubs.s8     q1, q1, q3
+    ee.vsubs.s8     q2, q2, q3
+    ee.vst.128.ip   q1, a2, 16
+    ee.vst.128.ip   q2, a2, 16
+.Lw4_end:
+    retw.n
+    .size   itofs_s3_w4_unpack, . - itofs_s3_w4_unpack
+
+    .data
+    .align  16
+    .global itofs_w4_consts
+itofs_w4_consts:
+    .fill   16, 1, 0x0F
+    .fill   16, 1, 0xF0
+    .fill   16, 1, 0x01

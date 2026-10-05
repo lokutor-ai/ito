@@ -46,6 +46,8 @@ typedef struct itofs_qlin_s {  // int8 or int16 conv / linear, tap-major weights
     const float *b;            // [out] or NULL
     int K, out, in;
     int act16;                 // int8-weight layer that always takes 15-bit (two-plane) activations (blob entry flag bit 0)
+    int w4;                    // 1: the weights are int4 groups (blob dtype 4, format version 2): w points at K * out rows of rb bytes (see itofs_w4_*), not int8
+    int rb;                    // bytes per weight row: in (int8 / int16 planes) or itofs_w4_row_bytes(in) (int4)
 } itofs_qlin_t;
 
 typedef struct {               // ConvLN: conv -> LayerNorm -> (FiLM) -> GELU, residual
@@ -100,7 +102,8 @@ typedef struct {
     const float *cond_w, *cond_b, *n0_g, *n0_b, *n1_g, *n1_b;
     itofs_block_t blk[ITOFS_MAX_BLOCKS];
     size_t blob_size;
-    long n_int8_params, n_int16_params, n_f32_params;
+    long n_int8_params, n_int16_params, n_f32_params, n_int4_params;   // n_int4_params: weights stored as int4 groups (not counted in n_int8_params)
+    int format;                // blob format version (1: int8 / int16 / f32, 2: may hold int4 tensors)
 } itofs_model_t;
 
 // Parse a blob (must stay alive, 16-byte aligned). Returns 0 or a negative error.
@@ -117,7 +120,21 @@ void itofs_qgemm_ref(const int8_t *x, int rows, int ldx, int in, const int8_t *w
 // Optional weight-prefetch hint (never changes a result): called with the weights / width / output channels / rows of a GEMM call that
 // WILL follow, before the current one is made, so a kernel with a DMA from slow memory can start loading its first tiles during the
 // float work in between. A hint that does not match the next itofs_qgemm_fn call must be harmless (the kernel drops it).
-typedef void (*itofs_qnext_fn)(const int8_t *w, int in, int out, int rows, void *user);
+typedef void (*itofs_qnext_fn)(const int8_t *w, int in, int out, int rows, int rb, void *user);   // rb: bytes per weight row (in for int8, itofs_w4_row_bytes(in) for int4)
+
+// ---- int4 weights (blob dtype 4, format version 2) ----------------------------------------------------------------------
+// A weight row of `in` values is stored in groups of 32 along the input axis: ng = ceil(in / 32) groups, then
+//   [ng * 16 bytes of nibbles][ng bytes of group parameters, padded to a multiple of 16]            row bytes = itofs_w4_row_bytes(in)
+// group g holds 16 bytes: byte j (0..15) has weight j of the group in its low nibble and weight 16 + j in its high nibble (q = 0..15);
+// its parameter byte is (m << 4) | zp with m = 1..7 and zp = 0..15. The int8 weight is  w8 = (q - zp) * m  (|w8| <= 105), and the layer's
+// per-output-channel float scale is applied exactly as for int8 weights, so an int4 layer is an int8 layer whose weights have this form: the
+// int32 accumulators, the rescale and the result are those of the equivalent int8 blob, bit for bit. Weights past `in` in the last group are 0.
+static inline int itofs_w4_row_bytes(int in) { const int ng = (in + 31) >> 5; return ng * 16 + ((ng + 15) & ~15); }
+// Unpack one row to int8: writes ng * 32 values (the last group's values past `in` included) to dst (4-byte aligned).
+void itofs_w4_unpack_row(const uint8_t *row, int in, int8_t *dst);
+// acc[r][o] = sum_{i<in} x[r][i] * w8[o][i] for int4 rows `w4` (row stride rs bytes); same contract as itofs_qgemm_fn otherwise.
+typedef void (*itofs_qgemm4_fn)(const int8_t *x, int rows, int ldx, int in, const uint8_t *w4, int rs, int out, int32_t *acc, void *user);
+void itofs_qgemm4_ref(const int8_t *x, int rows, int ldx, int in, const uint8_t *w4, int rs, int out, int32_t *acc, void *user);
 
 // Debug taps: called with every frame of an intermediate.
 typedef void (*itofs_tap_fn)(void *user, int what, int t, const float *row, int width);
@@ -153,6 +170,7 @@ typedef struct {
     const itofs_model_t *m;
     itofs_limits_t lim;
     itofs_qgemm_fn qgemm; void *qgemm_user;
+    itofs_qgemm4_fn qgemm4;                        // int4-weight layers (default itofs_qgemm4_ref)
     itofs_qnext_fn qnext;                          // NULL: no hints
     const struct itofs_qlin_s *pf_L; int pf_n;     // hint state: the dense layer (and row count) that follows the qlin_run about to be made
     const struct itofs_qlin_s *nx_L; int nx_n;     // the dense layer (and rows) the next stage run starts with

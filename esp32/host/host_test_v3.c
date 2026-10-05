@@ -76,22 +76,32 @@ static void tap_fn(void *u, int what, int t, const float *row, int w)
 // weight-prefetch hint check: the hints (itofs_qnext_fn) must name exactly the GEMM calls that follow, in order. Models the firmware's
 // kernel: a FIFO of hints (2 deep), the head is consumed by the matching call; a mismatch flushes it. hits = hinted calls that
 // matched, bad = calls that did not match a pending hint, free = calls made with nothing pending (no hint known), dups = repeats
-typedef struct { const int8_t *w; int in, out, rows; } hint_t;
+typedef struct { const int8_t *w; int in, out, rows, rb; } hint_t;
 typedef struct { hint_t q[2]; int n; long hits, bad, freec, dups, over; } hintchk_t;
-static void hint_fn(const int8_t *w, int in, int out, int rows, void *u)
+static void hint_fn(const int8_t *w, int in, int out, int rows, int rb, void *u)
 {
     hintchk_t *h = u;
-    if (h->n && h->q[h->n - 1].w == w && h->q[h->n - 1].in == in && h->q[h->n - 1].out == out && h->q[h->n - 1].rows == rows) { h->dups++; return; }
+    if (h->n && h->q[h->n - 1].w == w && h->q[h->n - 1].in == in && h->q[h->n - 1].out == out && h->q[h->n - 1].rows == rows && h->q[h->n - 1].rb == rb) { h->dups++; return; }
     if (h->n == 2) { h->over++; return; }
-    h->q[h->n].w = w; h->q[h->n].in = in; h->q[h->n].out = out; h->q[h->n].rows = rows; h->n++;
+    h->q[h->n].w = w; h->q[h->n].in = in; h->q[h->n].out = out; h->q[h->n].rows = rows; h->q[h->n].rb = rb; h->n++;
+}
+static int hint_match(hintchk_t *h, const int8_t *w, int in, int out, int rows, int rb)
+{
+    if (h->n == 0) { h->freec++; return 0; }
+    if (h->q[0].w == w && h->q[0].in == in && h->q[0].out == out && h->q[0].rows == rows && h->q[0].rb == rb) { h->hits++; h->q[0] = h->q[1]; h->n--; return 1; }
+    h->bad++; h->n = 0; return 0;
 }
 static void hint_gemm(const int8_t *x, int rows, int ldx, int in, const int8_t *w, int out, int32_t *acc, void *u)
 {
     hintchk_t *h = u;
-    if (h->n == 0) h->freec++;
-    else if (h->q[0].w == w && h->q[0].in == in && h->q[0].out == out && h->q[0].rows == rows) { h->hits++; h->q[0] = h->q[1]; h->n--; }
-    else { h->bad++; h->n = 0; }
+    hint_match(h, w, in, out, rows, in);
     itofs_qgemm_ref(x, rows, ldx, in, w, out, acc, NULL);
+}
+static void hint_gemm4(const int8_t *x, int rows, int ldx, int in, const uint8_t *w, int rs, int out, int32_t *acc, void *u)
+{
+    hintchk_t *h = u;
+    hint_match(h, (const int8_t *)w, in, out, rows, rs);
+    itofs_qgemm4_ref(x, rows, ldx, in, w, rs, out, acc, NULL);
 }
 
 static int g_act = 8;
@@ -198,8 +208,8 @@ int main(int argc, char **argv)
     if (e) { fprintf(stderr, "model init: %s\n", itofs_strerror(e)); return 1; }
     if (m.arch != 3) { fprintf(stderr, "not an arch-3 blob (this test covers arch-3 blobs)\n"); return 2; }
     printf("act_bits %d (int8-weight layers: %s; int16-weight layers: always 15-bit)\n", g_act, g_act == 8 ? "1 int8 plane" : "2 planes");
-    printf("blob %s: %ld bytes, %ld int8 + %ld int16 + %ld f32 params | text %d x%d, GRU %d%s, pros %d x%d, mel head %d x%d -> %d, "
-           "vocoder %d/%d x%d, n_fft %d hop %d sr %d (%d fps), %d styles\n", argv[1], bs, m.n_int8_params, m.n_int16_params,
+    printf("blob %s: %ld bytes, %ld int8 + %ld int4 + %ld int16 + %ld f32 params | text %d x%d, GRU %d%s, pros %d x%d, mel head %d x%d -> %d, "
+           "vocoder %d/%d x%d, n_fft %d hop %d sr %d (%d fps), %d styles\n", argv[1], bs, m.n_int8_params, m.n_int4_params, m.n_int16_params,
            m.n_f32_params, m.text_dim, m.text_layers, m.rnn_hidden, m.rnn_bidir ? " bidirectional" : " forward", m.pros_dim,
            m.pros_layers, m.mel_dim, m.mel_layers, m.n_mels, m.dec_dim, m.dec_inter, m.dec_blocks, m.n_fft, m.hop, m.sr, m.fps, m.n_styles);
     const int chunk = 2400 / m.hop > 0 ? 2400 / m.hop : 1;
@@ -331,7 +341,7 @@ int main(int argc, char **argv)
             for (int ci = 0; ci < 3; ci++) {
                 itofs_ctx_t *ch = make_ctx(&m, 400, chunks_h[ci]);
                 hintchk_t hk; memset(&hk, 0, sizeof hk);
-                ch->qgemm = hint_gemm; ch->qgemm_user = &hk; ch->qnext = hint_fn;
+                ch->qgemm = hint_gemm; ch->qgemm4 = hint_gemm4; ch->qgemm_user = &hk; ch->qnext = hint_fn;
                 ch->par = host_par;
                 g_first = 2;
                 long nsx = synth(ch, tok, n, style, 12345u, y2, cap);

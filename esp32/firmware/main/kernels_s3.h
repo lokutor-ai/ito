@@ -5,12 +5,14 @@
 #include <stddef.h>
 #include "itofs.h"
 void s3_kernels_init(void);
+void s3_qgemm4(const int8_t *x, int rows, int ldx, int in, const uint8_t *w4, int rs, int out, int32_t *acc, void *user);   // int4-weight rows (see itofs.h)
 void s3_qgemm(const int8_t *x, int rows, int ldx, int in, const int8_t *w, int out, int32_t *acc, void *user);
 extern volatile int s3_dual_enabled;
+extern volatile int s3_w4_pie;            // 1: PIE unpack of int4 rows (verified against the C unpack at boot), 0: C unpack; the `unpack` command switches it
 extern volatile int s3_wmode;             // 0 direct (through the cache), 1 copy (memcpy tiles), 2 gdma (double-buffered tiles), 3 gdma + cross-call prefetch
 extern volatile int s3_dma_errors;
 int s3_set_wmode(int m);                  // 0 or -1 if the mode is unavailable
-void s3_prefetch(const int8_t *w, int in, int out, int rows, void *user);   // itofs_qnext_fn: only acts in mode 3
+void s3_prefetch(const int8_t *w, int in, int out, int rows, int rb, void *user);   // itofs_qnext_fn: only acts in mode 3
 void s3_stream_reset(void);
 int s3_dma_ok(void);
 const char *s3_wmode_name(int m);

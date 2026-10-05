@@ -1,0 +1,71 @@
+act_bits 8 (int8-weight layers: 1 int8 plane; int16-weight layers: always 15-bit)
+blob export/D192_5i4/itofs_weights.bin: 3193152 bytes, 891312 int8 + 1473792 int4 + 543936 int16 + 84134 f32 params | text 128 x3, GRU 96 forward, pros 96 x3, mel head 176 x4 -> 100, vocoder 192/576 x5, n_fft 1200 hop 300 sr 24000 (80 fps), 1 styles
+arenas (max_tokens 400, chunk 8 frames): hot 158952 bytes, bulk 785824 bytes
+
+=== golden 0: 84 tokens, style 0, T = 447 frames (5.59 s)
+A free-running vs reference a8: durations EXACT (0 differ) | h 89.7 | style s 0.0 | logd 98.0 | pred 89.9 | F0 95.4 | mel 45.3 | src 29.9 | harm STFT 29.9 | spec 25.4 | audio 25.8 dB
+  host speed (1 thread, plain C GEMM; not a chip number): text side 0.0 ms, total 64.0 ms for 5.59 s audio
+B duration head given ref h: logd 98.0 dB, durations EXACT
+C prosody given ref h + durations: pred 103.4 dB | F0 110.0 dB
+C mel head given ref h + durations + pred: mel 66.3 dB | F0 137.0 dB
+C vocoder given ref mel + pred: src 78.9 | harm STFT 78.9 | spec 41.4 | audio 28.9 dB
+C vocoder given ref mel + pred + F0: src 116.7 | spec 46.1 | audio 37.3 dB
+D streaming vs whole (golden noise): whole 134100 samples; 1:identical 2:identical 3:identical 5:identical 8:identical 16:identical 24:identical
+D streaming vs whole (seeded noise, seed 12345): whole 134100 samples; 1:identical 2:identical 3:identical 5:identical 8:identical 16:identical 24:identical
+H prefetch hints, chunk 2 (2-frame first): 20983 GEMM calls hinted, 0 unhinted, 0 mismatched, 4841 repeated hints, 0 dropped; audio identical
+H prefetch hints, chunk 8 (2-frame first): 5397 GEMM calls hinted, 0 unhinted, 0 mismatched, 1231 repeated hints, 0 dropped; audio identical
+H prefetch hints, chunk 24 (2-frame first): 2781 GEMM calls hinted, 0 unhinted, 0 mismatched, 469 repeated hints, 0 dropped; audio identical
+G shipped start-up schedule (10,11,12,14,18,24 frames, 8-token text steps): audio identical; text step 1:identical text step 3:identical text step 8:identical text step 13:identical text step 24:identical text step 40:identical
+F first chunk (8 frames): text side 0.0 M int8 + 0.00 M f32 MACs (84 tokens) | frame pipeline fill 52.6 M int8 + 0.09 M f32 MACs | total 52.6 M int8 + 0.09 M f32
+G incremental vs whole-sentence text side: h/logd/durations bit-identical | PCM bit-identical | before the first chunk: 69.7 M int8 + 0.37 M f32 MACs (8 of 84 tokens final)
+E with the float durations: C vs reference audio 25.8 dB (wav written)
+
+=== golden 1: 125 tokens, style 0, T = 659 frames (8.24 s)
+A free-running vs reference a8: durations EXACT (0 differ) | h 89.9 | style s 0.0 | logd 95.9 | pred 89.7 | F0 95.9 | mel 44.2 | src 24.6 | harm STFT 24.6 | spec 25.2 | audio 18.7 dB
+  host speed (1 thread, plain C GEMM; not a chip number): text side 0.0 ms, total 97.3 ms for 8.24 s audio
+B duration head given ref h: logd 95.9 dB, durations EXACT
+C prosody given ref h + durations: pred 103.4 dB | F0 109.4 dB
+C mel head given ref h + durations + pred: mel 65.2 dB | F0 137.0 dB
+C vocoder given ref mel + pred: src 80.7 | harm STFT 80.7 | spec 39.0 | audio 27.4 dB
+C vocoder given ref mel + pred + F0: src 116.1 | spec 49.0 | audio 38.0 dB
+D streaming vs whole (golden noise): whole 197700 samples; 1:identical 2:identical 3:identical 5:identical 8:identical 16:identical 24:identical
+D streaming vs whole (seeded noise, seed 12345): whole 197700 samples; 1:identical 2:identical 3:identical 5:identical 8:identical 16:identical 24:identical
+H prefetch hints, chunk 2 (2-frame first): 31207 GEMM calls hinted, 0 unhinted, 0 mismatched, 7173 repeated hints, 0 dropped; audio identical
+H prefetch hints, chunk 8 (2-frame first): 7951 GEMM calls hinted, 0 unhinted, 0 mismatched, 1815 repeated hints, 0 dropped; audio identical
+H prefetch hints, chunk 24 (2-frame first): 4041 GEMM calls hinted, 0 unhinted, 0 mismatched, 682 repeated hints, 0 dropped; audio identical
+G shipped start-up schedule (10,11,12,14,18,24 frames, 8-token text steps): audio identical; text step 1:identical text step 3:identical text step 8:identical text step 13:identical text step 24:identical text step 40:identical
+F first chunk (8 frames): text side 0.0 M int8 + 0.00 M f32 MACs (125 tokens) | frame pipeline fill 52.6 M int8 + 0.09 M f32 MACs | total 52.6 M int8 + 0.09 M f32
+G incremental vs whole-sentence text side: h/logd/durations bit-identical | PCM bit-identical | before the first chunk: 69.7 M int8 + 0.37 M f32 MACs (8 of 125 tokens final)
+E with the float durations: C vs reference audio 18.7 dB (wav written)
+
+=== golden 2: 96 tokens, style 0, T = 496 frames (6.20 s)
+A free-running vs reference a8: durations EXACT (0 differ) | h 90.9 | style s 0.0 | logd 98.0 | pred 90.4 | F0 95.1 | mel 45.1 | src 24.9 | harm STFT 24.9 | spec 22.0 | audio 19.4 dB
+  host speed (1 thread, plain C GEMM; not a chip number): text side 0.0 ms, total 73.7 ms for 6.20 s audio
+B duration head given ref h: logd 98.0 dB, durations EXACT
+C prosody given ref h + durations: pred 100.9 dB | F0 107.3 dB
+C mel head given ref h + durations + pred: mel 57.0 dB | F0 136.7 dB
+C vocoder given ref mel + pred: src 82.0 | harm STFT 82.0 | spec 41.3 | audio 30.9 dB
+C vocoder given ref mel + pred + F0: src 116.8 | spec 46.3 | audio 36.3 dB
+D streaming vs whole (golden noise): whole 148800 samples; 1:identical 2:identical 3:identical 5:identical 8:identical 16:identical 24:identical
+D streaming vs whole (seeded noise, seed 12345): whole 148800 samples; 1:identical 2:identical 3:identical 5:identical 8:identical 16:identical 24:identical
+H prefetch hints, chunk 2 (2-frame first): 23430 GEMM calls hinted, 0 unhinted, 0 mismatched, 5385 repeated hints, 0 dropped; audio identical
+H prefetch hints, chunk 8 (2-frame first): 6006 GEMM calls hinted, 0 unhinted, 0 mismatched, 1367 repeated hints, 0 dropped; audio identical
+H prefetch hints, chunk 24 (2-frame first): 3092 GEMM calls hinted, 0 unhinted, 0 mismatched, 518 repeated hints, 0 dropped; audio identical
+G shipped start-up schedule (10,11,12,14,18,24 frames, 8-token text steps): audio identical; text step 1:identical text step 3:identical text step 8:identical text step 13:identical text step 24:identical text step 40:identical
+F first chunk (8 frames): text side 0.0 M int8 + 0.00 M f32 MACs (96 tokens) | frame pipeline fill 52.6 M int8 + 0.09 M f32 MACs | total 52.6 M int8 + 0.09 M f32
+G incremental vs whole-sentence text side: h/logd/durations bit-identical | PCM bit-identical | before the first chunk: 69.7 M int8 + 0.37 M f32 MACs (8 of 96 tokens final)
+E with the float durations: C vs reference audio 19.4 dB (wav written)
+
+MACs per second of audio (C graph, 20.03 s over the golden sentences). logical = weights x rows; executed = int8 x int8
+MACs the GEMM kernel runs (x activation planes x weight planes); f32 = float multiply-adds outside the GEMMs:
+  text side                 0.393 M logical,    1.573 M executed int8,  0.028 M f32 per token
+  prosody net               12.06 M logical,    48.23 M executed int8,   0.02 M f32 per second
+  harmonic STFT proj        18.46 M logical,    18.46 M executed int8,   0.00 M f32 per second
+  vocoder embed             10.97 M logical,    10.97 M executed int8,   0.00 M f32 per second
+  ConvNeXt blocks           88.47 M logical,    88.47 M executed int8,   0.54 M f32 per second
+  head (out linear)         18.46 M logical,    18.46 M executed int8,   0.00 M f32 per second
+  mel head                  52.84 M logical,    52.84 M executed int8,   0.00 M f32 per second
+  TOTAL                    201.27 M logical,   237.44 M executed int8,   0.56 M f32 per second (frame rate, excluding the text side)
+
+worst SNR: free-running spec 22.0 dB | mel head given ref pred 57.0 dB | vocoder spec given ref mel + F0 46.1 dB
+PASS (0 failures: durations / streaming bit-exactness)
