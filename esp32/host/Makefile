@@ -5,7 +5,7 @@
 #   make test VOICE=male   the same for the male voice (VOICE=g also works): ito_male_esp32s3.bin against golden/g/
 #   make test_sched        the boot calibration / start-delay policy (engine/itofs_sched.c) against a model of the speaker, with simulated timings (no weights needed)
 CC ?= cc
-CFLAGS = -std=c99 -O2 -ffp-contract=off -Wall -Wno-unused-function -I../engine
+CFLAGS = -std=c99 -D_DEFAULT_SOURCE -O2 -ffp-contract=off -Wall -Wno-unused-function -I../engine
 ENGINE = ../engine/itofs.c ../engine/itofs.h
 VOICE ?= female
 ifeq ($(filter g G m M male,$(VOICE)),)
@@ -23,7 +23,7 @@ ito_cli: ito_cli.c $(ENGINE)
 host_test_v3: host_test_v3.c $(ENGINE)
 	$(CC) $(CFLAGS) -o $@ host_test_v3.c ../engine/itofs.c -lm
 host_test_v3_asan: host_test_v3.c $(ENGINE)
-	$(CC) -std=c99 -O1 -g -fsanitize=address,undefined -ffp-contract=off -I../engine -o $@ host_test_v3.c ../engine/itofs.c -lm
+	$(CC) -std=c99 -D_DEFAULT_SOURCE -O1 -g -fsanitize=address,undefined -ffp-contract=off -I../engine -o $@ host_test_v3.c ../engine/itofs.c -lm
 gen_selftest: gen_selftest.c $(ENGINE)
 	$(CC) $(CFLAGS) -o $@ gen_selftest.c ../engine/itofs.c -lm
 opcount_v3: opcount_v3.c $(ENGINE)
