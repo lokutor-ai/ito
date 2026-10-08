@@ -10,6 +10,8 @@ before it does not grow with the sentence length. The voice is distilled from a 
 [Lokutor](https://lokutor.com), the makers of [Oído](https://github.com/lokutor-ai/oido) (speech recognition on the
 same chip).
 
+> **First run on a physical board (2026-10-08):** found on first run on a physical board: the GDMA self-test crashed (a heap overflow in the self-test buffer); fixed in fedbd26. QEMU cannot exercise the real GDMA path. The numbers in this box are still estimates until the measured figures are reviewed and published.
+>
 > **Status (5 October 2026).** The on-chip engine is verified on a laptop and in Espressif's QEMU emulator: the
 > firmware's audio is bit-identical to the host build of the engine, and every sample in [`samples/`](samples) is that
 > engine's exact output. **Nothing has run on a physical board yet.** Time to first audio and real-time factor are

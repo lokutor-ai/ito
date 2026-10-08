@@ -4,6 +4,8 @@ The whole text-to-speech chain runs on an **ESP32-S3-DevKitC-1 N16R8** (16 MB fl
 encoder, duration head, prosody net, mel head, harmonic F0 source, ConvNeXt vocoder and iSTFT. Phonemisation runs on
 the host that sends the text (`tools/say.py`). The board receives token ids and plays 24 kHz audio over I2S.
 
+> **First run on a physical board (2026-10-08):** found on first run on a physical board: the GDMA self-test crashed (a heap overflow in the self-test buffer); fixed in fedbd26. QEMU cannot exercise the real GDMA path. The numbers in this box are still estimates until the measured figures are reviewed and published.
+>
 > **Status (5 October 2026).** The engine and firmware are verified on the host and in Espressif's QEMU: the firmware's
 > PCM is bit-identical to the host build, for all three weight sets of both voices. **Nothing has run on silicon yet.** Every timing here is an **estimate**
 > from exact QEMU instruction counts and an assumed CPI and PSRAM bandwidth. **Real-time playback is estimated at 0.63-0.66 centrally (0.65 for long sentences) and 0.97-0.99 pessimistically with the main set, but not established** (§4).
