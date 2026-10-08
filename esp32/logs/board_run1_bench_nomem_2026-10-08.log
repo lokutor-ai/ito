@@ -1,0 +1,82 @@
+I (102) octal_psram: VCC          : 0x01 (3V)
+I (106) octal_psram: SRF          : 0x01 (Fast Refresh)
+I (111) octal_psram: BurstType    : 0x01 (Hybrid Wrap)
+I (116) octal_psram: BurstLen     : 0x01 (32 Byte)
+I (120) octal_psram: Readlatency  : 0x02 (10 cycles@Fixed)
+I (126) octal_psram: DriveStrength: 0x00 (1/1)
+I (130) MSPI Timing: PSRAM timing tuning index: 5
+I (134) esp_psram: Found 8MB PSRAM device
+I (138) esp_psram: Speed: 80MHz
+I (141) cpu_start: Multicore app
+I (429) esp_psram: SPI SRAM memory test OK
+I (438) cpu_start: Pro cpu start user code
+I (438) cpu_start: cpu freq: 240000000 Hz
+I (438) app_init: Application information:
+I (438) app_init: Project name:     itofs
+I (441) app_init: App version:      ito-3.0.0
+I (446) app_init: Compile time:     Oct  5 2026 17:13:11
+I (451) app_init: ELF file SHA256:  12adef4a1...
+I (455) app_init: ESP-IDF:          v5.5.1
+I (459) efuse_init: Min chip rev:     v0.0
+I (463) efuse_init: Max chip rev:     v0.99 
+I (467) efuse_init: Chip rev:         v0.2
+I (470) heap_init: Initializing. RAM available for dynamic allocation:
+I (477) heap_init: At 3FC9B390 len 0004E380 (312 KiB): RAM
+I (482) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+I (487) heap_init: At 600FE000 len 00001FE8 (7 KiB): RTCRAM
+I (492) esp_psram: Adding pool of 8192K of PSRAM memory to heap allocator
+I (499) spi_flash: detected chip: boya
+I (502) spi_flash: flash io: qio
+I (505) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (512) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (518) main_task: Started on CPU0
+I (521) esp_psram: Reserving pool of 32K of internal memory for DMA/internal allocations
+I (529) main_task: Calling app_main()
+
+==== ItoFS TTS on ESP32-S3 ====
+weight sets in flash: 0 'weights' present; 1 'weights_b' present; 2 'weights_c' present;
+internal SRAM before the hot arena: largest free block 256 KB, free 309 KB
+arena: hot 210764 bytes in internal SRAM, bulk 1312272 bytes in PSRAM; chunk 24 frames = 7200 samples; 8-bit activations
+kernels: int4 unpack by the PIE kernel (PIE kernel reproduces the C unpack on 7168 groups, every (m, zp))
+kernels: PIE int8 dot (esp-nn), dual core; staging tiles ok (4096 B x 2 per core in internal SRAM); GDMA PSRAM->SRAM self-test ok
+MEM boot: peak PSRAM used 5092 / 8192 KB, peak internal SRAM used 298 / 374 KB
+weights: set 0 ('weights'): 3806628 bytes copied flash -> PSRAM in 381 ms
+model: arch 3 (ItoFS v3: mel front + mel vocoder), 2365104 int8 + 0 int4 + 543936 int16 + 84134 f32 params, text 128, GRU 96 forward (incremental text side), prosody 96, mel head 176 x4 -> 100, decoder 192/576 x5, n_fft 1200, hop 300 (80 fps), 24000 Hz, 1 styles, style table, blob format 1
+I (1262) main_task: Returned from app_main()
+SELFTEST dual-core, 8-bit activations: golden sentence 0 vs host C engine: 134100 samples (host 134100), fnv32 023bd6b1 (host 023bd6b1) -> PASS
+TIMING selftest(no playback): 84 tokens, style 0, 5.59 s audio | first chunk 184.3 ms (begin 0.8 ms; incremental text side, 8 tokens final at first chunk) | compute 3708.5 ms, RTF 0.664 | underruns 0 (start delay planned -1 ms) | weight set 0 | weight staging direct: 2911 GEMM calls, 0 announced ahead, 0 not
+MEM selftest(no playback): peak PSRAM used 5372 / 8192 KB, peak internal SRAM used 332 / 374 KB
+BENCH begin (QEMU numbers are meaningless; on the board send everything up to BENCH end)
+BENCH ERROR: no memory
+BENCH end of kernel part
+BENCH_TTS wmode direct demo 0: 25 tokens, 2.09 s audio | text side 0.9 ms | first chunk 183.9 ms (75.6 M int8 + 0.39 M f32 ops, GEMM 79.3 ms) | total 1407.9 ms, RTF 0.674 | ops 535.0 M int8 + 1.9 M f32, GEMM 559.7 ms = 0.956 GMAC/s, non-GEMM 848.3 ms | weights streamed 30.6 MB
+BENCH_TTS wmode direct demo 1: 108 tokens, 7.17 s audio | text side 0.9 ms | first chunk 184.1 ms (75.6 M int8 + 0.39 M f32 ops, GEMM 79.9 ms) | total 4748.6 ms, RTF 0.662 | ops 1873.5 M int8 + 7.0 M f32, GEMM 1799.3 ms = 1.041 GMAC/s, non-GEMM 2949.2 ms | weights streamed 87.4 MB
+BENCH_TTS wmode direct demo 2: 175 tokens, 10.46 s audio | text side 0.9 ms | first chunk 184.4 ms (75.6 M int8 + 0.39 M f32 ops, GEMM 80.3 ms) | total 6952.7 ms, RTF 0.665 | ops 2759.5 M int8 + 10.7 M f32, GEMM 2606.5 ms = 1.059 GMAC/s, non-GEMM 4346.2 ms | weights streamed 123.1 MB
+BENCH_TTFA_MODEL wmode direct: first chunk = 183.7 ms + 0.004 ms/token -> under 200 ms up to 4524 tokens
+BENCH_TTS wmode copy demo 0: 25 tokens, 2.09 s audio | text side 0.9 ms | first chunk 201.6 ms (75.6 M int8 + 0.39 M f32 ops, GEMM 97.3 ms) | total 1546.2 ms, RTF 0.741 | ops 535.0 M int8 + 1.9 M f32, GEMM 698.7 ms = 0.766 GMAC/s, non-GEMM 847.5 ms | weights streamed 30.6 MB
+BENCH_TTS wmode copy demo 1: 108 tokens, 7.17 s audio | text side 0.9 ms | first chunk 201.7 ms (75.6 M int8 + 0.39 M f32 ops, GEMM 97.6 ms) | total 5173.8 ms, RTF 0.721 | ops 1873.5 M int8 + 7.0 M f32, GEMM 2224.6 ms = 0.842 GMAC/s, non-GEMM 2949.2 ms | weights streamed 87.4 MB
+BENCH_TTS wmode copy demo 2: 175 tokens, 10.46 s audio | text side 0.9 ms | first chunk 201.8 ms (75.6 M int8 + 0.39 M f32 ops, GEMM 97.7 ms) | total 7560.5 ms, RTF 0.723 | ops 2759.5 M int8 + 10.7 M f32, GEMM 3216.4 ms = 0.858 GMAC/s, non-GEMM 4344.1 ms | weights streamed 123.1 MB
+BENCH_TTFA_MODEL wmode copy: first chunk = 201.6 ms + 0.001 ms/token -> under 200 ms up to -1392 tokens
+BENCH_TTS wmode gdma demo 0: 25 tokens, 2.09 s audio | text side 0.9 ms | first chunk 214.8 ms (75.6 M int8 + 0.39 M f32 ops, GEMM 108.4 ms) | total 1627.9 ms, RTF 0.780 | ops 535.0 M int8 + 1.9 M f32, GEMM 760.9 ms = 0.703 GMAC/s, non-GEMM 867.0 ms | weights streamed 30.6 MB
+BENCH_TTS wmode gdma demo 1: 108 tokens, 7.17 s audio | text side 0.9 ms | first chunk 214.8 ms (75.6 M int8 + 0.39 M f32 ops, GEMM 108.4 ms) | total 5424.2 ms, RTF 0.756 | ops 1873.5 M int8 + 7.0 M f32, GEMM 2410.5 ms = 0.777 GMAC/s, non-GEMM 3013.7 ms | weights streamed 87.4 MB
+BENCH_TTS wmode gdma demo 2: 175 tokens, 10.46 s audio | text side 0.9 ms | first chunk 214.8 ms (75.6 M int8 + 0.39 M f32 ops, GEMM 108.5 ms) | total 7923.8 ms, RTF 0.757 | ops 2759.5 M int8 + 10.7 M f32, GEMM 3482.7 ms = 0.792 GMAC/s, non-GEMM 4441.1 ms | weights streamed 123.1 MB
+BENCH_TTFA_MODEL wmode gdma: first chunk = 214.7 ms + 0.000 ms/token -> under 200 ms up to -34924 tokens
+BENCH_TTS wmode gdma+prefetch demo 0: 25 tokens, 2.09 s audio | text side 0.9 ms | first chunk 203.7 ms (75.6 M int8 + 0.39 M f32 ops, GEMM 86.6 ms) | total 1542.0 ms, RTF 0.739 | ops 535.0 M int8 + 1.9 M f32, GEMM 625.5 ms = 0.855 GMAC/s, non-GEMM 916.5 ms | weights streamed 30.6 MB
+BENCH_TTS wmode gdma+prefetch demo 1: 108 tokens, 7.17 s audio | text side 0.9 ms | first chunk 203.6 ms (75.6 M int8 + 0.39 M f32 ops, GEMM 86.7 ms) | total 5185.6 ms, RTF 0.723 | ops 1873.5 M int8 + 7.0 M f32, GEMM 1963.4 ms = 0.954 GMAC/s, non-GEMM 3222.2 ms | weights streamed 87.4 MB
+BENCH_TTS wmode gdma+prefetch demo 2: 175 tokens, 10.46 s audio | text side 0.9 ms | first chunk 203.7 ms (75.6 M int8 + 0.39 M f32 ops, GEMM 86.6 ms) | total 7590.8 ms, RTF 0.726 | ops 2759.5 M int8 + 10.7 M f32, GEMM 2826.0 ms = 0.976 GMAC/s, non-GEMM 4764.8 ms | weights streamed 123.1 MB
+BENCH_TTFA_MODEL wmode gdma+prefetch: first chunk = 203.7 ms + -0.000 ms/token -> under 200 ms up to -1 tokens
+BOARD_SUMMARY fw=v3bench arch=3 act=8 best_wmode=direct | direct: mean first chunk 184.1 ms, mean RTF 0.667, GEMM 1.041 GMAC/s | copy: mean first chunk 201.7 ms, mean RTF 0.728, GEMM 0.842 GMAC/s | gdma: mean first chunk 214.8 ms, mean RTF 0.764, GEMM 0.777 GMAC/s | gdma+prefetch: mean first chunk 203.6 ms, mean RTF 0.729, GEMM 0.954 GMAC/s | demo tokens 25 108 175
+MEM bench: peak PSRAM used 5372 / 8192 KB, peak internal SRAM used 352 / 374 KB
+BENCH end
+CALIB set 0 ('weights', vocoder 192/576 x5, int8): 84 tokens, 21 chunks | first chunk 182.4 ms (begin 0.9 ms) | steady chunk 179.2 ms of 300 ms audio: RTF steady 0.597, whole 0.663 -> measured RTF 0.663 | weight staging direct
+TIER_SELECT chosen=0 ('weights', vocoder 192/576 x5, int8) measured_rtf=0.663 target=0.85 status=OK degraded=0 | measured: set0 0.663 set1 not needed set2 not needed
+SAY demo 0: "LJ009-0076: wiː kˈʌm tə ðə sˈɜːmən ."
+TIMING demo: 25 tokens, style 0, 2.09 s audio | first chunk 183.7 ms (begin 0.9 ms; incremental text side, 8 tokens final at first chunk) | compute 1408.8 ms, RTF 0.675 | underruns 1 (start delay planned 248 ms) | weight set 0 | weight staging direct: 1164 GEMM calls, 0 announced ahead, 0 not
+MEM demo: peak PSRAM used 5372 / 8192 KB, peak internal SRAM used 352 / 374 KB
+SAY demo 1: "LJ018-0098: ænd ɹˈɛkəɡnˌaɪzd æz wˈʌn ʌvðə fɹˈiːkwɛntɚz ʌvðə bˈoʊɡəs lˈɔː stˈeɪʃənɚz . hɪz ɚɹˈɛst lˈɛd tə ðæt ʌv ˈʌðɚz ."
+TIMING demo: 108 tokens, style 0, 7.17 s audio | first chunk 183.9 ms (begin 1.0 ms; incremental text side, 8 tokens final at first chunk) | compute 4750.2 ms, RTF 0.662 | underruns 2 (start delay planned 248 ms) | weight set 0 | weight staging direct: 3667 GEMM calls, 0 announced ahead, 0 not
+MEM demo: peak PSRAM used 5372 / 8192 KB, peak internal SRAM used 352 / 374 KB
+SAY demo 2: "LJ004-0152: ɔːlðˈoʊ æt mˈɪstɚ . bˈʌkstənz vˈɪzɪt ɐ nˈuː dʒˈeɪl wʌz ɪn pɹˈɑːsɛs ʌv ɪɹˈɛkʃən , ðə fˈɜːst stˈɛp təwˈɔːɹdz ɹᵻfˈɔːɹm sˈɪns hˈaʊɚdz vˌɪzɪtˈeɪʃən ɪn sˈɛvəntˌiːn sˈɛvənti fˈoːɹ ."
+TIMING demo: 175 tokens, style 0, 10.46 s audio | first chunk 183.5 ms (begin 0.9 ms; incremental text side, 8 tokens final at first chunk) | compute 6958.0 ms, RTF 0.665 | underruns 1 (start delay planned 248 ms) | weight set 0 | weight staging direct: 5284 GEMM calls, 0 announced ahead, 0 not
+MEM demo: peak PSRAM used 5372 / 8192 KB, peak internal SRAM used 352 / 374 KB
+READY (BOOT button = demos, serial: say <ids> | style <k> | demo [k] | test | stats | tier [k] | status | help)

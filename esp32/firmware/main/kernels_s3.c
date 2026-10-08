@@ -357,7 +357,7 @@ static void worker_task(void *arg)
 // PSRAM -> SRAM copy through the GDMA, checked (a platform where this does not work degrades to modes 0/1)
 static int dma_selftest(core_ctx_t *c)
 {
-    const size_t n = 8192;
+    const size_t n = TILE_BYTES;            // must fit the staging tile it lands in (it was 8192 for a 4096+128 B tile: a heap overflow that smashed the GDMA channel objects; QEMU's heap layout hid it)
     int8_t *src = heap_caps_aligned_alloc(64, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!src) return 0;
     for (size_t i = 0; i < n; i++) src[i] = (int8_t)(i * 7 + 3);
@@ -430,7 +430,8 @@ void s3_kernels_init(void)
             async_memcpy_config_t cfg = ASYNC_MEMCPY_DEFAULT_CONFIG();
             cfg.backlog = 4;
             cfg.dma_burst_size = bursts[i];
-            if (esp_async_memcpy_install(&cfg, &c->dma) != ESP_OK) c->dma = NULL;
+            esp_err_t ie = esp_async_memcpy_install(&cfg, &c->dma);
+            if (ie != ESP_OK) c->dma = NULL;
         }
         if (!c->dma || !dma_selftest(c)) g_dma_ok = 0;
     }
@@ -571,10 +572,18 @@ void s3_bench(const void *wbase_v, size_t wbytes)
     const int8_t *wps = (const int8_t *)(((uintptr_t)wbase_v + 63) & ~(uintptr_t)63);
     if (wbytes > (4u << 20)) wbytes = 4u << 20;
     wbytes = wbytes > 128 ? wbytes - 128 : 0;
-    int8_t *x = heap_caps_aligned_alloc(16, 16 * 1216 + 64, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    int32_t *acc = heap_caps_aligned_alloc(16, 16 * 256 * 4 + 64, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (!x || !acc || !g_tiles_ok) { printf("BENCH ERROR: no memory\n"); goto out; }
-    for (int i = 0; i < 16 * 1216 + 64; i++) x[i] = (int8_t)(i * 40503u >> 8);
+    // scratch for `brow` rows: 16 if internal SRAM has room, else fewer (on the board the free internal SRAM at this point is fragmented: 2 x 12 KB blocks were all that was left)
+    int brow = 16;
+    int8_t *x = NULL; int32_t *acc = NULL;
+    for (; brow >= 4; brow >>= 1) {
+        x = heap_caps_aligned_alloc(16, brow * 1216 + 64, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        acc = heap_caps_aligned_alloc(16, brow * 256 * 4 + 64, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (x && acc) break;
+        heap_caps_free(x); heap_caps_free(acc); x = NULL; acc = NULL;
+    }
+    if (brow < 4) brow = 4;
+    if (!x || !acc || !g_tiles_ok) { printf("BENCH ERROR: no memory (x %p acc %p tiles %d; internal free %u B, largest block %u B)\n", (void *)x, (void *)acc, g_tiles_ok, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)); goto out; }
+    for (int i = 0; i < brow * 1216 + 64; i++) x[i] = (int8_t)(i * 40503u >> 8);
     printf("BENCH weights: %s, %u KB cycled through (data cache 64 KB)\n", esp_ptr_external_ram(wps) ? "model blob in PSRAM" :
            "model blob NOT in PSRAM (memory-mapped flash): numbers are for flash", (unsigned)(wbytes >> 10));
     {   // PSRAM -> SRAM bandwidth: memcpy and GDMA, 12 KB pieces
@@ -606,11 +615,12 @@ void s3_bench(const void *wbase_v, size_t wbytes)
         {"prosody conv w16a16 96->96", 96, 96, 16}, {"text conv w16a16 128->128", 128, 128, 16},
     };
     for (size_t s = 0; s < sizeof sh / sizeof sh[0]; s++) {
-        printf("BENCH_GEMM %-28s rows %2d |", sh[s].name, sh[s].rows);
+        const int rws = sh[s].rows < brow ? sh[s].rows : brow;
+        printf("BENCH_GEMM %-28s rows %2d |", sh[s].name, rws);
         for (int mode = 0; mode < 3; mode++) {
             if ((mode >= 1 && !g_tiles_ok) || (mode == 2 && !g_dma_ok)) { printf(" %s n/a |", s3_wmode_name(mode)); continue; }
-            double g1 = bench_shape(wps, wbytes, sh[s].in, sh[s].out, sh[s].rows, mode, 0, 0, acc, x);
-            double g2 = bench_shape(wps, wbytes, sh[s].in, sh[s].out, sh[s].rows, mode, 1, 0, acc, x);
+            double g1 = bench_shape(wps, wbytes, sh[s].in, sh[s].out, rws, mode, 0, 0, acc, x);
+            double g2 = bench_shape(wps, wbytes, sh[s].in, sh[s].out, rws, mode, 1, 0, acc, x);
             printf(" %s 1c %.3f 2c %.3f |", s3_wmode_name(mode), g1, g2);
         }
         printf(" GMAC/s (weights in PSRAM)\n");
@@ -619,7 +629,7 @@ void s3_bench(const void *wbase_v, size_t wbytes)
         int8_t *wsr = g_cc[1].buf[1];
         for (int i = 0; i < TILE_BYTES; i++) wsr[i] = (int8_t)(i * 97u);
         const int ro = TILE_BYTES / 256;
-        double g1 = bench_shape(wsr, TILE_BYTES, 256, ro, 8, 0, 0, 1, acc, x), g2 = bench_shape(wsr, TILE_BYTES, 256, ro, 8, 0, 1, 1, acc, x);
+        double g1 = bench_shape(wsr, TILE_BYTES, 256, ro, brow < 8 ? brow : 8, 0, 0, 1, acc, x), g2 = bench_shape(wsr, TILE_BYTES, 256, ro, brow < 8 ? brow : 8, 0, 1, 1, acc, x);
         printf("BENCH_GEMM 256->%d SRAM-resident rows  8 | sram 1c %.3f 2c %.3f | GMAC/s (compute ceiling, weights in internal SRAM)\n", ro, g1, g2);
     }
 out:

@@ -25,6 +25,9 @@
 #include "esp_random.h"
 #include "esp_cache.h"
 #include "driver/uart.h"
+#ifndef ITOFS_QEMU
+#include "hal/usb_serial_jtag_ll.h"     // the console input of a board connected only through the native USB port (the UART0 pins are unconnected there)
+#endif
 #include "driver/gpio.h"
 #ifndef ITOFS_QEMU
 #include "driver/i2s_std.h"
@@ -149,9 +152,11 @@ static void play_task(void *arg)
     (void)arg;
     int16_t *st = heap_caps_malloc(sizeof(int16_t) * 2 * (size_t)I2S_SLICE + 64, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);   // one 20 ms slice
     buf_t b;
+    int64_t end_us = 0;              // when the audio handed to the I2S so far has been played out (the DMA ring holds ~120 ms, and i2s_channel_write returns once the data is queued, not played)
     for (;;) {
+        int starved = 0;
         if (s_playing && xQueueReceive(s_full_q, &b, 0) != pdTRUE) {
-            s_underruns++;           // synthesis did not keep up: the DAC plays silence meanwhile
+            starved = 1;             // the queue is empty: an underrun only if the DAC has also run out of audio (checked below; found on the board: the ring made every late chunk look like a gap)
             xQueueReceive(s_full_q, &b, portMAX_DELAY);
         } else if (!s_playing) {
             xQueueReceive(s_full_q, &b, portMAX_DELAY);
@@ -165,7 +170,13 @@ static void play_task(void *arg)
                 vTaskDelay(pdMS_TO_TICKS((wait > 10000 ? 10000 : wait + 999) / 1000));
             }
         }
+        {
+            const int64_t now = esp_timer_get_time();
+            if (!s_playing) end_us = now;
+            else if (starved && now > end_us + 2000) { s_underruns++; end_us = now; }      // synthesis did not keep up: the DAC played silence meanwhile
+        }
         s_playing = 1;
+        end_us += (int64_t)b.n * 1000000 / s_sr;
 #ifndef ITOFS_QEMU
         for (int o = 0; o < b.n; o += I2S_SLICE) {
             const int m = b.n - o < I2S_SLICE ? b.n - o : I2S_SLICE;
@@ -1017,6 +1028,12 @@ static void console_task(void *arg)
     uint8_t ch[64];
     for (;;) {
         int n = uart_read_bytes(UART_NUM_0, ch, sizeof ch, pdMS_TO_TICKS(20));
+#ifndef ITOFS_QEMU
+        if (n <= 0) {            // found on the board: with only the native USB port connected the commands never arrived; read the USB-Serial/JTAG FIFO as well
+            n = 0;
+            while (n < (int)sizeof ch && usb_serial_jtag_ll_rxfifo_data_available()) n += usb_serial_jtag_ll_read_rxfifo(ch + n, sizeof ch - n);
+        }
+#endif
         for (int i = 0; i < n; i++) {
             if (ch[i] == '\n' || ch[i] == '\r') {
                 line[len] = 0;
