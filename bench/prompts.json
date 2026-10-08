@@ -1,0 +1,386 @@
+{
+ "name": "ito-bench-v1",
+ "license": "CC0-1.0",
+ "language": "en-US",
+ "note": "Written for this benchmark (the first 8 are the Ito blind-test #9 sentences). None appears in the Ito training corpora (checked by exact phoneme-string match against corpus_voiceD/train). WER references are the text itself; scoring applies Whisper's EnglishTextNormalizer to both sides.",
+ "prompts": [
+  {
+   "id": "01",
+   "category": "question",
+   "source": "blind9",
+   "text": "Hey, are you still coming over for dinner tonight, or should I save you a plate?",
+   "showcase": true
+  },
+  {
+   "id": "02",
+   "category": "numbers",
+   "source": "blind9",
+   "text": "Your package should arrive on Friday, October 9th, sometime before noon.",
+   "showcase": true
+  },
+  {
+   "id": "03",
+   "category": "long",
+   "source": "blind9",
+   "text": "When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company.",
+   "showcase": true
+  },
+  {
+   "id": "04",
+   "category": "hard_words",
+   "source": "blind9",
+   "text": "The pharmacist recommended an anti-inflammatory, but honestly, I'd rather try physiotherapy first.",
+   "showcase": true
+  },
+  {
+   "id": "05",
+   "category": "conversational",
+   "source": "blind9",
+   "text": "Thanks so much for calling. I'll check the schedule and get back to you first thing tomorrow morning.",
+   "showcase": false
+  },
+  {
+   "id": "06",
+   "category": "hard_words",
+   "source": "blind9",
+   "text": "Could you grab some quinoa and Worcestershire sauce on your way home?",
+   "showcase": true
+  },
+  {
+   "id": "07",
+   "category": "numbers",
+   "source": "blind9",
+   "text": "It's about 23 degrees outside, so you probably won't need a jacket.",
+   "showcase": true
+  },
+  {
+   "id": "08",
+   "category": "conversational",
+   "source": "blind9",
+   "text": "I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up.",
+   "showcase": false
+  },
+  {
+   "id": "09",
+   "category": "conversational",
+   "source": "ito-bench-v1",
+   "text": "Sure, I can do that. Just give me a minute to finish this email.",
+   "showcase": true
+  },
+  {
+   "id": "10",
+   "category": "conversational",
+   "source": "ito-bench-v1",
+   "text": "Oh no, I completely forgot about the meeting. I'm so sorry!",
+   "showcase": false
+  },
+  {
+   "id": "11",
+   "category": "conversational",
+   "source": "ito-bench-v1",
+   "text": "Honestly, the movie was fine, but the book was so much better.",
+   "showcase": false
+  },
+  {
+   "id": "12",
+   "category": "conversational",
+   "source": "ito-bench-v1",
+   "text": "We're running a little late, so go ahead and start without us.",
+   "showcase": false
+  },
+  {
+   "id": "13",
+   "category": "conversational",
+   "source": "ito-bench-v1",
+   "text": "I'm not sure yet, but I'll let you know by the end of the day.",
+   "showcase": false
+  },
+  {
+   "id": "14",
+   "category": "conversational",
+   "source": "ito-bench-v1",
+   "text": "Wow, you actually remembered my birthday this year.",
+   "showcase": false
+  },
+  {
+   "id": "15",
+   "category": "conversational",
+   "source": "ito-bench-v1",
+   "text": "Okay, so here's the plan: we meet at the corner, then walk to the park together.",
+   "showcase": true
+  },
+  {
+   "id": "16",
+   "category": "conversational",
+   "source": "ito-bench-v1",
+   "text": "Don't worry about the dishes, I'll take care of them later.",
+   "showcase": false
+  },
+  {
+   "id": "17",
+   "category": "conversational",
+   "source": "ito-bench-v1",
+   "text": "Hmm, that's strange. It was working perfectly fine yesterday.",
+   "showcase": false
+  },
+  {
+   "id": "18",
+   "category": "conversational",
+   "source": "ito-bench-v1",
+   "text": "Good morning! The coffee is ready, and there are fresh muffins on the counter.",
+   "showcase": false
+  },
+  {
+   "id": "19",
+   "category": "conversational",
+   "source": "ito-bench-v1",
+   "text": "No problem at all.",
+   "showcase": false
+  },
+  {
+   "id": "20",
+   "category": "conversational",
+   "source": "ito-bench-v1",
+   "text": "Got it, thanks!",
+   "showcase": false
+  },
+  {
+   "id": "21",
+   "category": "question",
+   "source": "ito-bench-v1",
+   "text": "What time does the pharmacy close on Sundays?",
+   "showcase": false
+  },
+  {
+   "id": "22",
+   "category": "question",
+   "source": "ito-bench-v1",
+   "text": "Did you remember to lock the front door before we left?",
+   "showcase": false
+  },
+  {
+   "id": "23",
+   "category": "question",
+   "source": "ito-bench-v1",
+   "text": "How long would it take to drive from Boston to Philadelphia?",
+   "showcase": false
+  },
+  {
+   "id": "24",
+   "category": "question",
+   "source": "ito-bench-v1",
+   "text": "Would you rather go hiking this weekend, or stay in and watch a movie?",
+   "showcase": false
+  },
+  {
+   "id": "25",
+   "category": "question",
+   "source": "ito-bench-v1",
+   "text": "Can you turn off the lights in the kitchen, please?",
+   "showcase": true
+  },
+  {
+   "id": "26",
+   "category": "question",
+   "source": "ito-bench-v1",
+   "text": "Is it going to rain tomorrow afternoon?",
+   "showcase": false
+  },
+  {
+   "id": "27",
+   "category": "question",
+   "source": "ito-bench-v1",
+   "text": "Why is the printer making that awful grinding noise again?",
+   "showcase": false
+  },
+  {
+   "id": "28",
+   "category": "question",
+   "source": "ito-bench-v1",
+   "text": "Have you ever tried cooking risotto without a recipe?",
+   "showcase": false
+  },
+  {
+   "id": "29",
+   "category": "question",
+   "source": "ito-bench-v1",
+   "text": "That's a great idea. Why didn't I think of that?",
+   "showcase": false
+  },
+  {
+   "id": "30",
+   "category": "numbers",
+   "source": "ito-bench-v1",
+   "text": "The meeting has been moved to Tuesday, March 14th, at 3:30 in the afternoon.",
+   "showcase": false
+  },
+  {
+   "id": "31",
+   "category": "numbers",
+   "source": "ito-bench-v1",
+   "text": "Your total comes to $47.85, including tax.",
+   "showcase": false
+  },
+  {
+   "id": "32",
+   "category": "numbers",
+   "source": "ito-bench-v1",
+   "text": "Please call me back at 555-0193 when you have a moment.",
+   "showcase": false
+  },
+  {
+   "id": "33",
+   "category": "numbers",
+   "source": "ito-bench-v1",
+   "text": "The train leaves from platform 12 at 7:45 in the morning.",
+   "showcase": false
+  },
+  {
+   "id": "34",
+   "category": "numbers",
+   "source": "ito-bench-v1",
+   "text": "She was born on July 4th, 1996, in a small town near the coast.",
+   "showcase": false
+  },
+  {
+   "id": "35",
+   "category": "numbers",
+   "source": "ito-bench-v1",
+   "text": "Set a timer for 25 minutes, and remind me to check the oven.",
+   "showcase": false
+  },
+  {
+   "id": "36",
+   "category": "numbers",
+   "source": "ito-bench-v1",
+   "text": "The temperature dropped to minus 8 degrees overnight.",
+   "showcase": false
+  },
+  {
+   "id": "37",
+   "category": "numbers",
+   "source": "ito-bench-v1",
+   "text": "About 3.5 million people visited the museum last year.",
+   "showcase": false
+  },
+  {
+   "id": "38",
+   "category": "numbers",
+   "source": "ito-bench-v1",
+   "text": "Flight 207 to Denver is now boarding at gate B22.",
+   "showcase": true
+  },
+  {
+   "id": "39",
+   "category": "numbers",
+   "source": "ito-bench-v1",
+   "text": "I've walked 10,432 steps today, which is a new personal record.",
+   "showcase": false
+  },
+  {
+   "id": "40",
+   "category": "hard_words",
+   "source": "ito-bench-v1",
+   "text": "The archaeologist described the hieroglyphics as remarkably well preserved.",
+   "showcase": false
+  },
+  {
+   "id": "41",
+   "category": "hard_words",
+   "source": "ito-bench-v1",
+   "text": "My colleague from Saskatchewan is fluent in Portuguese and Mandarin.",
+   "showcase": false
+  },
+  {
+   "id": "42",
+   "category": "hard_words",
+   "source": "ito-bench-v1",
+   "text": "Ophthalmologists and otolaryngologists often train for many years.",
+   "showcase": true
+  },
+  {
+   "id": "43",
+   "category": "hard_words",
+   "source": "ito-bench-v1",
+   "text": "Nguyen and Siobhan are presenting the quarterly cybersecurity report.",
+   "showcase": false
+  },
+  {
+   "id": "44",
+   "category": "hard_words",
+   "source": "ito-bench-v1",
+   "text": "Her rhythm on the xylophone was surprisingly sophisticated.",
+   "showcase": false
+  },
+  {
+   "id": "45",
+   "category": "hard_words",
+   "source": "ito-bench-v1",
+   "text": "The entrepreneur's Wi-Fi router kept disconnecting during the presentation.",
+   "showcase": false
+  },
+  {
+   "id": "46",
+   "category": "hard_words",
+   "source": "ito-bench-v1",
+   "text": "Thoroughly squeezed lemons make the best lemonade, in my opinion.",
+   "showcase": false
+  },
+  {
+   "id": "47",
+   "category": "hard_words",
+   "source": "ito-bench-v1",
+   "text": "The colonel's anemone collection is genuinely phenomenal.",
+   "showcase": false
+  },
+  {
+   "id": "48",
+   "category": "hard_words",
+   "source": "ito-bench-v1",
+   "text": "Please don't confuse the words affect and effect in your essay.",
+   "showcase": false
+  },
+  {
+   "id": "49",
+   "category": "long",
+   "source": "ito-bench-v1",
+   "text": "If you're planning to visit the city next spring, I'd recommend booking your hotel early, because prices tend to go up quickly once the festival schedule is announced.",
+   "showcase": false
+  },
+  {
+   "id": "50",
+   "category": "long",
+   "source": "ito-bench-v1",
+   "text": "After spending nearly three hours trying to assemble the bookshelf, we realized that two of the screws had been missing from the box the entire time.",
+   "showcase": true
+  },
+  {
+   "id": "51",
+   "category": "long",
+   "source": "ito-bench-v1",
+   "text": "The new software update promises longer battery life, faster charging, and a redesigned settings menu, although many users say they haven't noticed much of a difference.",
+   "showcase": false
+  },
+  {
+   "id": "52",
+   "category": "long",
+   "source": "ito-bench-v1",
+   "text": "Whenever my grandmother tells the story of how she met my grandfather, she always adds a new detail that nobody in the family has ever heard before.",
+   "showcase": false
+  },
+  {
+   "id": "53",
+   "category": "long",
+   "source": "ito-bench-v1",
+   "text": "Before you leave for the airport, double-check that you have your passport, your boarding pass, your charger, and the address of the place where you're staying.",
+   "showcase": false
+  },
+  {
+   "id": "54",
+   "category": "long",
+   "source": "ito-bench-v1",
+   "text": "The quiet little bookstore on the corner has survived three recessions, two floods, and the arrival of online shopping, mostly thanks to its loyal neighborhood customers.",
+   "showcase": false
+  }
+ ]
+}

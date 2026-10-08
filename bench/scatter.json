@@ -1,0 +1,471 @@
+{
+ "x": "params (log scale; rule-based systems have params null)",
+ "y": "utmosv2",
+ "points": [
+  {
+   "system": "ito_v3_chip_fefix",
+   "name": "Ito 256 vocoder (first release) chip-exact (frontend fix) (ours)",
+   "params": 4050224,
+   "mcu": "emulated (QEMU bit-exact)",
+   "utmosv2": 3.1509874131944446,
+   "utmosv2_ci": [
+    3.062498191550926,
+    3.230035174334491
+   ],
+   "utmos22": 4.44447382291158,
+   "dnsmos_ovrl": 3.3903142057732474,
+   "wer": 0.004149377593360996,
+   "f0_std_st": 2.890913913792854
+  },
+  {
+   "system": "ito_v3_chip",
+   "name": "Ito 256 vocoder (first release) chip-exact (ours, bench v1 frontend)",
+   "params": 4050224,
+   "mcu": "emulated (QEMU bit-exact)",
+   "utmosv2": 3.1825629340277777,
+   "utmosv2_ci": [
+    3.0905657732928242,
+    3.2672887731481484
+   ],
+   "utmos22": 4.44225169994213,
+   "dnsmos_ovrl": 3.3855629994413508,
+   "wer": 0.013831258644536652,
+   "f0_std_st": 2.883958509717548
+  },
+  {
+   "system": "ito_192_female",
+   "name": "Ito 192 vocoder, chip-exact, female (ours, shipped)",
+   "params": 2993174,
+   "mcu": "emulated (QEMU bit-exact)",
+   "utmosv2": 3.211311459541321,
+   "utmosv2_ci": [
+    3.122177559468481,
+    3.2909859855969747
+   ],
+   "utmos22": 4.429544554816352,
+   "dnsmos_ovrl": 3.3439833614084438,
+   "wer": 0.005532503457814661,
+   "f0_std_st": 2.8030088997047957
+  },
+  {
+   "system": "ito_192_male",
+   "name": "Ito 192 vocoder, chip-exact, male (ours, shipped; no teacher row for this voice)",
+   "params": 2993174,
+   "mcu": "emulated (QEMU bit-exact)",
+   "utmosv2": 3.255695025126139,
+   "utmosv2_ci": [
+    3.156237451897727,
+    3.3427725928801078
+   ],
+   "utmos22": 4.407949580086602,
+   "dnsmos_ovrl": 3.427984711975401,
+   "wer": 0.006915629322268326,
+   "f0_std_st": 2.4167429059551604
+  },
+  {
+   "system": "ito_192_female_int4",
+   "name": "Ito 192, int4 set, chip-exact, female",
+   "params": 2993174,
+   "mcu": "emulated (QEMU bit-exact)",
+   "utmosv2": 3.131520902668988,
+   "utmosv2_ci": [
+    3.043557045194838,
+    3.212104838976154
+   ],
+   "utmos22": 4.415354878814132,
+   "dnsmos_ovrl": 3.341388779272808,
+   "wer": 0.005532503457814661,
+   "f0_std_st": 2.8145431033431407
+  },
+  {
+   "system": "ito_192_female_light",
+   "name": "Ito 192, light set, chip-exact, female",
+   "params": 2993174,
+   "mcu": "emulated (QEMU bit-exact)",
+   "utmosv2": 3.119562776000411,
+   "utmosv2_ci": [
+    3.0281500422292282,
+    3.2030807935529286
+   ],
+   "utmos22": 4.416629429216738,
+   "dnsmos_ovrl": 3.372464075096354,
+   "wer": 0.005532503457814661,
+   "f0_std_st": 2.824270999521742
+  },
+  {
+   "system": "ito_192_male_int4",
+   "name": "Ito 192, int4 set, chip-exact, male",
+   "params": 2993174,
+   "mcu": "emulated (QEMU bit-exact)",
+   "utmosv2": 3.2558181153403387,
+   "utmosv2_ci": [
+    3.1660339920609086,
+    3.3383554414466574
+   ],
+   "utmos22": 4.403919758620085,
+   "dnsmos_ovrl": 3.424887288091452,
+   "wer": 0.005532503457814661,
+   "f0_std_st": 2.398791611770706
+  },
+  {
+   "system": "ito_192_male_light",
+   "name": "Ito 192, light set, chip-exact, male",
+   "params": 2993174,
+   "mcu": "emulated (QEMU bit-exact)",
+   "utmosv2": 3.234313488006592,
+   "utmosv2_ci": [
+    3.154097967788025,
+    3.314843134747611
+   ],
+   "utmos22": 4.386364212742558,
+   "dnsmos_ovrl": 3.388880475584339,
+   "wer": 0.005532503457814661,
+   "f0_std_st": 2.441564065252195
+  },
+  {
+   "system": "ito_v3_float",
+   "name": "Ito 256 vocoder (first release) float (ours)",
+   "params": 4402394,
+   "mcu": "no",
+   "utmosv2": 3.2025462962962963,
+   "utmosv2_ci": [
+    3.0998987268518516,
+    3.293872974537037
+   ],
+   "utmos22": 4.439622534645928,
+   "dnsmos_ovrl": 3.3967507308616187,
+   "wer": 0.013831258644536652,
+   "f0_std_st": 2.9274435906861793
+  },
+  {
+   "system": "teacher_styletts2_voiceD",
+   "name": "StyleTTS 2 LibriTTS, voice D (our teacher)",
+   "params": 191468193,
+   "mcu": "no",
+   "utmosv2": 3.434787326388889,
+   "utmosv2_ci": [
+    3.3427734375,
+    3.521629050925926
+   ],
+   "utmos22": 4.465928514798482,
+   "dnsmos_ovrl": 3.335306605064003,
+   "wer": 0.015214384508990318,
+   "f0_std_st": 2.8422031167876716
+  },
+  {
+   "system": "sanotts_amy",
+   "name": "sanoTTS amy",
+   "params": 1454284,
+   "mcu": "no",
+   "utmosv2": 2.8020652488425926,
+   "utmosv2_ci": [
+    2.718297435619213,
+    2.8838094075520835
+   ],
+   "utmos22": 3.963953177134196,
+   "dnsmos_ovrl": 3.1796978809409007,
+   "wer": 0.012448132780082987,
+   "f0_std_st": 2.421970173030923
+  },
+  {
+   "system": "sanotts_kristin",
+   "name": "sanoTTS kristin",
+   "params": 1396151,
+   "mcu": "no",
+   "utmosv2": 1.9769422743055556,
+   "utmosv2_ci": [
+    1.8929569950810186,
+    2.0564435040509257
+   ],
+   "utmos22": 3.5614352844379566,
+   "dnsmos_ovrl": 3.1086763722939406,
+   "wer": 0.0677731673582296,
+   "f0_std_st": 2.1506528568728456
+  },
+  {
+   "system": "sanotts_heart",
+   "name": "sanoTTS heart",
+   "params": 2272145,
+   "mcu": "no",
+   "utmosv2": 1.9476453993055556,
+   "utmosv2_ci": [
+    1.8827193648726852,
+    2.013618073640046
+   ],
+   "utmos22": 3.1884188342977455,
+   "dnsmos_ovrl": 3.1442574199359785,
+   "wer": 0.016597510373443983,
+   "f0_std_st": 2.5685362155953833
+  },
+  {
+   "system": "sanotts_heart-nano",
+   "name": "sanoTTS heart-nano",
+   "params": 294279,
+   "mcu": "MCU-sized, untimed",
+   "utmosv2": 1.3342737268518519,
+   "utmosv2_ci": [
+    1.2747750741464121,
+    1.3894981101707176
+   ],
+   "utmos22": 2.1708408152615584,
+   "dnsmos_ovrl": 2.9732877714891632,
+   "wer": 0.016597510373443983,
+   "f0_std_st": 2.2604337427272867
+  },
+  {
+   "system": "inflect_nano_v2",
+   "name": "Inflect Nano v2 (Owen Song)",
+   "params": 3966721,
+   "mcu": "measured (ESP32-P4, 3.5x slower than RT)",
+   "utmosv2": 3.080078125,
+   "utmosv2_ci": [
+    3.0118263527199076,
+    3.1472819010416666
+   ],
+   "utmos22": 4.409575696344729,
+   "dnsmos_ovrl": 3.39999095767978,
+   "wer": 0.011065006915629323,
+   "f0_std_st": 3.785246366375504
+  },
+  {
+   "system": "inflect_micro_v2",
+   "name": "Inflect Micro v2 (Owen Song)",
+   "params": 9356513,
+   "mcu": "no",
+   "utmosv2": 3.4575557002314814,
+   "utmosv2_ci": [
+    3.372846589265046,
+    3.5295518663194443
+   ],
+   "utmos22": 4.412852190158985,
+   "dnsmos_ovrl": 3.38226023984378,
+   "wer": 0.009681881051175657,
+   "f0_std_st": 3.6518559216432407
+  },
+  {
+   "system": "tinytts_pschatzmann",
+   "name": "TinyTTS (pschatzmann port)",
+   "params": 1600000,
+   "mcu": "measured (ESP32-S3, 22.9x slower than RT)",
+   "utmosv2": 2.452510127314815,
+   "utmosv2_ci": [
+    2.386971028645833,
+    2.5176161024305554
+   ],
+   "utmos22": 3.6585604305620545,
+   "dnsmos_ovrl": 3.2949290679348904,
+   "wer": 0.0677731673582296,
+   "f0_std_st": 3.419390330791285
+  },
+  {
+   "system": "piper_lessac_low",
+   "name": "Piper lessac low",
+   "params": 15650556,
+   "mcu": "no",
+   "utmosv2": 3.3942780671296298,
+   "utmosv2_ci": [
+    3.3277949580439814,
+    3.457175925925926
+   ],
+   "utmos22": 4.4055655444109885,
+   "dnsmos_ovrl": 3.351512175869011,
+   "wer": 0.012448132780082987,
+   "f0_std_st": 4.357610068340965
+  },
+  {
+   "system": "piper_lessac_medium",
+   "name": "Piper lessac medium",
+   "params": 15650556,
+   "mcu": "no",
+   "utmosv2": 3.6949146412037037,
+   "utmosv2_ci": [
+    3.6255777994791667,
+    3.7603443287037037
+   ],
+   "utmos22": 4.280043646141335,
+   "dnsmos_ovrl": 3.2877379489292315,
+   "wer": 0.006915629322268326,
+   "f0_std_st": 4.4218649803363315
+  },
+  {
+   "system": "piper_amy_low",
+   "name": "Piper amy low",
+   "params": 15626364,
+   "mcu": "no",
+   "utmosv2": 3.4173900462962963,
+   "utmosv2_ci": [
+    3.340962275752315,
+    3.4869845920138887
+   ],
+   "utmos22": 4.441731523584436,
+   "dnsmos_ovrl": 3.276052836631783,
+   "wer": 0.006915629322268326,
+   "f0_std_st": 1.7606170299154924
+  },
+  {
+   "system": "kitten_nano_08",
+   "name": "Kitten TTS nano 0.8",
+   "params": 14009827,
+   "mcu": "no",
+   "utmosv2": 1.9869429976851851,
+   "utmosv2_ci": [
+    1.9083098234953704,
+    2.065557183159722
+   ],
+   "utmos22": 3.9267243632563837,
+   "dnsmos_ovrl": 3.3099188826688315,
+   "wer": 0.011065006915629323,
+   "f0_std_st": 4.1614972960624135
+  },
+  {
+   "system": "kitten_micro_08",
+   "name": "Kitten TTS micro 0.8",
+   "params": 34966908,
+   "mcu": "no",
+   "utmosv2": 1.7797670717592593,
+   "utmosv2_ci": [
+    1.7133232964409721,
+    1.8494827835648149
+   ],
+   "utmos22": 3.9743533708431102,
+   "dnsmos_ovrl": 3.250587955399188,
+   "wer": 0.008298755186721992,
+   "f0_std_st": 3.636420183693692
+  },
+  {
+   "system": "kitten_mini_08",
+   "name": "Kitten TTS mini 0.8",
+   "params": 73188595,
+   "mcu": "no",
+   "utmosv2": 1.8828486689814814,
+   "utmosv2_ci": [
+    1.8377812138310186,
+    1.931261302806713
+   ],
+   "utmos22": 4.022291660308838,
+   "dnsmos_ovrl": 3.2700542418180736,
+   "wer": 0.011065006915629323,
+   "f0_std_st": 3.208947882387104
+  },
+  {
+   "system": "kokoro_af_heart",
+   "name": "Kokoro-82M (af_heart)",
+   "params": 81810022,
+   "mcu": "no",
+   "utmosv2": 3.869285300925926,
+   "utmosv2_ci": [
+    3.8056278935185186,
+    3.9317509403935187
+   ],
+   "utmos22": 4.4908773104349775,
+   "dnsmos_ovrl": 3.406391172305232,
+   "wer": 0.008298755186721992,
+   "f0_std_st": 2.865879864292301
+  },
+  {
+   "system": "melotts_en_us",
+   "name": "MeloTTS EN-US",
+   "params": 51874097,
+   "mcu": "no",
+   "utmosv2": 3.026837384259259,
+   "utmosv2_ci": [
+    2.9603587962962963,
+    3.09129322193287
+   ],
+   "utmos22": 3.7204919965178878,
+   "dnsmos_ovrl": 3.0148984832757346,
+   "wer": 0.0318118948824343,
+   "f0_std_st": 2.8478700134546795
+  },
+  {
+   "system": "pocket_tts_alba",
+   "name": "Pocket TTS (Kyutai, alba)",
+   "params": 109501826,
+   "mcu": "no",
+   "utmosv2": 3.3121744791666665,
+   "utmosv2_ci": [
+    3.230105251736111,
+    3.3955448857060184
+   ],
+   "utmos22": 4.334297979319537,
+   "dnsmos_ovrl": 3.3126248009452337,
+   "wer": 0.024896265560165973,
+   "f0_std_st": 3.644161741681567
+  },
+  {
+   "system": "supertonic_2_F1",
+   "name": "Supertonic 2 (F1)",
+   "params": 65498438,
+   "mcu": "no",
+   "utmosv2": 3.616717303240741,
+   "utmosv2_ci": [
+    3.5215476707175926,
+    3.707646122685185
+   ],
+   "utmos22": 4.437526075928299,
+   "dnsmos_ovrl": 3.34929794969772,
+   "wer": 0.02351313969571231,
+   "f0_std_st": 2.805688577871731
+  },
+  {
+   "system": "supertonic_3_F1",
+   "name": "Supertonic 3 (F1)",
+   "params": 99218660,
+   "mcu": "no",
+   "utmosv2": 3.8446903935185186,
+   "utmosv2_ci": [
+    3.7783564814814814,
+    3.908349609375
+   ],
+   "utmos22": 4.454056722146493,
+   "dnsmos_ovrl": 3.3210725563710404,
+   "wer": 0.016597510373443983,
+   "f0_std_st": 2.6976195720004292
+  },
+  {
+   "system": "moss_tts_nano_en_2",
+   "name": "MOSS-TTS-Nano (ONNX, en_2 ref)",
+   "params": 100000000,
+   "mcu": "no",
+   "utmosv2": 3.435908564814815,
+   "utmosv2_ci": [
+    3.3661006221064813,
+    3.5036205150462965
+   ],
+   "utmos22": 4.368265920215183,
+   "dnsmos_ovrl": 3.210895251917977,
+   "wer": 0.016597510373443983,
+   "f0_std_st": 2.2655083137052534
+  },
+  {
+   "system": "espeak_ng",
+   "name": "eSpeak NG",
+   "params": null,
+   "mcu": "community ports",
+   "utmosv2": 1.7422960069444444,
+   "utmosv2_ci": [
+    1.6870062934027779,
+    1.7976557978877314
+   ],
+   "utmos22": 2.1378319682898344,
+   "dnsmos_ovrl": 2.7603259589046143,
+   "wer": 0.0027662517289073307,
+   "f0_std_st": 1.6103076684543536
+  },
+  {
+   "system": "flite_slt",
+   "name": "Flite (cmu_us_slt)",
+   "params": null,
+   "mcu": "community ports",
+   "utmosv2": 1.5537651909722223,
+   "utmosv2_ci": [
+    1.5056785300925926,
+    1.6004240813078703
+   ],
+   "utmos22": 2.589162332040292,
+   "dnsmos_ovrl": 2.59215975540971,
+   "wer": 0.017980636237897647,
+   "f0_std_st": 1.0887671005809243
+  }
+ ]
+}

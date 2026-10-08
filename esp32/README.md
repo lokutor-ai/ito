@@ -82,10 +82,10 @@ and per second of audio.
 | Weights | 3.81 MB blob: 2.37 M int8 + 0.54 M int16 + 0.08 M f32 parameters (the style FiLM is precomputed into a table). The vocoder is 192 wide (576 inner, 5 ConvNeXt blocks); the 4.89 MB blob of 3 October had a 256/768 vocoder (blind test #10: no audible difference, see the root README) |
 | Flash | app 379 KB in a 2 MB slot at 0x10000; three 4.5 MB weight partitions at 0x200000 / 0x680000 / 0xB00000 (main 3.81 MB, main-int4 3.20 MB, light 3.05 MB per voice) |
 | PSRAM | **peak 5.3 of 8 MB** (weights copied to PSRAM + stage ring buffers + PCM chunk buffers + text buffers for 400 tokens; QEMU; 6.5 MB with the 256-wide vocoder) |
-| Internal SRAM | **peak 314 of 384 KB in QEMU, about 327 KB on the chip with the I2S DMA buffers** (192 KB hot scratch for 24-frame chunks, 12-row wide layers + 4 weight-staging tiles of 4 KB + stacks; was 340 of 384 KB with a 238 KB scratch for the 256-wide vocoder). The firmware checks at boot that the scratch fits in one block with room left over and falls back to PSRAM (slow) if not: look for `internal SRAM before the hot arena` in the boot log |
+| Internal SRAM | **peak 320 of 379 KB in QEMU (final firmware, `results/chip/qemu_sets_*.log`; the earlier single-set build peaked at 314 of 383 KB)** (192 KB hot scratch for 24-frame chunks, 12-row wide layers + 4 weight-staging tiles of 4 KB + stacks; was 340 of 384 KB with a 238 KB scratch for the 256-wide vocoder). The firmware checks at boot that the scratch fits in one block with room left over and falls back to PSRAM (slow) if not: look for `internal SRAM before the hot arena` in the boot log |
 | Work before the first audio | **23.0-24.3 M instructions and 3.9 MB of weights from PSRAM for the shipped 10-frame (125 ms) first chunk (main int8 set); 16.0-16.5 M and 3.45 MB for a 2-frame one (`first 2`). The same for any sentence length** (forward GRU, fixed style: the text side runs incrementally) |
-| Work per second of audio | 263 M int8 MACs + 1.2 M f32 MACs + other float work; about 85 M instructions on the dual-core critical path |
-| Weight traffic | 11 MB of weights read from PSRAM per second of audio (one weight pass serves a 24-frame, 300 ms chunk, the two 1202-wide layers two passes; 15 MB with the 256-wide vocoder, 17 MB before that, 38 MB with 8-frame chunks) |
+| Work per second of audio | 263 M int8 MACs + about 1 M f32 MACs + other float work; 76-86 M instructions on the dual-core critical path |
+| Weight traffic | 11 MB of weights read from PSRAM per second of audio (one weight pass serves a 24-frame, 300 ms chunk, the two 1202-wide layers two passes; 15 MB with the 256-wide vocoder, 17 MB before that; with 8-frame chunks and the 192-wide vocoder 28 MB, with the 256-wide one 38 MB) |
 
 ## 3b. int4 weights (blob format 2)
 
@@ -120,7 +120,7 @@ PESQ moves by 0.02 to 0.08; the mel distance grows by about 75 %, which is large
 | **int4, PIE unpack (shipped)** | **23.4-23.6 M, 3.20 MB** | **78-88 M (+1 %)** | **8.1-8.8 MB (-21 %)** |
 
 So the saving is in memory, not in instructions: with the PIE unpack the extra instructions are about 1 % and the weight traffic falls by a fifth, which matters only where the board is limited by the PSRAM
-(the pessimistic column of §4: whole-sentence RTF 0.92-0.93 against 0.97-0.98). Where it is limited by the CPU the int4 set is a hair slower than int8 (optimistic 0.47 against 0.46).
+(the pessimistic column of §4: whole-sentence RTF 0.92-0.93 against 0.97-0.98). Where it is limited by the CPU the int4 set is a hair slower than int8 (optimistic 0.45-0.48 against 0.43-0.47).
 
 ## 4. Estimated time to first audio and real-time factor
 
@@ -181,7 +181,7 @@ Still **estimated, not measured on silicon**; same CPI, bandwidth and overlap as
 | per second of audio: critical-path instructions, weights from PSRAM (+ about 4.5 MB of activation rings) | 76-86 M, 10.5-11.2 MB | 78-88 M, 8.1-8.8 MB | 73-83 M, 7.7-8.4 MB |
 | **time to first audio** (optimistic / central / pessimistic) | **124-132 / 171-180 / 251-260 ms** | **127-133 / 168-174 / 236-243 ms** | **118-124 / 157-164 / 222-229 ms** |
 | **RTF, whole sentences with the ramp** | **0.43-0.47 / 0.63-0.66 / 0.97-0.99** | **0.45-0.48 / 0.62-0.64 / 0.92-0.93** | **0.42-0.45 / 0.59-0.61 / 0.88** |
-| RTF, long-sentence limit (175 tokens) | 0.46 / 0.65 / 0.96 | 0.47 / 0.63 / 0.91 | 0.44 / 0.60 / 0.87 |
+| RTF, long-sentence limit (175 tokens) | 0.47 / 0.65 / 0.96 | 0.48 / 0.64 / 0.91-0.92 | 0.45 / 0.61 / 0.87 |
 | **start delay for gapless playback** | **125-130 / 176-182 / 558-663 ms** | **127-133 / 173-179 / 481-526 ms** | **118-124 / 162-169 / 406-429 ms** |
 | structural model, long-sentence RTF: nothing overlapped / `wmode 2` / `wmode 3` (optimistic; central; pessimistic) | 0.66, 0.78, 0.96-0.97 / 0.59, 0.69-0.70, 0.86-0.87 / 0.54-0.55, 0.64, 0.77-0.78 | 0.64, 0.75, 0.91-0.92 / 0.58, 0.68, 0.82 / 0.54, 0.62, 0.74 | 0.61, 0.71, 0.87 / 0.55, 0.64, 0.78 / 0.51, 0.59, 0.70 |
 

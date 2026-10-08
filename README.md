@@ -66,7 +66,7 @@ a question with hard words).
 | **Ito**, streaming front (as rated: 256-wide vocoder; the shipped 192-wide one is 3.3 M, see #10) | **4.4 M** | **ESP32-S3** | **4.00** (4/4/4/4) |
 | Ito variant with a bidirectional front (no streaming text side) | 4.5 M | ESP32-S3 | 4.00 |
 | Ito variant with a wider vocoder | 8.2 M | over the chip budget | 3.75 |
-| sanoTTS "amy" | 1.46 M | — | 2.00 |
+| sanoTTS "amy" | 1.45 M | — | 2.00 |
 | sanoTTS "heart-nano" | 0.29 M | — | 1.00 |
 
 Please read these numbers with their limits:
@@ -97,7 +97,7 @@ The scores were teacher 4.00, variant A 3.25, variant B 3.00. In #6
 and #7 the gap to the teacher had been 2.25 to 2.5 points, and in #9 it is 0.75. Details are in
 [`results/blind8/`](results/blind8).
 
-**Automatic metrics** on the eight sentences above (UTMOS; Whisper word error rate after number normalisation):
+**Automatic metrics** on the eight sentences above (UTMOS; Whisper word error rate after number normalisation; Ito measured with the first release's 256-wide vocoder):
 
 | | Teacher | Ito | sanoTTS amy | sanoTTS heart-nano |
 |---|---|---|---|---|
@@ -105,10 +105,39 @@ and #7 the gap to the teacher had been 2.25 to 2.5 points, and in #9 it is 0.75.
 | WER, Whisper medium.en / base | 0 / 0 | 0 / 0 | 0 / 1.0 % | 1.0 / 1.0 % |
 
 UTMOS cannot hear intonation, so treat it as a check, not a verdict. On 60 held-out sentences, Ito's pitch range is
-0.94 of the teacher's: the per-utterance spread of log-F0 relative to the teacher.
+0.94 of the teacher's (female voice; 0.97 male): the per-utterance spread of log-F0 relative to the teacher.
 
-**Benchmark against other small and embedded TTS systems:** see [`bench/`](bench) *(being merged)*.
-**Prior art:** see [`docs/prior_art.md`](docs/prior_art.md) *(being merged)*.
+**Benchmark against other small and embedded TTS systems** (54 prompts, 21 public systems and the teacher):
+
+Automatic metrics (mean over the prompts; Whisper large-v3 word error rate; higher is better except WER). Ito is the chip engine's exact output (host build, main int8 weight set); the 256-wide row is the first release, kept for comparison. All numbers, confidence intervals, paired differences and methods are in [`bench/`](bench).
+
+| System | Params | Runs on a microcontroller | UTMOSv2 | UTMOS22 | DNSMOS | WER % |
+|---|---|---|---|---|---|---|
+| *Built for or run on microcontrollers* | | | | | | |
+| Ito, shipped, female (chip-exact, ESP32-S3 emulated) | 3.34 M (2.99 M on chip) | ESP32-S3 (emulated, bit-exact) | 3.21 | 4.43 | 3.34 | 0.6 |
+| Ito, shipped, male | 3.34 M (2.99 M on chip) | ESP32-S3 (emulated, bit-exact) | 3.26 | 4.41 | 3.43 | 0.7 |
+| Ito, first release (256-wide vocoder) | 4.05 M | ESP32-S3 (emulated, bit-exact) | 3.15 | 4.44 | 3.39 | 0.4 |
+| Inflect Nano v2 (Owen Song) | 3.96 M | ESP32-P4, 3.5x slower than real time | 3.08 | 4.41 | 3.40 | 1.1 |
+| TinyTTS | 1.6 M | ESP32-S3, 22.9x slower than real time | 2.45 | 3.66 | 3.29 | 6.8 |
+| sanoTTS amy | 1.45 M | no (the MCU voice is a different 567 K one) | 2.80 | 3.96 | 3.18 | 1.2 |
+| sanoTTS heart-nano | 0.29 M | MCU-sized, no published timing | 1.33 | 2.17 | 2.97 | 1.7 |
+| eSpeak NG (rules) | - | community ports | 1.74 | 2.14 | 2.76 | 0.3 |
+| *Larger models (CPU or GPU)* | | | | | | |
+| Inflect Micro v2 (Owen Song) | 9.36 M | no | 3.46 | 4.41 | 3.38 | 1.0 |
+| Kitten TTS nano | 14.0 M | no | 1.99 | 3.93 | 3.31 | 1.1 |
+| Piper amy low | 15.6 M | no | 3.42 | 4.44 | 3.28 | 0.7 |
+| Piper lessac medium | 15.7 M | no | 3.69 | 4.28 | 3.29 | 0.7 |
+| MeloTTS EN | 51.9 M | no | 3.03 | 3.72 | 3.01 | 3.2 |
+| Supertonic 2 | 65.5 M | no | 3.62 | 4.44 | 3.35 | 2.4 |
+| Kokoro-82M | 81.8 M | no | 3.87 | 4.49 | 3.41 | 0.8 |
+| Supertonic 3 | 99.2 M | no | 3.84 | 4.45 | 3.32 | 1.7 |
+| MOSS-TTS-Nano | ~100 M | no | 3.44 | 4.37 | 3.21 | 1.7 |
+| Pocket TTS | 110 M | no | 3.31 | 4.33 | 3.31 | 2.5 |
+| StyleTTS 2 (Ito's teacher) | 191 M | no | 3.43 | 4.47 | 3.34 | 1.5 |
+
+What this says, and no more: among the neural systems built for or run on a microcontroller, Ito (female) has the highest UTMOSv2 (+0.13 over Inflect Nano v2, 95% interval 0.03 to 0.23), ties it on UTMOS22, is behind it on DNSMOS (3.34 vs 3.40) and has the lower word error rate (0.6 vs 1.1 %). Nine larger models, including the teacher, score higher on UTMOSv2, and none of them runs on an MCU. UTMOSv2 is stochastic (about 0.03 on these 54-clip means), the male and female rows are different speakers, and the Ito rows were scored on a different machine from the other systems' stored values (deterministic metrics reproduce; see [`bench/README.md`](bench/README.md)). Inflect's speed is a third-party measurement; Ito's is an estimate.
+
+**Prior art:** see [`docs/prior_art.md`](docs/prior_art.md).
 
 ## Size and compute
 
@@ -117,11 +146,11 @@ UTMOS cannot hear intonation, so treat it as a check, not a verdict. On 60 held-
 | Parameters | 3.34 M: acoustic front 1.62 M + vocoder 1.72 M (was 4.40 M with a 256-wide vocoder) |
 | Chip weights | **3.81 MB** main set (`ito_female_esp32s3.bin`; was 4.89 MB): int8 mel head and vocoder; int16 pitch path. Fallback sets for the boot calibration: main-int4 3.20 MB (`_int4`), light 3.05 MB (`_light`) |
 | Flash | 379 KB app + three 4.5 MB weight partitions (main 3.81 MB, main-int4 3.20 MB, light 3.05 MB per voice) |
-| PSRAM / SRAM | peak 5.3 of 8 MB PSRAM, 314 of 383 KB internal SRAM (QEMU; about 327 KB on the chip with the I2S buffers) |
+| PSRAM / SRAM | peak 5.3 of 8 MB PSRAM, 320 of 379 KB internal SRAM (QEMU, final firmware) |
 | Work before the first audio (125 ms first chunk) | **23.0–24.3 M instructions and 3.9 MB of weights read from PSRAM, for any sentence length** (exact counts from QEMU; 16.0–16.5 M and 3.45 MB for a 25 ms first chunk) |
 | Work per second of audio | 76–86 M instructions on the dual-core critical path, 10.5–11.2 MB of weights read from PSRAM (24-frame chunks; exact counts; the conversion to time is an estimate) |
 | Time to first audio | **estimated, not measured:** 124–132 ms optimistic, **171–180 ms central**, 251–260 ms pessimistic. The first chunk is 125 ms of audio and the chunks behind it are sized so that playback can start with it without a gap (the version of 2 October made 25 ms of sound after 145 ms and then fell silent for about 200 ms; `first 2` still does that; the first public version of the engine: 338 / 463 / 672 ms; the 256-wide vocoder of 3 October: 137–143 / 200–207 / 311–318 ms) |
-| Real-time factor | **estimated, not measured:** 0.43–0.47 optimistic, **0.63–0.66 central** (0.65 for long sentences), 0.97–0.99 pessimistic (0.96 for long sentences; 1.05 for a very short one). Below 1 is faster than real time; the pessimistic case (40 MB/s PSRAM, nothing overlapped, CPI 1.6) is **only just below it, which is not a margin**. With the 256-wide vocoder it was 0.77–0.80 central and 1.18–1.27 pessimistic |
+| Real-time factor | **estimated, not measured:** 0.43–0.47 optimistic, **0.63–0.66 central** (0.65 for long sentences), 0.97–0.99 pessimistic (0.96 for long sentences). Below 1 is faster than real time; the pessimistic case (40 MB/s PSRAM, nothing overlapped, CPI 1.6) is **only just below it, which is not a margin**. With the 256-wide vocoder it was 0.77–0.80 central and 1.18–1.27 pessimistic |
 | Start delay for gapless speech | **estimated:** optimistic = the time to first audio (125–130 ms), **central 176–182 ms**, pessimistic 558–663 ms (short sentences need the most); the firmware now plans this delay from its own measurements. With the 256-wide vocoder: 137–143 / 215–240 / 880–2200 ms. `delay <ms>` on the serial console holds playback for a chosen time |
 | On a laptop | RTF ≈ 0.01 on an Apple M4 Max CPU, for both the PyTorch model (whole utterance) and the C engine |
 
@@ -159,8 +188,8 @@ int4 weights save a fifth of the weight traffic for about 1 % more instructions 
   vocoder with a harmonic F0 source turns it into audio.
 - **Streaming by construction.** The GRU runs forward only, so the text side runs incrementally. Everything at frame
   rate is a convolution with a bounded right context: 23 frames in total, including the iSTFT overlap-add. This is
-  lookahead over features derived from the text, which is already known, so it adds no audio latency. Each 100 ms
-  chunk is computed from ring buffers. The streamed output is bit-identical to whole-utterance output on the chip, and equal to float precision (about 120 dB) in PyTorch.
+  lookahead over features derived from the text, which is already known, so it adds no audio latency. Each chunk
+  (on the chip a 125 ms first chunk, then 11, 12, 14, 18 and 24 frames of 12.5 ms; the Python `stream()` uses 100 ms ones) is computed from ring buffers. The streamed output is bit-identical to whole-utterance output on the chip, and equal to float precision (about 120 dB) in PyTorch.
 - **The engine** (`esp32/engine`) is new portable C99 code. It uses int8 and int16 GEMMs on the S3's vector unit
   through esp-nn, per-row activation scales (so streaming stays bit-exact), its own transcendental functions
   built from basic arithmetic (bit-identical on host and chip), and a mixed-radix FFT. It reads weights from PSRAM with tiled
@@ -196,7 +225,7 @@ from ito import Ito
 tts = Ito.load()                                   # female voice; downloads ito_female.pt on first use
 tts_g = Ito.load(voice="male")                     # male voice: ito_male.pt
 wav = tts.synthesize("Could you grab some quinoa on your way home?")   # float32 numpy, 24 kHz
-for chunk in tts.stream("A sentence of any length."):                  # 100 ms chunks, as on the chip
+for chunk in tts.stream("A sentence of any length."):                  # 100 ms chunks (the chip starts with a 125 ms one, then larger ones)
     ...
 ```
 
@@ -244,17 +273,17 @@ esp32/           engine/ (C99 engine), firmware/ (ESP-IDF app), host/ (host buil
 models/          README.md (how to get the weights from Hugging Face), LICENSE-WEIGHTS, TERMS.md
 samples/         chip-exact output for eight unseen sentences
 results/         blind10/, blind9/ and blind8/ (listening tests), chip/ (host tests, QEMU log, op profile, estimates)
-bench/           benchmark against other small TTS systems (being merged)
-docs/            prior_art.md (being merged)
+bench/           benchmark against other small TTS systems (results, scoring script)
+docs/            prior_art.md
 ```
 
 ## Limitations
 
-- English only, two voices (D female, G male); one voice per chip weights file.
+- English only, two voices (female and male); one voice per chip weights file.
 - Speed is estimated until board measurements are published; the boot calibration that picks a weight set and plans the start delay has only been tested with simulated timings.
 - The chip uses one fixed speaking style. Expressiveness comes from the text through the front, but there is no
   per-sentence style control.
-- The pitch range is still slightly narrower than the teacher's (0.94).
+- The pitch range is still slightly narrower than the teacher's (0.94 female, 0.97 male).
 - Requires an ESP32-S3 with 8 MB PSRAM (N16R8 recommended); the weights alone are 3.8 MB.
 - Grapheme-to-phoneme runs on the host (espeak-ng), not on the chip.
 - Ito's output is synthetic speech in the voice of a real (LibriTTS-R) speaker. Please disclose that it is synthetic
