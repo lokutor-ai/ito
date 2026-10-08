@@ -4,14 +4,11 @@ The whole text-to-speech chain runs on an **ESP32-S3-DevKitC-1 N16R8** (16 MB fl
 encoder, duration head, prosody net, mel head, harmonic F0 source, ConvNeXt vocoder and iSTFT. Phonemisation runs on
 the host that sends the text (`tools/say.py`). The board receives token ids and plays 24 kHz audio over I2S.
 
-> **First run on a physical board (2026-10-08):** found on first run on a physical board: the GDMA self-test crashed (a heap overflow in the self-test buffer); fixed in fedbd26. QEMU cannot exercise the real GDMA path. The numbers in this box are still estimates until the measured figures are reviewed and published.
+> **First run on a physical board (8 October 2026):** the first public prebuilt image crash-looped on first boot on real hardware: its GDMA self-test overflowed a heap buffer, which QEMU cannot show. That run found four first-silicon bugs (the GDMA self-test heap overflow, bench scratch fragmentation, underrun accounting, USB console input), fixed in `fedbd26` (with the notes in `e196730`). The prebuilt image in this repository is the fixed one, and the logs of the crashing runs are kept in `esp32/logs/board_crash_*.log`. The measured numbers below come from the fixed image.
 >
-> **Status (5 October 2026).** The engine and firmware are verified on the host and in Espressif's QEMU: the firmware's
-> PCM is bit-identical to the host build, for all three weight sets of both voices. **Nothing has run on silicon yet.** Every timing here is an **estimate**
-> from exact QEMU instruction counts and an assumed CPI and PSRAM bandwidth. **Real-time playback is estimated at 0.63-0.66 centrally (0.65 for long sentences) and 0.97-0.99 pessimistically with the main set, but not established** (§4).
-> **What the firmware does about it:** it carries up to three weight sets per voice (main int8, main int4, a light set with one block fewer), measures the real chunk times of each at boot (`CALIB`, `TIER_SELECT`),
-> keeps the first set whose measured RTF is <= 0.85, plans the playback start delay from those measurements, and says so (`WARNING: DEGRADED`) if even the fastest set measures >= 0.95 (§4c). That is a guarantee **by measurement on the board that runs it**, not a promise about silicon we have not seen.
-> We will publish board measurements as soon as we have them.
+> **Status (8 October 2026).** The engine and firmware are verified on the host and in Espressif's QEMU: the firmware's PCM is bit-identical to the host build, for all three weight sets of both voices. **Measured on a board** (ESP32-S3-DevKitC-1 N16R8 (rev v0.2, 8 MB octal PSRAM at 80 MHz, 16 MB flash, 240 MHz), 8 October 2026, firmware fedbd26, female voice): with the main int8 set the first audio chunk (125 ms of audio) was computed and ready 184 ms after the text was handed to the engine (183.9–184.3 ms over the three demo sentences), and the real-time factor was 0.66 on the boot calibration sentence (0.660–0.674 on the demo sentences). Gap-free playback is a separate number: the firmware plans to start playback about 246 ms after the text arrives, and with that planned delay the three demo sentences had 0 underruns. No DAC or amplifier was attached and no audio was listened to, so the I2S/DAC output stage is not included, these are not acoustic measurements, and the underrun count is the firmware's own accounting against its playout clock. The first audio chunk is ready in under 200 ms and synthesis runs faster than real time on this board (RTF 0.66), with 0 underruns when playback starts after the planned 246 ms delay. The other two weight sets were only timed by hand once afterwards with the `tier` serial command (one run each, not chosen by the boot calibration): main int4 set RTF about 0.65, first chunk about 180 ms; light set RTF about 0.61, first chunk about 168 ms. Against the pre-board estimates (optimistic / central / pessimistic: RTF 0.43–0.47 / 0.63–0.66 / 0.97–0.99, first audio chunk 124–132 / 171–180 / 251–260 ms), the measured RTF of 0.66 is at the top of the central estimate and far from the pessimistic one (0.97–0.99), and the measured first chunk of 184 ms is slightly above the central estimate and below the pessimistic one. Not measured: the main int4 and light weight sets beyond one manual run each, the male voice, a second board, audio quality through a DAC and power draw. Still estimates: the optimistic, central and pessimistic columns, which are the pre-board predictions kept for comparison. Details in §4a. All other timings in §3 and §4 are **pre-board estimates** from exact QEMU instruction counts and an assumed CPI and PSRAM bandwidth.
+>
+> **What the firmware does about it:** it carries up to three weight sets per voice (main int8, main int4, a light set with one block fewer), measures the real chunk times of each at boot (`CALIB`, `TIER_SELECT`), keeps the first set whose measured RTF is at most 0.85, plans the playback start delay from those measurements, and says so (`WARNING: DEGRADED`) if even the fastest set measures 0.95 or more (§4c). That is a check by measurement on the board that runs it, not a promise about other boards.
 
 ## 1. Flash and talk
 
@@ -83,8 +80,8 @@ and per second of audio.
 |---|---|
 | Weights | 3.81 MB blob: 2.37 M int8 + 0.54 M int16 + 0.08 M f32 parameters (the style FiLM is precomputed into a table). The vocoder is 192 wide (576 inner, 5 ConvNeXt blocks); the 4.89 MB blob of 3 October had a 256/768 vocoder (blind test #10: no audible difference, see the root README) |
 | Flash | app 379 KB in a 2 MB slot at 0x10000; three 4.5 MB weight partitions at 0x200000 / 0x680000 / 0xB00000 (main 3.81 MB, main-int4 3.20 MB, light 3.05 MB per voice) |
-| PSRAM | **peak 5.3 of 8 MB** (weights copied to PSRAM + stage ring buffers + PCM chunk buffers + text buffers for 400 tokens; QEMU; 6.5 MB with the 256-wide vocoder) |
-| Internal SRAM | **peak 320 of 379 KB in QEMU (final firmware, `results/chip/qemu_sets_*.log`; the earlier single-set build peaked at 314 of 383 KB)** (192 KB hot scratch for 24-frame chunks, 12-row wide layers + 4 weight-staging tiles of 4 KB + stacks; was 340 of 384 KB with a 238 KB scratch for the 256-wide vocoder). The firmware checks at boot that the scratch fits in one block with room left over and falls back to PSRAM (slow) if not: look for `internal SRAM before the hot arena` in the boot log |
+| PSRAM | measured on the board: peak 5.2 of 8 MB PSRAM (ESP32-S3-DevKitC-1 N16R8 (rev v0.2, 8 MB octal PSRAM at 80 MHz, 16 MB flash, 240 MHz), 8 October 2026, firmware fedbd26, female voice). Pre-board QEMU figure: peak 5.3 of 8 MB (weights copied to PSRAM + stage ring buffers + PCM chunk buffers + text buffers for 400 tokens) |
+| Internal SRAM | measured on the board: peak 354 of 374 KB (with the I2S DMA buffers) (ESP32-S3-DevKitC-1 N16R8 (rev v0.2, 8 MB octal PSRAM at 80 MHz, 16 MB flash, 240 MHz), 8 October 2026, firmware fedbd26, female voice). Pre-board QEMU figure: 320 of 379 KB. The firmware checks at boot that the scratch fits in one block with room left over and falls back to PSRAM (slow) if not: look for `internal SRAM before the hot arena` and `arena: hot ... in internal SRAM` in the boot log (this board: hot arena in internal SRAM) |
 | Work before the first audio | **23.0-24.3 M instructions and 3.9 MB of weights from PSRAM for the shipped 10-frame (125 ms) first chunk (main int8 set); 16.0-16.5 M and 3.45 MB for a 2-frame one (`first 2`). The same for any sentence length** (forward GRU, fixed style: the text side runs incrementally) |
 | Work per second of audio | 263 M int8 MACs + about 1 M f32 MACs + other float work; 76-86 M instructions on the dual-core critical path |
 | Weight traffic | 11 MB of weights read from PSRAM per second of audio (one weight pass serves a 24-frame, 300 ms chunk, the two 1202-wide layers two passes; 15 MB with the 256-wide vocoder, 17 MB before that; with 8-frame chunks and the 192-wide vocoder 28 MB, with the 256-wide one 38 MB) |
@@ -126,7 +123,7 @@ So the saving is in memory, not in instructions: with the PIE unpack the extra i
 
 ## 4. Estimated time to first audio and real-time factor
 
-**Estimated from exact QEMU instruction counts. Not measured on silicon.** QEMU runs the real firmware with `-icount shift=0`
+**Pre-board estimates from exact QEMU instruction counts (the measurement on the board is in §4a).** QEMU runs the real firmware with `-icount shift=0`
 (one instruction = one virtual nanosecond), so the instruction counts are exact: per core from text-in to the first chunk,
 per second of audio, and on the dual-core critical path (`tools/qemu/icount_profile.sh`, then
 `python3 esp32/tools/icount_estimate.py esp32/logs/qemu_icprof.log`). So are the bytes of weights the GEMM staging reads from PSRAM.
@@ -174,7 +171,7 @@ Then I2S adds at most one 20 ms DMA buffer.
 ### The three weight sets (same method, final firmware, both voices)
 
 Exact counts and estimates for each set that the boot calibration can choose from (§4c); `icprof 2` on the final firmware, both voices, the self-test sentence and the three demo sentences (25 / 84 / 108 / 175 tokens), ranges over all of them.
-Still **estimated, not measured on silicon**; same CPI, bandwidth and overlap assumptions as above.
+Pre-board **estimates** (the measured main-set numbers are in §4a; the int4 and light sets were timed by hand once); same CPI, bandwidth and overlap assumptions as above.
 
 | | main int8 (set 0) | main int4 (set 1) | light, 4 blocks int4 (set 2) |
 |---|---|---|---|
@@ -242,8 +239,7 @@ Reading this honestly:
   The model of time is unchanged: CPI 1.3 / 1.45 / 1.6, PSRAM 80 / 60 / 40 MB/s, 1.0 / 0.5 / 0.0 of the PSRAM time hidden behind compute.
 - **What changed on 5 October.** The vocoder is now 192 wide (576 inner) instead of 256 (768): -22 % weights, -24 % MACs per second of audio, no engine change (the widths are read from the blob).
   Blind test #10 (one listener, four sentences per system, female voice) rated the reference 4.25, the 256-wide vocoder 4.00, the 192-wide one 4.00 and the 192-wide one with int4 weights 4.00: no difference he could hear.
-- **Real time is still not established on silicon.** Only the board can say. If the effective PSRAM bandwidth is 60 MB/s or more, real time holds with margin.
-  If not, the fallbacks are int4 weights in the ConvNeXt blocks and fewer blocks (a 4-block fine-tune exists and is being added as a fallback weight set).
+- **Real time was measured on one board (§4a).** The first audio chunk is ready in under 200 ms and synthesis runs faster than real time on this board (RTF 0.66), with 0 underruns when playback starts after the planned 246 ms delay. This is one board, one boot run and a few demo runs with the female voice and the main int8 set; other boards and the male voice are not measured. We will report more boards and the other voice as they are measured.  If a board turns out slower, the fallbacks are int4 weights in the ConvNeXt blocks and fewer blocks (the int4 and light sets ship as fallback weight sets).
 
 **What the board prints** (please send the whole log from reset to `READY`):
 
@@ -258,6 +254,30 @@ BOARD_SUMMARY ... best_wmode=... mean first chunk, mean RTF, GEMM GMAC/s per mod
 
 These lines give the effective G, the real float-work time, the PSRAM bandwidth and the time to first audio directly.
 
+## 4a. Measured on the board (8 October 2026)
+
+**Measured on a board** (ESP32-S3-DevKitC-1 N16R8 (rev v0.2, 8 MB octal PSRAM at 80 MHz, 16 MB flash, 240 MHz), 8 October 2026, firmware fedbd26, female voice): with the main int8 set the first audio chunk (125 ms of audio) was computed and ready 184 ms after the text was handed to the engine (183.9–184.3 ms over the three demo sentences), and the real-time factor was 0.66 on the boot calibration sentence (0.660–0.674 on the demo sentences). Gap-free playback is a separate number: the firmware plans to start playback about 246 ms after the text arrives, and with that planned delay the three demo sentences had 0 underruns. No DAC or amplifier was attached and no audio was listened to, so the I2S/DAC output stage is not included, these are not acoustic measurements, and the underrun count is the firmware's own accounting against its playout clock. The first audio chunk is ready in under 200 ms and synthesis runs faster than real time on this board (RTF 0.66), with 0 underruns when playback starts after the planned 246 ms delay. The other two weight sets were only timed by hand once afterwards with the `tier` serial command (one run each, not chosen by the boot calibration): main int4 set RTF about 0.65, first chunk about 180 ms; light set RTF about 0.61, first chunk about 168 ms.
+
+| | measured | pre-board estimate for this set (optimistic / central / pessimistic) |
+|---|---|---|
+| Real-time factor (boot calibration, 84-token sentence) | **0.66** | 0.43–0.47 / 0.63–0.66 / 0.97–0.99 |
+| Real-time factor, demo sentences (25 / 108 / 175 tokens) | 0.674, 0.660, 0.662 | |
+| First audio chunk (125 ms of audio) computed and ready after the text is handed to the engine; excludes the I2S/DAC stage | **184 ms** (183.9–184.3 ms over the demo sentences) | 124–132 / 171–180 / 251–260 ms |
+| Playback start delay planned by the firmware for gap-free playback | about 246 ms (246–247 ms) | 125–130 / 176–182 / 558–663 ms |
+| Underruns in the demo sentences, with that planned delay (firmware accounting; no audio output) | 0 | 0 expected |
+| PSRAM to SRAM copy / GDMA / cached reads (boot benchmark) | 86.0 / 36.4 / 89.2 MB/s | 40-80 MB/s assumed for the copy |
+| Fastest weight-staging mode (`BOARD_SUMMARY`) | `direct`: mean first chunk 184.4 ms, mean RTF 0.664, GEMM 1.060 GMAC/s | the central column assumed `wmode 3` |
+| Main int4 set, timed by hand once (`tier 1`), not boot-chosen | RTF about 0.65, first chunk about 180 ms | |
+| Light set, timed by hand once (`tier 2`), not boot-chosen | RTF about 0.61, first chunk about 168 ms | |
+
+Boot calibration (`TIER_SELECT`): chose the main int8 set with a measured RTF of 0.66 (status OK, degraded flag 0; main int4 and light not needed, so not measured).
+
+Against the pre-board estimates (optimistic / central / pessimistic: RTF 0.43–0.47 / 0.63–0.66 / 0.97–0.99, first audio chunk 124–132 / 171–180 / 251–260 ms), the measured RTF of 0.66 is at the top of the central estimate and far from the pessimistic one (0.97–0.99), and the measured first chunk of 184 ms is slightly above the central estimate and below the pessimistic one. In the boot benchmark the PSRAM-to-SRAM copy ran at 86.0 MB/s (above the 40–80 MB/s the estimates assumed), GDMA at 36.4 MB/s (slower than a plain copy), cached PSRAM reads at 89.2 MB/s. The firmware therefore stages weights with `direct` reads, the fastest of the four modes it benchmarks (mean RTF 0.66, GEMM 1.060 GMAC/s). Not measured: the main int4 and light weight sets beyond one manual run each, the male voice, a second board, audio quality through a DAC and power draw. Still estimates: the optimistic, central and pessimistic columns, which are the pre-board predictions kept for comparison.
+
+**What 'first audio' means here.** The time from the text being handed to the engine until the first audio chunk (125 ms of audio) is computed and ready in memory. No DAC or amplifier was attached and no audio was listened to, so the I2S/DAC output stage is not included, these are not acoustic measurements, and the underrun count is the firmware's own accounting against its playout clock. Gap-free playback is a separate number: the firmware plans to start playback about 246 ms after the text arrives, and with that planned delay the run had 0 underruns. We do not claim that speech is audible or gap-free at 184 ms.
+
+Method: one board, one cold boot of the fixed prebuilt firmware (commit fedbd26) flashed as in §1, then the `tier` command by hand; the numbers are the ones the firmware prints (`BOARD_SUMMARY`, `CALIB`, `TIER_SELECT`, `TIMING`). Notes from the person who ran it: First run on silicon; native USB only, no DAC/amp attached (audio not heard). Bench scratch limited to 8 GEMM rows (free internal SRAM fragmented). Underruns counted against the DAC playout clock. The full boot log is in the repository as `esp32/logs/board_fixed_boot_and_tiers_2026-10-08.log`.
+
 ## 4b. Boot calibration and start-delay policy
 
 `engine/itofs_sched.c` is the policy that turns **measured** chunk times into decisions. It has no clock of its own: the firmware feeds it microseconds, the tests feed it simulated ones.
@@ -269,9 +289,9 @@ These lines give the effective G, the real float-work time, the PSRAM bandwidth 
 `make test_sched` (host) checks it with simulated timings against an independent discrete-event model of the speaker (true chunk times of a *different* sentence with its own jitter): the weight-set choice at the exact thresholds and with missing sets;
 **8,640 random sentences** (RTF 0.30 to 0.85, three splits of fixed and per-frame cost, 3 to 400 tokens, +-4 % jitter per chunk and +-4 % sentence-to-sentence cost between calibration and playback) with **0 underruns**; the first audio released with no extra wait on a fast board;
 a board slower than real time reported infeasible rather than hidden; slower-than-calibrated chunks seen early raising the delay. Outside the margin (+-8 % and +-8 %) 4 of 2,880 sentences underrun, which the test reports as information, not a guarantee.
-Nothing here runs on a board yet; the firmware integration is §4c.
+The firmware integration is §4c; its first run on a board is reported in §4a.
 
-## 4c. Weight sets and the boot guarantee
+## 4c. Weight sets and the boot check
 
 The board carries up to three weight sets per voice, best quality first, each a complete blob in its own flash partition (`firmware/partitions.csv`, [`BLOB_FORMAT.md`](BLOB_FORMAT.md)):
 
@@ -298,9 +318,9 @@ been produced; production of chunk k waits for the PCM buffer of chunk k - 6) wi
 (never earlier than the first chunk is ready). While the player waits, the times actually seen in this utterance replace the model's, so a sentence that turns out slower than calibrated raises the delay before playback starts. `delay <ms>` fixes it by hand, `delay auto` returns to the plan.
 The `TIMING` line reports the planned delay and the underruns.
 
-**What this does and does not guarantee.** If the chunk times measured at boot are representative of later sentences (to within the 25 % margin), then for a set with a measured RTF below the target playback is gapless, with the
-smallest start delay the model allows. It is a guarantee **by measurement, on the board that makes it**: the margin, the 0.85 target and the representativeness of the calibration sentence are engineering choices that a real board can contradict
-(a second core busy with something else, a thermal throttle, PSRAM contention from a radio). It cannot make a slow board fast: with no fallback below 0.95 the firmware says so instead of stuttering silently. Nothing here has run on silicon.
+**What this does and does not promise.** If the chunk times measured at boot are representative of later sentences (to within the 25 % margin), then for a set with a measured RTF below the target playback is gapless, with the
+smallest start delay the model allows. It is a check **by measurement, on the board that makes it**: the margin, the 0.85 target and the representativeness of the calibration sentence are engineering choices that a real board can contradict
+(a second core busy with something else, a thermal throttle, PSRAM contention from a radio). It cannot make a slow board fast: with no fallback below 0.95 the firmware says so instead of stuttering silently. It has run on one board once (§4a): the boot calibration chose the main int8 set with a measured RTF of 0.66 (status OK, degraded flag 0; main int4 and light not needed, so not measured); whether the margin and the 0.85 target hold on other boards, supplies and temperatures is not tested.
 
 **How it is tested without a board.**
 - `make test_sched` (host): the policy (`engine/itofs_sched.c`, no clock of its own) against a discrete-event model of the speaker with **simulated timings**: 10 weight-set choices (thresholds at exactly 0.85 and 0.95, missing sets); 8,640 random sentences
@@ -339,14 +359,9 @@ Timings printed under QEMU are emulator wall-clock times and say nothing about t
 
 ## 6. Not verified yet
 
-- **Anything on silicon:** all timings, the octal PSRAM bandwidth, the dual-core speed-up, GDMA staging (QEMU has no
-  GDMA: the control flow of `wmode 2` and `wmode 3` is tested there with a software copy, but the real `esp_async_memcpy` branch, its interrupts and the
-  two cores sharing the bus are not), I2S output, the BOOT button, and `say.py` over real USB. The boot benchmark runs all four staging modes,
-  compares each one's audio with the direct mode's and keeps the fastest that matches.
-- **The boot self-calibration and the start-delay plan on a board:** the policy is tested with simulated timings (host and QEMU), but the claim that the 1.25 margin covers the variation between the calibration sentence and later ones, and the 0.85 target, is untested on silicon. So is the PIE int4 unpack there (QEMU's PIE model is not silicon; the boot check against the C code is the guard).
-- **The hardware build itself** (octal PSRAM, QIO, I2S) was built but never run. QEMU runs the quad-PSRAM, no-I2S build
-  of the same sources.
-- The float-work cycle costs behind the estimates are assumptions.
+- **On silicon, one board and one run are now measured (§4a)** (ESP32-S3-DevKitC-1 N16R8 (rev v0.2, 8 MB octal PSRAM at 80 MHz, 16 MB flash, 240 MHz), 8 October 2026, firmware fedbd26, female voice): the firmware booted, passed its bit-exact self-test against the host engine, and printed the numbers above. GDMA staging: the on-board GDMA self-test passed; int4 unpack: PIE kernel (its on-board check against the C code passed). The first run also found and fixed four first-silicon bugs (a GDMA self-test heap overflow that crash-looped the first public prebuilt image, bench scratch fragmentation, underrun accounting, USB console input); see the commits and the note at the top. Not measured or not verified: the audio quality through a DAC (none was attached, nothing was listened to), the I2S output stage latency, power draw, the BOOT button, other boards, the male voice, long-run thermal behaviour and supply sensitivity, and the int4 and light sets in the boot calibration (each was timed by hand once only).
+- **The boot self-calibration and the start-delay plan** ran on this board once: the boot calibration chose the main int8 set with a measured RTF of 0.66 (status OK, degraded flag 0; main int4 and light not needed, so not measured). Whether the 1.25 margin covers the variation between the calibration sentence and later ones is only partly tested (the three demo sentences had 0 underruns with the planned delay).
+- **Most of the float-work cycle costs behind the pre-board estimates** are still assumptions; the board's `BENCH_*` lines measure some of them.
 - No formal listening test compares the quantised chip output with the float model. The PESQ of 4.52 against float
   suggests the difference is small.
 
