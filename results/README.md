@@ -2,20 +2,20 @@
 
 ## blind10/: listening test #10 (5 October 2026)
 
-`ratings.json`: the lighter vocoder. One expert listener rated 16 clips (4 systems x the same 4 sentences as #9) of the female voice for
+`ratings.json`: the lighter vocoder. One listener (an author of the accompanying paper) rated 16 clips (4 systems x the same 4 sentences as #9) of the female voice for
 naturalness, 1-5, system names hidden: teacher 4.25, Ito with the 256-wide vocoder 4.00, Ito with the 192-wide vocoder 4.00, Ito with the
-192-wide vocoder and int4 weights 4.00. He heard no difference between the three Ito systems. One listener, four clips per system.
+192-wide vocoder and int4 weights 4.00. This test is the chip build against the teacher only; it did not include sanoTTS. He heard no difference between the three Ito systems. One listener, four clips per system, integer scores.
 
 
 ## blind9/: listening test #9 (2 October 2026)
 
-- `ratings.json`: per-clip scores, the unblinded key, and the per-system means. One expert listener rated 24 clips
+- `ratings.json`: per-clip scores, the unblinded key, and the per-system means. One listener (an author of the accompanying paper) rated 24 clips
   (6 systems × 4 sentences) for naturalness on a 1–5 scale, with the system names hidden.
 - `sentences.json`: the eight test sentences. Sentences 01, 03, 04 and 06 were rated.
 - `metrics.json`: UTMOS and Whisper WER for all systems on all eight sentences (medium.en and base, after number
   normalisation).
 - `audio/ito/`, `audio/teacher/`: the rated clips of Ito and of the teacher, for all eight sentences. The Ito clips
-  come from the float PyTorch model, through the streaming path, with the optional text-to-style predictor. All clips
+  come from the float PyTorch model (first release, 256-wide vocoder), through the streaming path, with the optional text-to-style predictor: they are not the chip build (the chip build was rated in #10). sanoTTS amy and heart-nano are released voices, not the 567 K on-chip voice. All clips
   are trimmed and normalised to −20 LUFS. The sanoTTS baseline clips are not redistributed.
 
 | system | mean | per sentence (01 / 03 / 04 / 06) |
@@ -27,12 +27,12 @@ naturalness, 1-5, system names hidden: teacher 4.25, Ito with the 256-wide vocod
 | sanoTTS amy | 2.00 | 2 / 3 / 2 / 1 |
 | sanoTTS heart-nano | 1.00 | 1 / 1 / 1 / 1 |
 
-There was one listener and four sentences per system, so differences under about half a point are not meaningful.
+There was one listener, who is an author and built the systems, and four sentences per system with integer scores, so differences under about half a point are not meaningful. The system names were hidden, but the sanoTTS voices differ audibly from Ito's, so "blind" does not mean unidentifiable.
 
 ## blind8/: listening test #8 (1 October 2026)
 
 Two earlier Ito variants against the reference (teacher) model; one listener, four held-out sentences. Reference
-4.00, variant A 3.25, variant B 3.00.
+4.00, variant A (adversarial-mel front) 3.25 (4, 3, 4, 2), variant B (control front) 3.00 (3, 3, 4, 2): higher on one sentence, equal on three.
 
 ## chip/: the on-chip engine (`ito_female_esp32s3.bin`, `ito_male_esp32s3.bin`; the 192-wide vocoder of 5 October)
 
@@ -52,3 +52,5 @@ Two earlier Ito variants against the reference (teacher) model; one listener, fo
 
 The Ito audio here (and in `samples/`) is output of the Ito voice model and is shared under CC BY-NC-SA 4.0, with
 Lokutor's terms in [`models/TERMS.md`](../models/TERMS.md).
+
+A public listening test has been prepared; it has no responses yet and nothing from it is reported in this repository.

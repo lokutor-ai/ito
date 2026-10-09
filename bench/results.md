@@ -12,8 +12,7 @@ transparency, the rows of the first release (256-wide vocoder; 4.05 M parameters
 **v1.2 changes (2026-10-08):** the Ito rows were re-rendered and re-scored with the shipped model (`ito_192_*` rows). The
 first-release rows (`ito_v3_chip_fefix`, `ito_v3_chip`, `ito_v3_float`) are unchanged and no longer the headline. The
 speed/size fields of the old rows (4.89 MB, 83.6 M ops, ~350 M MACs/s, "TTFA 212 ms @0.5 GOPS") describe the 256-wide model and
-are superseded; the shipped model's estimates are in `esp32/README.md`. The Inflect Nano size is 3.96 M (Owen Song's figure,
-3,966,721 parameters), and the public systems are 21, not 22 (the 22 counted the teacher). All other systems' scores are
+are superseded; the shipped model's estimates are in `esp32/README.md`. The Inflect Nano size is 3.97 M (3,966,721 parameters; Owen Song's model card says 3.96 M), and the public systems are 21, not 22 (the 22 counted the teacher). All other systems' scores are
 the stored ones (not re-run); their audio is not re-rendered.
 
 **v1.1 changes:** added Inflect Nano/Micro v2, TinyTTS (pschatzmann port), Pocket TTS, Supertonic 2/3, MOSS-TTS-Nano;
@@ -40,13 +39,13 @@ nondeterministically). tronghieuit/tiny-tts is the same model as the pschatzmann
   UTMOSv2 0.00 [−0.07, 0.07] / −0.02 [−0.10, 0.06], UTMOS22 −0.00 / −0.02 [−0.04, −0.00], DNSMOS −0.00 / −0.04 [−0.06, −0.02], WER
   identical. So the fallback sets cost at most a few hundredths on the predictors (the audio is deterministic; they are post-training
   quantizations of the same model). The first-release int8-vs-float comparison remains: no measurable difference.
-- **MCU-class systems (measured or emulated on a microcontroller):** vs **Inflect Nano v2** (3.96 M, ESP32-P4, ~3.5x slower
+- **MCU-class systems (measured or emulated on a microcontroller):** vs **Inflect Nano v2** (3.97 M, ESP32-P4, ~3.5x slower
   than real time) Ito female is **slightly ahead on UTMOSv2** (+0.13 [0.03, 0.23]; the lower bound is close to 0 and UTMOSv2
   is noisy), **tied on UTMOS22** (4.43 vs 4.41; −0.02 [−0.05, 0.01]), **behind on DNSMOS** (3.34 vs 3.40; Inflect +0.06
   [0.03, 0.08]) and more intelligible (WER 0.6 vs 1.1 %, Δ 0.6 pts [0.1, 1.1]). With the male voice Ito is ahead on UTMOSv2 (+0.18 [0.08, 0.27]) and DNSMOS
   (+0.03 [0.00, 0.06]), tied on UTMOS22 (Δ 0.00 [−0.03, 0.03]), WER 0.7 vs 1.1 % (Δ 0.4 [0.0, 0.9]). vs **TinyTTS** (1.6 M, ESP32-S3,
   22.9x slower than real time): +0.76 UTMOSv2, WER 0.6 vs 6.8 %. vs **sanoTTS heart-nano** (0.29 M): +1.88. Ito is the only one
-  of these that streams; its speed was measured on one board for the female main set (first audio chunk computed in 184 ms without the DAC stage, RTF 0.66; `esp32/README.md` §4a), and is a pre-board estimate for everything else.
+  of these systems that streams; its speed was measured on one board for the female main set (first audio chunk computed in 184 ms from the phoneme ids, so without host-side G2P, the serial transfer and the DAC stage, RTF 0.66; `esp32/README.md` §4a), and is a pre-board estimate for everything else.
 - **Models that beat Ito female on UTMOSv2** (all ≥ 9 M params, none MCU-class; CIs exclude 0): Kokoro-82M (+0.66),
   Supertonic 3 (+0.63), Piper lessac medium (+0.48), Supertonic 2 (+0.41), **Inflect Micro v2 (+0.25, 9.36 M)**,
   MOSS-TTS-Nano (+0.22), our teacher (+0.22, the model Ito was distilled from), Piper amy low (+0.21) and Piper lessac low (+0.18); Pocket TTS (+0.10 [−0.01, 0.21]) is
@@ -62,10 +61,10 @@ nondeterministically). tronghieuit/tiny-tts is the same model as the pschatzmann
   and Kitten are wider (3.2–4.4 st), sanoTTS and MOSS flatter (2.2–2.6). The male voice's 2.42 st is a different
   speaker's. A flatness check, not a naturalness score.
 - **Predictors disagree** for some systems (Kitten: UTMOS22 ≈ 4.0 vs UTMOSv2 ≈ 1.9). The earlier blind test #9 (one
-  listener, 4 sentences) had teacher 4.75, Ito 4.00, sanoTTS amy 2.00. Run `listening_test/` before claiming
+  listener, 4 sentences) had teacher 4.75, Ito 4.00 (float model with style predictor, not the chip build), sanoTTS amy 2.00; the listener is an author. A public test has been prepared and has no responses yet. Run `listening_test/` before claiming
   naturalness against Kokoro/Supertonic/Piper/Inflect Micro.
 - **Speed figures are not like-for-like:** Ito's TTFA/RTF were measured on one board for the female main set (first audio
-  chunk computed in 184 ms, excluding the DAC stage; RTF 0.66; `esp32/README.md` §4a); everything else is a pre-board estimate from
+  chunk computed in 184 ms from the phoneme ids, excluding host-side G2P, the serial transfer and the DAC stage; RTF 0.66; `esp32/README.md` §4a); everything else is a pre-board estimate from
   exact instruction counts and an assumed PSRAM bandwidth (shipped model: 69.7 M int8 MACs before the 8-frame first chunk of the host tool, 124–132 / 171–180 / 251–260 ms
   to first audio and RTF 0.43–0.47 / 0.63–0.66 / 0.97–0.99 optimistic / central / pessimistic, `esp32/README.md`; ~263 M int8
   MACs per second of audio). Inflect Nano (P4) and TinyTTS (S3/P4) MCU numbers are third-party measurements from their
@@ -91,7 +90,7 @@ nondeterministically). tronghieuit/tiny-tts is the same model as the pschatzmann
 | sanoTTS kristin | 1.40 M | no (paper: not run on MCU) | 1.98 [1.89, 2.06] | 3.56 [3.49, 3.63] | 3.11 [3.05, 3.16] | 6.8 [4.1, 9.8] | 3.4 [1.9, 5.1] | 2.15 [1.96, 2.35] | n/p |
 | sanoTTS heart | 2.27 M | no published MCU run | 1.95 [1.88, 2.01] | 3.19 [3.12, 3.26] | 3.14 [3.08, 3.20] | 1.7 [0.5, 3.3] | 0.6 [0.2, 1.2] | 2.57 [2.51, 2.64] | n/p |
 | sanoTTS heart-nano | 0.29 M (int8) | MCU-sized; no published timing for this voice | 1.33 [1.27, 1.39] | 2.17 [2.08, 2.27] | 2.97 [2.90, 3.04] | 1.7 [0.5, 3.1] | 0.7 [0.2, 1.4] | 2.26 [2.18, 2.35] | published for sanoTTS's 567 K 'robot' voice only: RTF 0.383 measured on ESP32-S3 (repo README; paper: 0.22x RT, ~45 MMAC/s) |
-| Inflect Nano v2 (Owen Song) | 3.96 M | yes, ESP32-P4 (third-party port, whole-utterance) | 3.08 [3.01, 3.15] | 4.41 [4.38, 4.44] | 3.40 [3.38, 3.42] | 1.1 [0.4, 1.8] | 0.4 [0.2, 0.7] | 3.79 [3.59, 3.97] | ESP32-P4 @360 MHz: RTF ~3.5 (0.47 s audio in 1.66 s), inlanger/esp32-p4-inflect-tts README |
+| Inflect Nano v2 (Owen Song) | 3.97 M | yes, ESP32-P4 (third-party port, whole-utterance) | 3.08 [3.01, 3.15] | 4.41 [4.38, 4.44] | 3.40 [3.38, 3.42] | 1.1 [0.4, 1.8] | 0.4 [0.2, 0.7] | 3.79 [3.59, 3.97] | ESP32-P4 @360 MHz: RTF ~3.5 (0.47 s audio in 1.66 s), inlanger/esp32-p4-inflect-tts README |
 | Inflect Micro v2 (Owen Song) | 9.36 M | no published MCU run | 3.46 [3.37, 3.53] | 4.41 [4.37, 4.45] | 3.38 [3.35, 3.41] | 1.0 [0.4, 1.7] | 0.5 [0.2, 0.9] | 3.65 [3.46, 3.85] | – |
 | TinyTTS (pschatzmann port) | ~1.6 M | yes, ESP32-S3 / P4 (whole-utterance) | 2.45 [2.39, 2.52] | 3.66 [3.59, 3.73] | 3.29 [3.26, 3.33] | 6.8 [4.2, 9.9] | 4.2 [2.5, 6.3] | 3.42 [3.30, 3.54] | ESP32-S3: 34.1 s for 1.49 s audio (22.9x slower than real time); P4: 28.4 s (19x), repo README |
 | Piper lessac low | 15.7 M | no (ONNX on Linux; Raspberry Pi class) | 3.39 [3.33, 3.46] | 4.41 [4.38, 4.43] | 3.35 [3.31, 3.39] | 1.2 [0.5, 2.2] | 0.6 [0.2, 1.1] | 4.36 [4.18, 4.53] | – |

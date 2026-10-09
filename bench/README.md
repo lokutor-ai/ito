@@ -5,10 +5,10 @@ Ito against its teacher and 21 public small and edge English TTS systems, on 54 
 | System | Params | Runs on a microcontroller | UTMOSv2 | UTMOS22 | DNSMOS | WER % |
 |---|---|---|---|---|---|---|
 | *Built for or run on microcontrollers* | | | | | | |
-| Ito, shipped, female (chip-exact, ESP32-S3 emulated) | 3.34 M (2.99 M on chip) | ESP32-S3 (emulated, bit-exact) | 3.21 | 4.43 | 3.34 | 0.6 |
-| Ito, shipped, male | 3.34 M (2.99 M on chip) | ESP32-S3 (emulated, bit-exact) | 3.26 | 4.41 | 3.43 | 0.7 |
-| Ito, first release (256-wide vocoder) | 4.05 M | ESP32-S3 (emulated, bit-exact) | 3.15 | 4.44 | 3.39 | 0.4 |
-| Inflect Nano v2 (Owen Song) | 3.96 M | ESP32-P4, 3.5x slower than real time | 3.08 | 4.41 | 3.40 | 1.1 |
+| Ito, shipped, female (chip-exact: host build, bit-identical to the board) | 3.34 M (2.99 M on chip) | ESP32-S3 (board; streams) | 3.21 | 4.43 | 3.34 | 0.6 |
+| Ito, shipped, male | 3.34 M (2.99 M on chip) | ESP32-S3 (board; streams) | 3.26 | 4.41 | 3.43 | 0.7 |
+| Ito, first release (256-wide vocoder) | 4.05 M | ESP32-S3 (emulated; streams) | 3.15 | 4.44 | 3.39 | 0.4 |
+| Inflect Nano v2 (Owen Song) | 3.97 M | ESP32-P4, 3.5x slower than real time (third-party figure) | 3.08 | 4.41 | 3.40 | 1.1 |
 | TinyTTS | 1.6 M | ESP32-S3, 22.9x slower than real time | 2.45 | 3.66 | 3.29 | 6.8 |
 | sanoTTS amy | 1.45 M | no (the MCU voice is a different 567 K one) | 2.80 | 3.96 | 3.18 | 1.2 |
 | sanoTTS heart-nano | 0.29 M | MCU-sized, no published timing | 1.33 | 2.17 | 2.97 | 1.7 |
@@ -28,5 +28,5 @@ Ito against its teacher and 21 public small and edge English TTS systems, on 54 
 
 - **Ito rows** are the shipped model (192-wide vocoder, released weight blobs, main int8 set) rendered by the host build of the on-chip engine, whose PCM is bit-identical to the QEMU-verified firmware; female and male voice, plus the int4 and light weight sets (see `results.md`). The male voice has no teacher row. The 256-wide row is the first release.
 - **Scoring machine.** The Ito 192 rows were scored on 8 October 2026 on an Apple M4 Max (`BENCH_DEVICE=mps python score.py ...`); every other system's values are the stored ones from the earlier GPU run. Re-scoring 24 stored clips on the Mac reproduced UTMOS22, DNSMOS, F0 and all transcripts. **UTMOSv2 is stochastic** (random crops: about 0.25 per clip, about 0.03 on a 54-clip mean), so its small differences are within noise.
-- Speed columns are not like-for-like: Ito's time to first audio and real-time factor were measured on one board for the female main set (first audio chunk computed in 184 ms, excluding the DAC stage; RTF 0.66; `esp32/README.md` §4a) and are pre-board estimates for the rest; Inflect Nano's and TinyTTS's figures are from their own READMEs.
+- Speed columns are not like-for-like: Ito's time to first audio and real-time factor were measured on one board for the female main set (first audio chunk computed in 184 ms, counted from the phoneme ids, so excluding host-side G2P, the serial transfer and the DAC stage; RTF 0.66; `esp32/README.md` §4a) and are pre-board estimates for the rest; Inflect Nano's figure comes from a third-party port to the ESP32-P4 and TinyTTS's from its author's README; neither was re-measured by us. sanoTTS runs its text front end on the chip, whereas Ito's board times start at host-produced phoneme ids.
 - Files: `results.md` (all tables, paired differences, findings, method), `results.json` and `scatter.json` (numbers), `results_per_clip.json` (per-clip scores and transcripts), `prompts.json`, `score.py` (the scoring script). The renderers for the other systems and the listening-test tools are not included.

@@ -1,6 +1,6 @@
 # Raw serial logs from the physical board
 
-All logs come from one ESP32-S3-DevKitC-1 N16R8 (rev v0.2, 8 MB octal PSRAM at 80 MHz, 16 MB flash, 240 MHz), no DAC or amplifier attached, nothing listened to. They are the unedited console output; numbers in the READMEs are read from them. "First audio" in the READMEs is the first 125 ms audio chunk computed and ready after the text is handed to the engine, not audible latency.
+All logs come from one ESP32-S3-DevKitC-1 N16R8 (rev v0.2, 8 MB octal PSRAM at 80 MHz, 16 MB flash, 240 MHz), no DAC or amplifier attached, nothing listened to. They are the unedited console output; numbers in the READMEs are read from them. "First audio" in the READMEs is the first 125 ms audio chunk computed and ready after the phoneme ids are handed to the engine (text-to-phoneme conversion runs on the host and is not included), not audible latency.
 
 No boot behind a published number is a cold power cycle: the reset reason in those logs is `USB_UART_CHIP_RESET` (a reset over the USB serial port or by the watchdog), not a power-on reset.
 
