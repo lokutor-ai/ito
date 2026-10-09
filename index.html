@@ -1,0 +1,152 @@
+<title>Ito</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+:root{--ink:#1d1d1f;--muted:#5f6368;--rule:#d9d9d9;--link:#1a56b0;--ground:#ffffff;color-scheme:light}
+body{background:var(--ground);color:var(--ink);font:17px/1.6 "Source Serif 4",Georgia,"Times New Roman",serif}
+.page{max-width:1000px;margin:0 auto;padding-inline:20px;padding-block:48px 72px}
+h1{font-size:30px;font-weight:600;line-height:1.25;text-align:center;margin:0 0 12px;text-wrap:balance}
+.authors{text-align:center;margin:0}
+.affil{text-align:center;color:var(--muted);font-size:15px;margin:2px 0 14px}
+.links{text-align:center;margin:0 0 36px}
+.links a{margin:0 8px}
+a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
+a:focus-visible{outline:2px solid var(--link);outline-offset:2px}
+h2{font-size:22px;font-weight:600;margin:40px 0 10px}
+h3{font-size:18px;font-weight:600;margin:28px 0 8px}
+p{margin:0 0 12px}
+.prose{max-width:720px;margin-inline:auto}
+.abstract{text-align:justify;hyphens:auto}
+.note{color:var(--muted);font-size:15px}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:15px}
+th,td{padding:8px 10px;vertical-align:middle;text-align:left}
+thead th{border-top:1.5px solid var(--ink);border-bottom:1px solid var(--ink);font-weight:600}
+tbody tr:last-child td{border-bottom:1.5px solid var(--ink)}
+.samples td{border-bottom:1px solid var(--rule)}
+.samples .txt{min-width:220px;max-width:300px}
+.samples audio{width:190px;height:34px}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.res td{border:0}
+.res tr.ours td{font-weight:600}
+.res tr.group td{padding-top:14px;font-style:italic;color:var(--muted)}
+caption{caption-side:bottom;text-align:left;color:var(--muted);font-size:14px;padding-top:8px}
+pre{background:#f6f6f4;padding:12px 14px;overflow-x:auto;font-size:13.5px;line-height:1.5}
+footer{margin-top:48px;color:var(--muted);font-size:14px;text-align:center}
+</style>
+<div class="page">
+<h1>Ito: Natural Streaming Text-to-Speech on a $5 Microcontroller</h1>
+<p class="authors">Daniel Varela Sánchez, Guillermo Martín-Coello Juárez</p>
+<p class="affil">Lokutor (Hashing Works, S.L.L.), Madrid</p>
+<p class="links"><a href="https://github.com/lokutor-ai/ito">Code</a> · <a href="https://huggingface.co/lokutor-ai/ito">Model</a> · <span class="note">Paper (coming soon)</span></p>
+<video controls preload="none" poster="demo_poster.jpg" style="display:block;width:100%;max-width:720px;margin:0 auto 36px"><source src="demo.mp4" type="video/mp4">Your browser cannot play this video: <a href="demo.mp4">download demo.mp4</a>.</video>
+
+<div class="prose">
+<h2>Abstract</h2>
+<p class="abstract">Ito is a 3.3 M-parameter neural text-to-speech model that runs entirely on an ESP32-S3, a 240 MHz dual-core microcontroller with no neural accelerator. <strong>Phonemization runs on the host in this release:</strong> a computer turns the text into phoneme ids and sends them to the chip over serial, so on the chip Ito goes from phoneme ids to waveform, and the chip times on this page start at the ids. A causal acoustic model predicts a mel spectrogram with bounded lookahead, and a small convolutional vocoder with a harmonic source turns it into a 24 kHz waveform, so audio streams out while the sentence is still being synthesized. The model runs in int8 on the chip's vector unit and takes 3.8 MB of flash. In a blind listening test with one listener, who is an author, the float model (first release, with a per-sentence style predictor; not the chip build) was rated 4.0 out of 5, against 2.0 for the released sanoTTS amy voice and 4.75 for the teacher; and on a 54-sentence benchmark its automatic naturalness score (UTMOS22 4.43, shipped model, female voice) is within 0.04 of the 191 M-parameter model it was distilled from (4.47). That test used the first release's 256-wide vocoder. In a second blind test the same listener rated the chip build itself 4.00 against 4.25 for the teacher (no sanoTTS in that test). Four sentences per system; this is evidence, not a MOS study.</p>
+<p class="note">All Ito samples below are the exact output of the on-chip engine: the firmware running in Espressif&#x27;s QEMU emulator produces bit-identical audio. <strong>Measured on a board</strong> (ESP32-S3-DevKitC-1 N16R8 (rev v0.2, 8 MB octal PSRAM at 80 MHz, 16 MB flash, 240 MHz), 8 October 2026, firmware fedbd26, female voice): with the main int8 set the first audio chunk (125 ms of audio) was computed and ready 184 ms after the phoneme ids were handed to the engine (text-to-phoneme conversion runs on the host and is not included) (183.9–184.3 ms over the three demo sentences), and the real-time factor was 0.66 on the boot calibration sentence (0.660–0.674 on the demo sentences). Gap-free playback is a separate number: the firmware plans to start playback about 246 ms after the phoneme ids arrive, and with that planned delay the three demo sentences had 0 underruns. No DAC or amplifier was attached and no audio was listened to, so the I2S/DAC output stage is not included, these are not acoustic measurements, and the underrun count is the firmware&#x27;s own accounting against its playout clock. On this board, with nothing else running and I2S idle, synthesis ran faster than real time (RTF 0.66), with 0 underruns when playback starts after the planned 246 ms delay; this is a measurement on one board, not a guarantee. For the female voice, the other two weight sets were timed by hand once on 8 October with the <code>tier</code> serial command (one run each, not chosen by the boot calibration): main int4 set RTF about 0.65, first chunk about 180 ms; light set RTF about 0.61, first chunk about 168 ms. <strong>Update, 9 October 2026</strong> (same board, same firmware fedbd26, still no DAC and nothing listened to). Male voice: the boot calibration chose the main int8 set (RTF 0.659 on the calibration sentence, in both of two boots), the bit-exact self-test passed (137,400 samples, identical to the host C engine), the first audio chunk was ready in 183.8–184.8 ms over the demo sentences, the demo-sentence RTF was 0.659–0.672, the firmware planned a gap-free start 248–249 ms after the phoneme ids arrive, and underruns were 0. The male voice&#x27;s other two sets were timed by hand with <code>tier</code> (not boot-chosen; the firmware plans no start delay for hand-timed sets), demo sentences only: main int4 set first chunk 179.5–179.8 ms, RTF 0.645–0.653 (two passes); light set first chunk 167.9–168.0 ms, RTF 0.606–0.613 (one pass); the self-test passed with each set. Female voice, repeats: the same image booted four times in all (8 October and three times on 9 October, each after a USB-serial or watchdog reset, not a cold power cycle); the first chunk was ready in 183.5–184.5 ms over all demo runs, the boot-calibration RTF was 0.660–0.661, the planned start was 246–248 ms, the bit-exact self-test passed every time and underruns were 0. After a demo the PSRAM peak was 5372 KB (female) and 5380 KB (male) of 8192 KB, and internal SRAM 354 of 374 KB (high-water mark after the boot benchmark, 332 KB during the self-test, before any I2S DMA buffers; stack high-water marks were not printed). All of this comes from one board: the repeats and the male runs show repeatability on one chip, not a second board. Against the pre-board estimates (optimistic / central / pessimistic: RTF 0.43–0.47 / 0.63–0.66 / 0.97–0.99, first audio chunk 124–132 / 171–180 / 251–260 ms), the measured RTF of 0.66 is at the top of the central estimate and far from the pessimistic one (0.97–0.99), and the measured first chunk of 184 ms is slightly above the central estimate and below the pessimistic one. Still not measured: audio through a DAC and any listening to the output (no DAC was attached), a second board or a second chip revision, cold power-on boots (every boot was a reset), power draw, long-run thermal behaviour and supply sensitivity, stack high-water marks (not printed), the male voice&#x27;s sound quality through the chip (its audio is bit-identical to the host engine: self-test PASS), and a planned start delay for the hand-timed sets (the firmware plans none). Still estimates: the optimistic, central and pessimistic columns, which are the pre-board predictions kept for comparison. In the boot benchmark the PSRAM-to-SRAM copy ran at 86.0 MB/s (above the 40–80 MB/s the estimates assumed), GDMA at 36.4 MB/s (slower than a plain copy), cached PSRAM reads at 89.2 MB/s. The firmware therefore stages weights with <code>direct</code> reads, the fastest of the four modes it benchmarks (mean RTF 0.66, GEMM 1.060 GMAC/s). The firmware measures its own chunk times at boot, keeps the first of three weight sets with a real-time factor of 0.85 or less, plans the start delay from the measurements, and warns if even the fastest set is not fast enough; on this board the boot calibration chose the main int8 set with a measured RTF of 0.66 (status OK, degraded flag 0; main int4 and light were not needed, so the boot did not time them; they were timed by hand afterwards). The male voice&#x27;s boot calibration also chose the main int8 set (RTF 0.659, both male boots), and so did all four female boots. Everything above is one board; other boards are not measured.</p>
+</div>
+
+<h2>Samples</h2>
+<p>Eight sentences that none of the models saw in training. Ito runs on the microcontroller, in two voices (female and male); the other columns are references.</p>
+<div class="scroll">
+<table class="samples">
+<thead><tr><th>Text</th><th>Ito, female voice (ours, ESP32-S3)</th><th>Ito, male voice (ours, ESP32-S3)</th><th>sanoTTS amy</th><th>sanoTTS heart-nano</th><th>Teacher (StyleTTS 2, server)</th></tr></thead>
+<tbody>
+<tr><td class="txt">Hey, are you still coming over for dinner tonight, or should I save you a plate?</td><td><audio controls preload="none" src="audio/ito/01.mp3"></audio></td><td><audio controls preload="none" src="audio/ito_g/01.mp3"></audio></td><td><audio controls preload="none" src="audio/amy/01.mp3"></audio></td><td><audio controls preload="none" src="audio/heart/01.mp3"></audio></td><td><audio controls preload="none" src="audio/teacher/01.mp3"></audio></td></tr>
+<tr><td class="txt">Your package should arrive on Friday, October 9th, sometime before noon.</td><td><audio controls preload="none" src="audio/ito/02.mp3"></audio></td><td><audio controls preload="none" src="audio/ito_g/02.mp3"></audio></td><td><audio controls preload="none" src="audio/amy/02.mp3"></audio></td><td><audio controls preload="none" src="audio/heart/02.mp3"></audio></td><td><audio controls preload="none" src="audio/teacher/02.mp3"></audio></td></tr>
+<tr><td class="txt">When I finally got to the station, the last train had already left, so I ended up sharing a taxi with two strangers who turned out to be surprisingly good company.</td><td><audio controls preload="none" src="audio/ito/03.mp3"></audio></td><td><audio controls preload="none" src="audio/ito_g/03.mp3"></audio></td><td><audio controls preload="none" src="audio/amy/03.mp3"></audio></td><td><audio controls preload="none" src="audio/heart/03.mp3"></audio></td><td><audio controls preload="none" src="audio/teacher/03.mp3"></audio></td></tr>
+<tr><td class="txt">The pharmacist recommended an anti-inflammatory, but honestly, I&#x27;d rather try physiotherapy first.</td><td><audio controls preload="none" src="audio/ito/04.mp3"></audio></td><td><audio controls preload="none" src="audio/ito_g/04.mp3"></audio></td><td><audio controls preload="none" src="audio/amy/04.mp3"></audio></td><td><audio controls preload="none" src="audio/heart/04.mp3"></audio></td><td><audio controls preload="none" src="audio/teacher/04.mp3"></audio></td></tr>
+<tr><td class="txt">Thanks so much for calling. I&#x27;ll check the schedule and get back to you first thing tomorrow morning.</td><td><audio controls preload="none" src="audio/ito/05.mp3"></audio></td><td><audio controls preload="none" src="audio/ito_g/05.mp3"></audio></td><td><audio controls preload="none" src="audio/amy/05.mp3"></audio></td><td><audio controls preload="none" src="audio/heart/05.mp3"></audio></td><td><audio controls preload="none" src="audio/teacher/05.mp3"></audio></td></tr>
+<tr><td class="txt">Could you grab some quinoa and Worcestershire sauce on your way home?</td><td><audio controls preload="none" src="audio/ito/06.mp3"></audio></td><td><audio controls preload="none" src="audio/ito_g/06.mp3"></audio></td><td><audio controls preload="none" src="audio/amy/06.mp3"></audio></td><td><audio controls preload="none" src="audio/heart/06.mp3"></audio></td><td><audio controls preload="none" src="audio/teacher/06.mp3"></audio></td></tr>
+<tr><td class="txt">It&#x27;s about 23 degrees outside, so you probably won&#x27;t need a jacket.</td><td><audio controls preload="none" src="audio/ito/07.mp3"></audio></td><td><audio controls preload="none" src="audio/ito_g/07.mp3"></audio></td><td><audio controls preload="none" src="audio/amy/07.mp3"></audio></td><td><audio controls preload="none" src="audio/heart/07.mp3"></audio></td><td><audio controls preload="none" src="audio/teacher/07.mp3"></audio></td></tr>
+<tr><td class="txt">I know it sounds strange, but I actually enjoy the quiet hours before everyone else wakes up.</td><td><audio controls preload="none" src="audio/ito/08.mp3"></audio></td><td><audio controls preload="none" src="audio/ito_g/08.mp3"></audio></td><td><audio controls preload="none" src="audio/amy/08.mp3"></audio></td><td><audio controls preload="none" src="audio/heart/08.mp3"></audio></td><td><audio controls preload="none" src="audio/teacher/08.mp3"></audio></td></tr>
+</tbody>
+</table>
+</div>
+<p class="note">sanoTTS clips were generated with the released <a href="https://github.com/ampixa/sanoTTS">sanoTTS</a> package. The teacher is the public <a href="https://github.com/yl4579/StyleTTS2">StyleTTS 2</a> LibriTTS model in its female voice. All clips are loudness-matched.</p>
+
+<h2>Results</h2>
+<p>Automatic metrics for 17 systems (Ito in three versions) on 54 fixed English prompts that none of them saw in training. Ito is scored on the chip engine's exact output. The full table, with 21 public systems and the teacher and with confidence intervals, is in the repository.</p>
+<div class="scroll">
+<table class="res">
+<thead><tr><th>System</th><th class="num">Params</th><th>Runs on a microcontroller</th><th class="num">UTMOSv2</th><th class="num">UTMOS22</th><th class="num">DNSMOS</th><th class="num">WER %</th></tr></thead>
+<tbody>
+<tr class="group"><td colspan="7">Built for microcontrollers</td></tr>
+<tr class="ours"><td>Ito, female voice (ours)<sup>b</sup></td><td class="num">3.34 M</td><td>ESP32-S3 (board; streams)</td><td class="num">3.21</td><td class="num">4.43</td><td class="num">3.34</td><td class="num">0.6</td></tr>
+<tr class="ours"><td>Ito, male voice (ours)<sup>b</sup></td><td class="num">3.34 M</td><td>ESP32-S3 (board; streams)</td><td class="num">3.26</td><td class="num">4.41</td><td class="num">3.43</td><td class="num">0.7</td></tr>
+<tr><td>Ito, first release (256-wide vocoder)<sup>c</sup></td><td class="num">4.05 M</td><td>ESP32-S3 (emulated; streams)</td><td class="num">3.15</td><td class="num">4.44</td><td class="num">3.39</td><td class="num">0.4</td></tr>
+<tr><td>Inflect Nano v2 (Owen Song)</td><td class="num">3.97 M</td><td>ESP32-P4, 3.5× slower than real time<sup>d</sup></td><td class="num">3.08</td><td class="num">4.41</td><td class="num">3.40</td><td class="num">1.1</td></tr>
+<tr><td>TinyTTS</td><td class="num">1.6 M</td><td>ESP32-S3, 22.9× slower than real time<sup>d</sup></td><td class="num">2.45</td><td class="num">3.66</td><td class="num">3.29</td><td class="num">6.8</td></tr>
+<tr><td>sanoTTS amy</td><td class="num">1.45 M</td><td>no<sup>a</sup></td><td class="num">2.80</td><td class="num">3.96</td><td class="num">3.18</td><td class="num">1.2</td></tr>
+<tr><td>sanoTTS heart-nano</td><td class="num">0.29 M</td><td>MCU-sized</td><td class="num">1.33</td><td class="num">2.17</td><td class="num">2.97</td><td class="num">1.7</td></tr>
+<tr><td>eSpeak NG (rule-based)</td><td class="num">—</td><td>community ports</td><td class="num">1.74</td><td class="num">2.14</td><td class="num">2.76</td><td class="num">0.3</td></tr>
+<tr class="group"><td colspan="7">Larger models (CPU or GPU)</td></tr>
+<tr><td>Inflect Micro v2 (Owen Song)</td><td class="num">9.36 M</td><td>no</td><td class="num">3.46</td><td class="num">4.41</td><td class="num">3.38</td><td class="num">1.0</td></tr>
+<tr><td>Kitten TTS nano</td><td class="num">14.0 M</td><td>no</td><td class="num">1.99</td><td class="num">3.93</td><td class="num">3.31</td><td class="num">1.1</td></tr>
+<tr><td>Piper amy low</td><td class="num">15.6 M</td><td>no</td><td class="num">3.42</td><td class="num">4.44</td><td class="num">3.28</td><td class="num">0.7</td></tr>
+<tr><td>Piper lessac medium</td><td class="num">15.7 M</td><td>no</td><td class="num">3.69</td><td class="num">4.28</td><td class="num">3.29</td><td class="num">0.7</td></tr>
+<tr><td>MeloTTS EN</td><td class="num">51.9 M</td><td>no</td><td class="num">3.03</td><td class="num">3.72</td><td class="num">3.01</td><td class="num">3.2</td></tr>
+<tr><td>Supertonic 2</td><td class="num">65 M</td><td>no</td><td class="num">3.62</td><td class="num">4.44</td><td class="num">3.35</td><td class="num">2.4</td></tr>
+<tr><td>Kokoro-82M</td><td class="num">81.8 M</td><td>no</td><td class="num">3.87</td><td class="num">4.49</td><td class="num">3.41</td><td class="num">0.8</td></tr>
+<tr><td>Supertonic 3</td><td class="num">99 M</td><td>no</td><td class="num">3.84</td><td class="num">4.45</td><td class="num">3.32</td><td class="num">1.7</td></tr>
+<tr><td>MOSS-TTS-Nano</td><td class="num">~100 M</td><td>no</td><td class="num">3.44</td><td class="num">4.37</td><td class="num">3.21</td><td class="num">1.7</td></tr>
+<tr><td>Pocket TTS</td><td class="num">110 M</td><td>no</td><td class="num">3.31</td><td class="num">4.33</td><td class="num">3.31</td><td class="num">2.5</td></tr>
+<tr><td>StyleTTS 2 (our teacher)</td><td class="num">191 M</td><td>no</td><td class="num">3.43</td><td class="num">4.47</td><td class="num">3.34</td><td class="num">1.5</td></tr>
+</tbody>
+<caption>Higher is better for UTMOSv2, UTMOS22 and DNSMOS (overall); WER from Whisper large-v3. 95% confidence intervals are about ±0.05–0.1 for the quality scores. <sup>a</sup> The sanoTTS model that runs on the chip has 567 K parameters; its paper reports UTMOS 2.80. <sup>b</sup> The shipped model (192-wide vocoder; 3.34 M parameters, 2.99 M stored on the chip), main int8 weight set, scored on 8 October 2026 with the same pipeline on a different machine from the other rows' stored values; the male and female voices are different speakers, and there is no teacher row for the male voice. UTMOSv2 is stochastic (about 0.03 on these means). <sup>c</sup> The first release, kept for comparison. <sup>d</sup> Third-party figures (Inflect Nano: a third-party port to the larger ESP32-P4, not from its author), not re-measured by us. Inflect Nano v2 has 3,966,721 parameters (3.97 M; its model card says 3.96 M). The Ito rows are the host build of the chip engine, bit-identical to the board. The authors ran this benchmark on their own system.</caption>
+</table>
+</div>
+<p>Among the neural systems built for or run on a microcontroller that we could benchmark, Ito (female voice) has the highest UTMOSv2 and the lowest word error rate. Three systems could not be benchmarked: the 567 K-parameter sanoTTS voice that runs on the chip (only its authors&#x27; own UTMOS is available), Moonshine Micro and Grovety tinyTTS, so the ranking covers the systems in the table only. Inflect Nano (Owen Song), a 4 M-parameter model, is close: Ito is ahead by 0.13 on UTMOSv2 (95% interval 0.03 to 0.23), tied on UTMOS22 and 0.06 behind on DNSMOS, and Inflect Nano runs 3.5 times slower than real time on a larger chip. Nine models 3 to 60 times larger, which need a CPU or GPU, score higher on UTMOSv2; none has a published microcontroller run that we know of. To our knowledge, and among the systems we could find as of October 2026, Ito is the first neural TTS that streams on the ESP32-S3; it is not the first neural TTS on a microcontroller and is far from the smallest.</p>
+
+<h3>Listening test</h3>
+<div class="scroll">
+<table class="res">
+<thead><tr><th>System</th><th class="num">Rating (1–5)</th></tr></thead>
+<tbody>
+<tr><td>Teacher, StyleTTS 2</td><td class="num">4.75</td></tr>
+<tr class="ours"><td>Ito (ours; float model, not the chip build)</td><td class="num">4.00</td></tr>
+<tr><td>sanoTTS amy</td><td class="num">2.00</td></tr>
+<tr><td>sanoTTS heart-nano</td><td class="num">1.00</td></tr>
+</tbody>
+<caption>Blind, unlabeled clips rated for how human they sound; 4 sentences per system, integer scores, one listener who is an author (the first author) and built the systems, so not a neutral party. Test #9: the Ito clips are the float model of the first release (256-wide vocoder) with a per-sentence style predictor, not the chip build; sanoTTS amy and heart-nano are released voices, not the 567 K voice that runs on the chip, and they differ audibly in speaker, so &quot;blind&quot; does not mean unidentifiable. Test #10 rated the chip build: the 192-wide vocoder that ships now got 4.00, against 4.25 for the teacher (no sanoTTS in that test; the listener heard no difference between the versions of Ito). A public listening test has been prepared; it has no responses yet and nothing from it is reported here.</caption>
+</table>
+</div>
+
+<div class="prose">
+<h2>On the chip</h2>
+<div class="scroll">
+<table class="res">
+<tbody>
+<tr><td>Weights</td><td>3.8 MB int8, in flash</td></tr>
+<tr><td>Compute</td><td>about 260 M int8 multiply-accumulates per second of audio</td></tr>
+<tr><td>Streaming</td><td>yes; the work before the first chunk does not depend on sentence length</td></tr>
+<tr><td>Front end</td><td>text normalization and phonemization (espeak-ng) run on the host, which sends phoneme ids over serial; they are not included in the times below. sanoTTS runs its front end on the chip, so its times are not directly comparable.</td></tr>
+<tr><td>First-chunk time (from the phoneme ids)</td><td><strong>measured: 184 ms</strong> until the first audio chunk (125 ms of audio) is computed and ready after the phoneme ids are handed to the engine (text-to-phoneme conversion runs on the host and is not included) (183.9–184.3 ms over the three demo sentences of that run; main int8 set; excludes the I2S/DAC output stage: no DAC was attached and no audio was listened to, so this is not an acoustic measurement; ESP32-S3-DevKitC-1 N16R8 (rev v0.2, 8 MB octal PSRAM at 80 MHz, 16 MB flash, 240 MHz), 8 October 2026, firmware fedbd26, female voice). Pre-board estimates for this set: 124–132 / 171–180 / 251–260 ms (optimistic / central / pessimistic). Further runs on the same board and firmware, 9 October 2026, main int8 set: male voice 183.8–184.8 ms over the demo sentences (two boots); female voice 183.5–184.5 ms over all demo runs of four boots (8 October and three on 9 October, all after resets, none a cold power cycle); in every case the planned gap-free start was 246–249 ms, not 184 ms.</td></tr>
+<tr><td>Real-time factor</td><td><strong>measured: 0.66</strong> on the boot calibration sentence (main int8 set; demo sentences 0.660–0.674; below 1 is faster than real time; ESP32-S3-DevKitC-1 N16R8 (rev v0.2, 8 MB octal PSRAM at 80 MHz, 16 MB flash, 240 MHz), 8 October 2026, firmware fedbd26, female voice). Pre-board estimates for this set: 0.43–0.47 / 0.63–0.66 / 0.97–0.99 (optimistic / central / pessimistic). Female voice, timed by hand once, not chosen by the boot calibration: main int4 set RTF about 0.65, first chunk about 180 ms; light set RTF about 0.61, first chunk about 168 ms. Further runs, 9 October 2026: female boot-calibration RTF 0.660–0.661 over four boots; male voice boot calibration 0.659 (demo sentences 0.659–0.672); male voice timed by hand, not boot-chosen: main int4 set RTF 0.645–0.653 and first chunk 179.5–179.8 ms (two passes), light set RTF 0.606–0.613 and first chunk 167.9–168.0 ms (one pass).</td></tr>
+<tr><td>Weight sets and boot check</td><td>three sets per voice in flash: main (3.8 MB, int8), main with int4 blocks (3.2 MB) and a light set with one block fewer (3.1 MB). At boot the board measures each set&#x27;s real chunk times and keeps the first with a real-time factor of 0.85 or less; if even the best is 0.95 or more it prints a warning and sets a flag instead of stuttering silently. On the board we measured: the boot calibration chose the main int8 set with a measured RTF of 0.66 (status OK, degraded flag 0; main int4 and light were not needed, so the boot did not time them; they were timed by hand afterwards). Other boards are not measured.</td></tr>
+<tr><td>Start delay for gapless speech</td><td><strong>measured: about 246 ms</strong> (246–247 ms over the three demo sentences) is the delay the firmware plans before playback starts so that speech is gap-free, planned from its own calibration; with it the three demo sentences had 0 underruns (the firmware&#x27;s own accounting; no audio was output or heard; main int8 set; ESP32-S3-DevKitC-1 N16R8 (rev v0.2, 8 MB octal PSRAM at 80 MHz, 16 MB flash, 240 MHz), 8 October 2026, firmware fedbd26, female voice). Further runs, 9 October 2026: 246–248 ms over four female boots; male voice 248–249 ms, with 0 underruns (the firmware plans no start delay for hand-timed sets). Pre-board estimates for this set: 125–130 / 176–182 / 558–663 ms (optimistic / central / pessimistic). <code>delay &lt;ms&gt;</code> on the serial console holds playback for a chosen time.</td></tr>
+</tbody>
+</table>
+</div>
+<p class="note"><strong>Stability on the board.</strong> Stability on the board (9 October 2026, one board, 240 MHz, female voice, USB powered, nothing attached, I2S idle): 600 golden-sentence iterations in about 2.5 hours (each in three modes, 1,800 runs; main int8 set 300 iterations, int4 set 100, light set 100, main int8 again with I2S idle 100) gave 1,800 PASS and 0 FAIL against the host C engine, with no panic, watchdog or reboot; a 175-token demo repeated 15 times kept a first chunk of 183.9–184.6 ms and an RTF of 0.662–0.663 with no drift. A synthetic two-core lock-step stress with Ito's own PIE kernel (about 21 minutes, every call compared with a one-core reference, including the K=704, 45 KB-tile pattern reported by the <a href="https://github.com/lokutor-ai/oido#dual-core">Oído</a> project) gave 0 mismatches and 0 crashes. This says no corruption or crash was observed in 600 golden-sentence iterations and a 21-minute synthetic stress on one board, and no more. Oído reports faults with concurrent two-core PIE kernels on this chip; Ito did not reproduce them, but our core-1 start is a loose handshake, a cycle-aligned start was not tested, and Ito's real tiles are 5–15 KB, so anyone running dual-core PIE streaming at 240 MHz should test it, on more than one board. Not covered: a second board or chip revision, cold power-on boots, supply (USB voltage not measured), power draw, temperature, the male voice, audio output (no DAC) and runs of days. Raw logs and the stress source: <a href="https://github.com/lokutor-ai/ito/tree/main/esp32/logs">esp32/logs</a>.</p>
+<p class="note">The firmware measures its own throughput at boot and prints a <code>BOARD_SUMMARY</code> line. If you run it on an ESP32-S3 board, please share the line in an issue.</p>
+
+<h2>Try it</h2>
+<pre>pip install git+https://github.com/lokutor-ai/ito
+ito-tts "Good morning! The coffee is ready." -o hello.wav</pre>
+<p>Flashing instructions for the ESP32-S3 are in the <a href="https://github.com/lokutor-ai/ito">repository</a>.</p>
+
+<h2>Limitations and disclosures</h2>
+<ul>
+<li>English only, two voices, one fixed style; timing measured on one board, with no DAC attached and nothing listened to. Text normalization and phonemization run on the host, and the first-chunk time starts at the phoneme ids.</li>
+<li>The real-time factor of 0.66 was measured with nothing else running and I2S idle; co-residency with other tasks and I2S DMA load are not measured, and about 20 KB of internal SRAM is left before any I2S buffers.</li>
+<li>Quality evidence is automatic predictors (none validated against listeners for these systems), 54 prompts, one voice and one seed per system, and one listener who is an author.</li>
+<li>Disclosures: Ito is developed by Lokutor (Hashing Works, S.L.L.), which sells commercial licenses for it. The authors built the system and ran the benchmark, the listening tests and the board measurements; no independent party has reproduced them. Parts of the engine code, the experiment scripts and the accompanying manuscript were drafted with the help of an AI assistant (Claude, Anthropic); the authors directed the work, checked the results and take full responsibility. Ito&#x27;s output is synthetic speech in the voice of a real (LibriTTS-R) speaker and should be presented as such.</li>
+</ul>
+
+<h2>License</h2>
+<p>The engine and firmware code are GPLv3. The model weights are CC BY-NC-SA 4.0 with additional <a href="https://github.com/lokutor-ai/ito/blob/main/models/TERMS.md">terms</a>: no commercial use. For commercial licenses, or a free license for a small company, maker project or research group, write to contact@lokutor.com.</p>
+</div>
+
+<footer><a href="https://lokutor.com">Lokutor</a> · 2026</footer>
+</div>
