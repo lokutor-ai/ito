@@ -28,6 +28,17 @@ No boot behind a published number is a cold power cycle: the reset reason in tho
 
 Over the four female boots (8 October and these three) the self-test passed every time (fnv32 `023bd6b1`, identical to the host), and underruns were 0 in every run in every log above that is used for numbers.
 
+## 9 October 2026, stability runs (same board, firmware `fedbd26` for the soak)
+
+| File | What it is |
+|---|---|
+| `soak_female_240MHz_2026-10-09_0343.raw.log` | Raw serial capture of the soak (female voice, 240 MHz, USB powered, nothing attached, I2S idle), about 2.5 hours. |
+| `soak_female_240MHz_2026-10-09_0343.events.log` | The soak script's own progress log (timestamps, per-10-iteration counts, phase summaries). Its one "CRASH/REBOOT MARKER" line is the boot banner that appears when the port is opened (the board resets then), at 03:43:14 before the first phase; there is none later. |
+| `soak_female_240MHz_2026-10-09_0343.summary.txt` | The four phase summaries: main int8 set 300 iterations (900 PASS, 0 FAIL, hashes `023bd6b1` and `9666bb9e`), int4 set 100 iterations (300 / 0, `363d7d98`), light set 100 (300 / 0, `5f12d5e1`), main int8 again with I2S idle 100 (300 / 0). Each iteration runs the golden sentence in three modes (dual-core 8-bit, single-core, dual-core 16-bit) and compares the hash with the host C engine. The `supply_idle` phase name means I2S idle; the USB voltage was not measured. |
+| `ABORTED_prelim_soak_*_2026-10-09_0313.log` | A first soak attempt that was stopped; **not used for any number**. |
+| `synthetic_stress_240MHz_2026-10-09.log` | The synthetic two-core stress (source in `esp32/tools/stress/`): three full rounds (about 21 minutes) and the start of a fourth, 0 mismatches. The capture was stopped part-way through the fourth round. |
+| `dualcore_load_comparison.md` | A reading of the code (not a measurement) that compares how Ito and Oído load the two cores. |
+
 ## Other logs (not from the board)
 
 `qemu_*.log` in a local checkout are QEMU emulator runs; they are ignored by git and not part of this repository.
