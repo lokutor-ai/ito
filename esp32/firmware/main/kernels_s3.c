@@ -225,7 +225,7 @@ static void dma_wait(core_ctx_t *c) { hw_wait_one(c); }
 // output channels of the call that core k works on: [*c0, *c1)
 static void core_range(const pcall_t *p, int k, int *c0, int *c1)
 {
-    const int dual = s3_dual_enabled && (long)p->rows * p->in * p->out >= DUAL_MIN_MACS && p->out >= 2 * TOC;
+    const int dual = s3_dual_enabled && s3_gemm_dual && (long)p->rows * p->in * p->out >= DUAL_MIN_MACS && p->out >= 2 * TOC;
     const int split = dual ? ((p->out / 2) + TOC - 1) / TOC * TOC : p->out;
     if (k == 0) { *c0 = 0; *c1 = split; } else { *c0 = split; *c1 = dual ? p->out : split; }
 }
