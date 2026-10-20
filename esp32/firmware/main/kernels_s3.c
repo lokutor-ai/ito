@@ -36,11 +36,14 @@
 
 #define TOC 8
 #define DUAL_MIN_MACS 32768
+#ifndef TILE_BYTES
 #define TILE_BYTES 4096         // per staging buffer (2 per core): 16 KB of internal SRAM in total (was 10 KB per buffer: the double-buffered pipeline loses
                                 // under 2 % with 4 KB tiles, trace_sim.py, and the 24 KB saved pay for WIDE_ROWS = 12)
+#endif
 #define TILE_SLACK 128          // GDMA moves 64-byte aligned supersets of the tile
 
 volatile int s3_dual_enabled = 1;
+volatile int s3_gemm_dual = 1;
 volatile int s3_wmode = 0;
 volatile int s3_dma_errors = 0;
 s3_stats_t s3_stats;
@@ -524,7 +527,7 @@ static void qgemm_common(const int8_t *x, int rows, int ldx, int in, const int8_
 #ifdef ITOFS_ICPROF
     const uint32_t ic0 = esp_cpu_get_cycle_count();
 #endif
-    const int single = !s3_dual_enabled || (long)rows * in * out < DUAL_MIN_MACS || out < 2 * TOC;
+    const int single = !s3_dual_enabled || !s3_gemm_dual || (long)rows * in * out < DUAL_MIN_MACS || out < 2 * TOC;
     if (single) {
 #ifdef S3_PROF
         const uint32_t ps0 = PROF_NOW();
