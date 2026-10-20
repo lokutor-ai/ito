@@ -21,6 +21,13 @@ extern s3_stats_t s3_stats;               // accumulated by s3_qgemm: wall time 
 void s3_stats_reset(void);
 void s3_bench(const void *wbase, size_t wbytes);
 void s3_par(void *user, itofs_body_fn body, void *arg, int n);   // itofs_ctx_t.par: rows split across both cores   // PSRAM bandwidth + the engine's GEMM shapes, every mode, 1 and 2 cores
+// Optional cycle accounting (compile with -DS3_PROF; CCOUNT cycles, each field written by one core). Fields, in order, as uint64:
+// gemm_cycles[2] / par_cycles[2]: cycles each core spent in its part of a GEMM call / row-parallel loop, dma_wait[2]: of those, waiting for
+// weight tiles (GDMA completions or the tile memcpy), gemm_compute[2]: of those, in the dot kernels, gemm_sync0 / par_sync0: core 0 waiting
+// for core 1 after its own part, gemm_total / par_total: core 0 wall cycles of the whole calls, gemm_single / gemm_dual / par_calls: call counts
+typedef struct { uint64_t gemm_cycles[2], par_cycles[2], dma_wait[2], gemm_compute[2], gemm_sync0, par_sync0, gemm_total, par_total, gemm_single, gemm_dual, par_calls; } s3_prof_t;
+void s3_prof_reset(void);
+int s3_prof_read(uint64_t *out, int n);   // copies up to n fields, returns how many exist (-1: built without S3_PROF)
 #ifdef ITOFS_ICPROF
 // QEMU -icount profiling (CCOUNT ticks): single = GEMM calls on core 0 alone; h0 / h1 = the two halves of the dual-core
 // calls and of the row-parallel loops (s3_par; run one after the other when s3_ic_serial), hmax = sum over calls of the

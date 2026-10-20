@@ -45,6 +45,25 @@ volatile int s3_wmode = 0;
 volatile int s3_dma_errors = 0;
 s3_stats_t s3_stats;
 
+#ifdef S3_PROF
+#include "esp_cpu.h"
+s3_prof_t s3_prof;
+#define PROF_NOW() esp_cpu_get_cycle_count()
+#define PROF_ACC(field, t0) ((field) += (uint32_t)(PROF_NOW() - (t0)))
+#define PROF_CORE() ((int)esp_cpu_get_core_id())
+void s3_prof_reset(void) { memset(&s3_prof, 0, sizeof s3_prof); }
+int s3_prof_read(uint64_t *out, int n)
+{
+    const uint64_t *p = (const uint64_t *)&s3_prof;
+    const int have = (int)(sizeof s3_prof / sizeof *p);
+    for (int i = 0; i < n && i < have; i++) out[i] = p[i];
+    return have;
+}
+#else
+void s3_prof_reset(void) {}
+int s3_prof_read(uint64_t *out, int n) { (void)out; (void)n; return -1; }
+#endif
+
 #define PACK_BYTES 1280          // one packed weight row: the widest GEMM input is 1202 (80 vectors of 16 B)
 typedef struct { const int8_t *w; int in, out, rows, rb; } pcall_t;     // a GEMM call (the shared weights base, width, output channels, rows, bytes per weight row: in for int8, the int4 row size for int4)
 typedef struct { const int8_t *tp; size_t n; const int8_t *src; } slot_t;
@@ -96,8 +115,19 @@ static inline void w4_unpack_row(const uint8_t *row, int in, int8_t *dst)
     }
 }
 
+static inline void compute_(const job_t *j, const int8_t *wt, int o0, int o1, int8_t *pk);
 // channels [o0, o1) whose weights start at wt (row stride in; int4: j->rb bytes per packed row)
 static inline void compute(const job_t *j, const int8_t *wt, int o0, int o1, int8_t *pk)
+{
+#ifdef S3_PROF
+    const uint32_t t0 = PROF_NOW();
+    compute_(j, wt, o0, o1, pk);
+    PROF_ACC(s3_prof.gemm_compute[PROF_CORE()], t0);
+#else
+    compute_(j, wt, o0, o1, pk);
+#endif
+}
+static inline void compute_(const job_t *j, const int8_t *wt, int o0, int o1, int8_t *pk)
 {
     const int in = j->in, in16 = in >> 4, r0 = in16 << 4;
     if (j->w4) {       // each packed row is unpacked once into the aligned scratch row (amortised over every activation row), then the aligned dot kernel runs on it
@@ -224,7 +254,16 @@ static void pump(int k)
     }
 }
 // wait until tile `seq` has arrived
-static void wait_tile(core_ctx_t *c, long seq) { while (c->taken <= seq) { hw_wait_one(c); c->taken++; } }
+static void wait_tile(core_ctx_t *c, long seq)
+{
+#ifdef S3_PROF
+    const uint32_t t0 = PROF_NOW();
+#endif
+    while (c->taken <= seq) { hw_wait_one(c); c->taken++; }
+#ifdef S3_PROF
+    PROF_ACC(s3_prof.dma_wait[PROF_CORE()], t0);
+#endif
+}
 // all outstanding copies done, stream emptied
 static void drain(int k)
 {
@@ -265,7 +304,13 @@ static void gemm_range(const job_t *j, core_ctx_t *c)
         const int toc = tile_channels(rb);
         for (int t0 = j->oc0; t0 < j->oc1; t0 += toc) {
             const int t1 = (t0 + toc < j->oc1) ? t0 + toc : j->oc1;
+#ifdef S3_PROF
+            const uint32_t tc = PROF_NOW();
+#endif
             memcpy(c->buf[0], j->w + (size_t)t0 * rb, (size_t)(t1 - t0) * rb);
+#ifdef S3_PROF
+            PROF_ACC(s3_prof.dma_wait[PROF_CORE()], tc);
+#endif
             compute(j, c->buf[0], t0, t1, c->pk);
         }
         return;
@@ -345,8 +390,14 @@ static void worker_task(void *arg)
 #ifdef ITOFS_ICPROF
         const uint32_t c0 = esp_cpu_get_cycle_count();
 #endif
+#ifdef S3_PROF
+        const uint32_t w0 = PROF_NOW();
+#endif
         if (s_kind) s_body(s_barg, s_b0, s_b1, 1);
         else gemm_range(&s_job, &g_cc[1]);
+#ifdef S3_PROF
+        PROF_ACC(*(s_kind ? &s3_prof.par_cycles[1] : &s3_prof.gemm_cycles[1]), w0);
+#endif
 #ifdef ITOFS_ICPROF
         s_h1 = esp_cpu_get_cycle_count() - c0;
 #endif
@@ -463,6 +514,9 @@ void s3_qgemm4(const int8_t *x, int rows, int ldx, int in, const uint8_t *w4, in
 static void qgemm_common(const int8_t *x, int rows, int ldx, int in, const int8_t *w, int rb, int w4, int out, int32_t *acc)
 {
     const int64_t t0 = esp_timer_get_time();
+#ifdef S3_PROF
+    const uint32_t pq0 = PROF_NOW();
+#endif
     int mode = s3_wmode;
     if (!esp_ptr_external_ram(w)) mode = 0;      // internal RAM or flash-mapped weights: in place
     job_t j = { x, rows, ldx, in, w, out, acc, 0, out, mode, rb, w4 };
@@ -472,7 +526,14 @@ static void qgemm_common(const int8_t *x, int rows, int ldx, int in, const int8_
 #endif
     const int single = !s3_dual_enabled || (long)rows * in * out < DUAL_MIN_MACS || out < 2 * TOC;
     if (single) {
+#ifdef S3_PROF
+        const uint32_t ps0 = PROF_NOW();
+#endif
         gemm_range(&j, &g_cc[0]);
+#ifdef S3_PROF
+        PROF_ACC(s3_prof.gemm_cycles[0], ps0);
+        s3_prof.gemm_single++;
+#endif
         if (mode >= 2) stream_pop(1);              // core 1 had no part in this call
 #ifdef ITOFS_ICPROF
         s3_ic.single += esp_cpu_get_cycle_count() - ic0; s3_ic.nsingle++;
@@ -501,9 +562,23 @@ static void qgemm_common(const int8_t *x, int rows, int ldx, int in, const int8_
         j.oc1 = split;
         s_waiter = xTaskGetCurrentTaskHandle();
         xTaskNotifyGive(s_worker);
+#ifdef S3_PROF
+        const uint32_t pd0 = PROF_NOW();
+#endif
         gemm_range(&j, &g_cc[0]);
+#ifdef S3_PROF
+        PROF_ACC(s3_prof.gemm_cycles[0], pd0);
+        const uint32_t pd1 = PROF_NOW();
+#endif
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+#ifdef S3_PROF
+        PROF_ACC(s3_prof.gemm_sync0, pd1);
+        s3_prof.gemm_dual++;
+#endif
     }
+#ifdef S3_PROF
+    PROF_ACC(s3_prof.gemm_total, pq0);
+#endif
     s3_stats.us += esp_timer_get_time() - t0;
     s3_stats.macs += (double)rows * in * out;
     s3_stats.wbytes += (double)rb * out;
@@ -533,9 +608,21 @@ void s3_par(void *user, itofs_body_fn body, void *arg, int n)
         return;
     }
 #endif
+#ifdef S3_PROF
+    const uint32_t pp0 = PROF_NOW();
+#endif
     xTaskNotifyGive(s_worker);
     body(arg, 0, h, 0);
+#ifdef S3_PROF
+    PROF_ACC(s3_prof.par_cycles[0], pp0);
+    const uint32_t pp1 = PROF_NOW();
+#endif
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+#ifdef S3_PROF
+    PROF_ACC(s3_prof.par_sync0, pp1);
+    PROF_ACC(s3_prof.par_total, pp0);
+    s3_prof.par_calls++;
+#endif
 }
 
 // ------------------------------------------------------------------------------------------------------------------
