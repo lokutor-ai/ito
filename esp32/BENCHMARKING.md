@@ -113,3 +113,12 @@ Rules for the table: show the hash column and mark rows that match the host refe
 - The spread would be over cold boots and repetitions, not a single boot.
 - Peak memory would be given per run, and the hot arena size alongside it.
 - A second board would be required for any claim about the chip in general.
+
+### Kernel check and cycle benchmark
+
+`firmware/main/kernel_check_s3.c` (build with `-DITOFS_KCHECK`, call `s3_kernel_check(1)`) compares every GEMM kernel variant in its table with a plain C int32 reference on random and extreme-valued data (972 shapes per variant: 1 to 24 rows, 1 to 76 vectors, 1 to 33 weight rows), then, on a chip, measures CPU cycles per MAC with the weights in internal SRAM and streamed from PSRAM. It is a way to judge a kernel change without running the synthesiser; QEMU runs the exactness part only.
+
+Findings from experiments on one board (cycles per MAC, 8 activation rows, 240 MHz):
+
+- The dot kernel costs about 21 cycles per weight row for 1 or 2 vectors (a fixed cost) and roughly 3 cycles per vector beyond that, near the dependent-accumulate rate of ACCX. Unrolling the loop 4 times made it slower (0.96 against 0.67 cycles per MAC at 32 inputs). A version that alternates two register pairs and issues the next row's loads before reading ACCX was equal at 64 inputs and slower below it (0.81 against 0.67 at 32).
+- Starting the data cache preload engine (`EXTMEM_DCACHE_PRELOAD_*`) on PSRAM weights hung the board at its first use in this form; it is not used.

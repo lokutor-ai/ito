@@ -1,4 +1,8 @@
-idf_component_register(SRCS "main.c" "kernels_s3.c" "dot_rows_s3.S" "../../engine/itofs.c" "../../engine/itofs_sched.c"
+set(ITOFS_SRCS "main.c" "kernels_s3.c" "dot_rows_s3.S" "../../engine/itofs.c" "../../engine/itofs_sched.c")
+if(ITOFS_KCHECK)
+  list(APPEND ITOFS_SRCS "kernel_check_s3.c")
+endif()
+idf_component_register(SRCS ${ITOFS_SRCS}
                        INCLUDE_DIRS "." "../../engine"
                        PRIV_REQUIRES esp_timer esp_driver_i2s esp_driver_uart esp_driver_gpio esp_partition
                                      esp_psram heap esp_system spi_flash esp_mm esp_hw_support)
@@ -14,4 +18,7 @@ if(ITOFS_EXTRA_DEFS)      # e.g. -D ITOFS_EXTRA_DEFS="STEADY_FRAMES=16;WIDE_ROWS
 endif()
 if(ITOFS_ICPROF)
   target_compile_definitions(${COMPONENT_LIB} PRIVATE ITOFS_ICPROF=1 ITOFS_PROF=1)
+endif()
+if(ITOFS_KCHECK)
+  target_compile_definitions(${COMPONENT_LIB} PRIVATE ITOFS_KCHECK=1)
 endif()

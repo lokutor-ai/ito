@@ -6,6 +6,8 @@
 #include "itofs.h"
 void s3_kernels_init(void);
 void s3_qgemm4(const int8_t *x, int rows, int ldx, int in, const uint8_t *w4, int rs, int out, int32_t *acc, void *user);   // int4-weight rows (see itofs.h)
+void s3_gemm_rows(const int8_t *x, int rows, int ldx, int in16, const int8_t *w, int nw, int32_t *acc, int out);   // the aligned fast path of s3_qgemm
+int s3_kernel_check(int bench);           // kernel_check_s3.c (build with ITOFS_KCHECK): every kernel variant against a C reference, optionally cycles per MAC
 void s3_qgemm(const int8_t *x, int rows, int ldx, int in, const int8_t *w, int out, int32_t *acc, void *user);
 extern volatile int s3_dual_enabled;
 extern volatile int s3_gemm_dual;         // 0 (default): GEMM calls stay on core 0 while the row-parallel loops (s3_par) still use both cores; 1: the full split, both cores run the GEMM (opt-in)

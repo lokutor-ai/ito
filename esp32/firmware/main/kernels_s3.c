@@ -125,6 +125,13 @@ static inline void w4_unpack_row(const uint8_t *row, int in, int8_t *dst)
     }
 }
 
+// the aligned fast path: nw weight rows of in16 vectors each, every row against the rows activation rows of stride ldx; acc[r * out + o]
+void s3_gemm_rows(const int8_t *x, int rows, int ldx, int in16, const int8_t *w, int nw, int32_t *acc, int out)
+{
+    for (int o = 0; o < nw; o++)
+        itofs_s3_dot_rows(x, ldx, w + (size_t)o * in16 * 16, (rows << 16) | in16, acc + o, out * 4);
+}
+
 static inline void compute_(const job_t *j, const int8_t *wt, int o0, int o1, int8_t *pk);
 // channels [o0, o1) whose weights start at wt (row stride in; int4: j->rb bytes per packed row)
 static inline void compute(const job_t *j, const int8_t *wt, int o0, int o1, int8_t *pk)
@@ -150,8 +157,7 @@ static inline void compute_(const job_t *j, const int8_t *wt, int o0, int o1, in
         return;
     }
     if ((in & 15) == 0 && ((uintptr_t)wt & 15) == 0 && j->rows < 65536) {   // every weight row aligned: fast kernel
-        for (int o = o0; o < o1; o++)
-            itofs_s3_dot_rows(j->x, j->ldx, wt + (size_t)(o - o0) * in, (j->rows << 16) | in16, j->acc + o, j->out * 4);
+        s3_gemm_rows(j->x, j->rows, j->ldx, in16, wt, o1 - o0, j->acc + o0, j->out);
         return;
     }
     if (pk && j->rows < 65536 && in <= PACK_BYTES - 32) {

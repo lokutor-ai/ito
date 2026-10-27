@@ -1123,6 +1123,9 @@ void app_main(void)
     printf("arena: hot %u bytes in %s, bulk %u bytes in PSRAM; chunk %d frames = %d samples; %d-bit activations\n", (unsigned)s_hb, hot_where,
            (unsigned)s_bb, s_chunk_frames, s_chunk_samples, s_lim.act_bits ? s_lim.act_bits : 8);
     s3_kernels_init();
+#ifdef ITOFS_KCHECK
+    s3_kernel_check(1);
+#endif
     (void)first;
 
     s_free_q = xQueueCreate(NBUF, sizeof(buf_t));
