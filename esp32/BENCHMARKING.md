@@ -4,15 +4,15 @@ This page does two things: it says what the published speed numbers are and what
 
 ## What the published numbers are
 
-The root README and [`README.md`](README.md) §4a report, for one ESP32-S3-DevKitC-1 N16R8 (rev v0.2, 8 MB octal PSRAM at 80 MHz, 16 MB flash, 240 MHz), firmware `fedbd26`:
+The root README and [`README.md`](README.md) §4a report, with the full split, for one ESP32-S3-DevKitC-1 N16R8 (rev v0.2, 8 MB octal PSRAM at 80 MHz, 16 MB flash, 240 MHz), firmware `fedbd26`:
 
 - first audio chunk (125 ms of audio) ready 184 ms after the phoneme ids reach the engine;
-- RTF 0.66 on the boot calibration sentence (0.660 to 0.674 on the three demo sentences);
+- RTF 0.66 (full split) on the boot calibration sentence (0.660 to 0.674 on the three demo sentences);
 - planned gap-free start delay about 246 ms, 0 underruns.
 
 Read them with these qualifications:
 
-1. **They are for the full split.** Both cores run the GEMM (`s3_gemm_dual = 1`). That load collapses the 3.3 V rail on some boards ([`DUAL_CORE_POWER.md`](DUAL_CORE_POWER.md)). On a board where it does, the row split is the usable configuration and is slower (next section).
+1. **They are for the full split, which is no longer the default.** Both cores run the GEMM (`s3_gemm_dual = 1`). The default build now uses the row split (the GEMM on core 0, the row loops on both cores), because the full split collapses the 3.3 V rail on some boards ([`DUAL_CORE_POWER.md`](DUAL_CORE_POWER.md)). The 0.66 is what you get after opting in on a board whose supply passes the stress test; the output audio is the same either way. A row-split figure from a different board is in the next section.
 2. **They depend on the chunk plan.** The 0.66 uses the firmware's ramp of 125 ms, then 11, 12, 14, 18 and 24-frame chunks. Every chunk streams the layers' weights from PSRAM again, so the chunk size sets the weight traffic, and with it the RTF. An independent run on another board (below) went from RTF 1.06 at 8 frames per chunk to 0.84 at 24. A number without its chunk plan cannot be compared.
 3. **They are one board, resets only, three sentences.** The repeat boots show repeatability on one chip, not a second board; none was a cold power-on; the spread reported is min to max over a handful of runs.
 4. **The pre-board estimate columns (optimistic / central / pessimistic) are estimates**, are labelled so, and were not changed by the measurements.
@@ -72,7 +72,7 @@ Goal: any two numbers produced by it can be compared, and any number can be repr
 - Weights: the female main int8 set, then the male main int8 set (and the int4 and light sets as separate runs). Record the file hashes.
 - Sentences: the three demo sentences (25, 108 and 175 tokens) plus the 84-token boot calibration sentence, as phoneme ids from the host front end, identical across runs. Add one short (under 2 s) and one long (over 12 s) sentence to see the ramp and the steady state.
 - Chunk plan: the firmware's default plan for the headline row (the 10-frame first chunk, then 11, 12, 14, 18 and 24 frames), and 8, 16 and 24 fixed frames for the chunk-size rows.
-- Configuration: the row split and the full split as separate rows. A board whose full split fails the stress test in [`DUAL_CORE_POWER.md`](DUAL_CORE_POWER.md) reports the row split only and says so.
+- Configuration: the row split (the default) and the full split (opt-in) as separate rows. A board whose full split fails the stress test in [`DUAL_CORE_POWER.md`](DUAL_CORE_POWER.md) reports the row split only and says so.
 
 ### Procedure
 

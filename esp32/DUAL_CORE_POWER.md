@@ -1,10 +1,45 @@
 # Two-core PIE load and the 3.3 V supply (ESP32-S3)
 
-**Short version.** Running dense PIE (`EE.*`) integer GEMM on both cores of an ESP32-S3 at 240 MHz can draw enough current to pull the 3.3 V rail down on some development boards: weak regulators, long or thin USB cables, or too little bulk capacitance next to the module. The result is not a clean crash. It looks like a software bug. If your board hangs, resets or gives wrong results only when both cores run the GEMM, read this page before debugging the engine.
+**Short version.** Ito runs its int8 GEMM in one of two ways, and **the default is the safer, slower one: the row split**. The faster **full split** is an opt-in. Running dense PIE (`EE.*`) integer GEMM on both cores of an ESP32-S3 at 240 MHz can draw enough current to pull the 3.3 V rail down on some development boards: weak regulators, long or thin USB cables, or too little bulk capacitance next to the module. The result is not a clean crash. It looks like a software bug. If your board hangs, resets or gives wrong results only when both cores run the GEMM, you are on the wrong side of this page; the default build already avoids it.
 
-Ito's two-core GEMM (`s3_gemm_dual = 1`, the default) is exactly this load. It runs fine on the board used for the published numbers (see the root README), and it hangs on at least one other ESP32-S3-WROOM-1 N16R8-class development board. The safe alternative, the row split, costs speed (below) and is bit-identical.
+**Breaking change.** Earlier builds, including the earlier prebuilt image, defaulted to the full split, and the headline numbers in the root README were measured with it. The default is now the row split. Speed on a board with a good supply drops (RTF about 0.66 with the full split and the shipped chunk ramp, about 0.84 to 0.90 with the row split on another board and fixed chunk sizes; see "Cost" below for exactly what each number is). Output audio is unchanged, bit for bit. To get the old behaviour back, see "Opting in to the full split".
 
-This page is written from stress tests on one board that failed, with plain ESP-IDF code and no Ito engine involved. It is a measurement on one board, not a statement about any particular board design.
+## The two modes
+
+Both modes run the same engine on the same weights and produce the same PCM. They differ only in which core executes the int8 GEMM calls (the matrix multiplies that hold nearly all the multiply-accumulates).
+
+| Work | Row split (default, `s3_gemm_dual = 0`) | Full split (opt-in, `s3_gemm_dual = 1`) |
+|---|---|---|
+| int8 GEMM (PIE dot products) | core 0 only | core 0 and core 1, each half of the output channels |
+| Row-parallel float loops (GELU, normalisation, depthwise convolutions, source features) | core 0 and core 1, rows split in half | core 0 and core 1, rows split in half |
+| Everything else (scheduling, text side, I2S) | core 0 | core 0 |
+| Dense SIMD load on the 3.3 V rail | one core at a time | both cores at the same time |
+| Speed | slower (core 1 is idle for the GEMM, about two thirds of the time) | faster |
+| Needs a stiff 3.3 V supply | no more than one core of PIE | yes, tested on your board |
+
+```
+row split          core 0: [ GEMM (all channels) ][ half the rows ][ GEMM ][ half the rows ] ...
+                   core 1: [      idle           ][ half the rows ][ idle ][ half the rows ] ...
+
+full split         core 0: [ GEMM (half channels) ][ half the rows ][ GEMM (half) ][ half the rows ] ...
+                   core 1: [ GEMM (half channels) ][ half the rows ][ GEMM (half) ][ half the rows ] ...
+                             ^ both cores in dense PIE at once: the peak current
+```
+
+Why bit-identical: the GEMM accumulates in exact int32 arithmetic, and each output channel is computed by exactly one core in either mode (the weight stream follows the split). The float loops are the same in both modes. So there is no reordering of any floating-point operation. This was checked, not assumed: the firmware's self-test hashes the PCM of a golden sentence (84 tokens, 134,100 samples) and compares it with the host C engine, and it prints `fnv32 023bd6b1` in both modes (and `9666bb9e` with 16-bit activations); a full sample-by-sample comparison of the dumped PCM against the host engine in QEMU gives 0 differing samples in both modes. The boot log states which mode is active (`GEMM split: row ...` or `GEMM split: full ...`).
+
+## Cost
+
+Numbers are real-time factor (compute time over audio duration; below 1 is faster than real time). They come from **different boards and different harnesses** and are not one controlled comparison, so read each with its chunk plan.
+
+| Mode | RTF | Chunk plan | Board and harness |
+|---|---|---|---|
+| Full split | about 0.66 (0.660 to 0.674 on the demo sentences) | the firmware's ramp: a 125 ms first chunk, then 11, 12, 14, 18 and 24 frames | a board with a good supply, the shipped firmware's own boot calibration |
+| Row split | about 0.90 (0.903) | 16 frames per chunk, fixed | a second board of the same module class, a separate harness driving Ito's kernels |
+| Row split | about 0.84 (0.836) | 24 frames per chunk, fixed | the same second board and harness |
+| One core, no split | about 1.32 (1.323) | 8 frames per chunk, fixed (the row split is 1.056 at the same 8 frames) | the same second board and harness |
+
+The full-split and row-split numbers are not a like-for-like pair: the ramp reaches 24-frame chunks only at the end, and the firmware's own row-split RTF on the first board was not measured. Expect the row split to land somewhere from about 0.84 to 0.9 with 24 to 16-frame chunks; a board-specific figure comes from running the boot benchmark yourself. More chunk plans, and why the plan matters, are in [`BENCHMARKING.md`](BENCHMARKING.md). The firmware's boot calibration (`CALIB`, `TIER_SELECT`) measures whichever mode is active, so it picks a lighter weight set automatically if the row split is too slow for real time on your board.
 
 ## Symptoms
 
@@ -71,34 +106,46 @@ Two further notes. One core of dense PIE on internal SRAM already browns out on 
 
 ## What to do
 
-1. **Use the row split as the default.** Keep the GEMM calls on core 0 and split only the row-parallel loops (GELU, normalisation, depthwise convolutions, source features) across both cores. This is `s3_gemm_dual = 0`, set at build time with `S3_GEMM_DUAL_DEFAULT=0` (see "Choosing the split" below). The output is bit-identical to the full split. On a second board with the weights in PSRAM and the engine's chunk sizes it ran at about RTF 0.90 at 16 frames per chunk (chunk size matters a lot, see [`BENCHMARKING.md`](BENCHMARKING.md)), against about 1.32 on one core.
-2. **Use the full split only on a board whose supply you have tested**, and only after the stress test below passes for that board.
+1. **Leave the default (row split) unless you have tested your board.** Nothing to configure. The GEMM stays on core 0 and only the row loops use both cores.
+2. **Test your board, then opt in if it passes** (see "Check your board" and "Opting in to the full split").
 3. **Improve the supply** if you want the full split on a board that fails:
-   - 220 to 470 uF of bulk capacitance on 3V3 as close to the module as you can (low-ESR electrolytic or polymer tantalum, plus the usual ceramic), or a stronger 3.3 V regulator;
-   - a short, thick USB cable, a different host port or a powered hub, or a 5 V feed on the 5 V pin from a supply that can deliver an ampere.
+   - 220 to 470 uF of bulk capacitance on 3V3 as close to the module as you can (low-ESR electrolytic or polymer tantalum, plus the usual ceramic);
+   - a 3.3 V regulator rated for at least 1 A (many development boards use a small regulator that is marginal at this load);
+   - a short, thick USB cable, a different host port or a powered hub, or a 5 V feed on the 5 V pin from a supply that can deliver an ampere;
+   - or a different board.
    Changing the cable alone did not fix the board that failed.
-4. **Run a stress test before you enable the full split** (below).
-5. **160 MHz is a software remedy**, safe on the failing board but slower than the row split at 240 MHz (about RTF 1.12 against 0.90 on the second board), so it is not recommended unless you need the power savings anyway.
+4. **160 MHz is a software remedy**, safe on the failing board but slower than the row split at 240 MHz (at 8-frame chunks on the second board: RTF 1.547 against 1.056 for the row split at 240 MHz), so it is not recommended unless you need the power savings anyway.
 
-## Stress test
+## Check your board
 
-[`tools/stress/`](tools/stress/README.md) is a small ESP-IDF program that runs Ito's PIE kernel on both cores and compares every result with a one-core reference. It starts the second core with a spin flag and uses random data, so it exercises the supply but is gentler than a sustained dense load over a long run.
+Run the stress test before enabling the full split. [`tools/stress/`](tools/stress/README.md) is a small ESP-IDF program that runs Ito's PIE kernel on both cores and compares every result with a one-core reference.
 
-For a board you intend to ship, use something at least as demanding as these cases at 240 MHz:
+```bash
+cd esp32/tools/stress
+idf.py set-target esp32s3
+idf.py build flash monitor      # leave it running for several minutes
+```
+
+It starts the second core with a spin flag and uses random data, so it exercises the supply but is gentler than a sustained dense load over a long run. For a board you intend to ship, use something at least as demanding as these cases at 240 MHz:
 
 1. Both cores running the dot rows over a buffer in PSRAM, 10 seconds, every pass checked.
 2. The same with the buffer in internal SRAM (no stalls: the worst case).
 3. The same cases at 160 MHz as a control.
 4. Optionally, the brownout-detector ladder above, to see how far the rail falls.
 
-Pass means no reset, no hang and no mismatch in any pass. If the PSRAM case on both cores hangs or mismatches, keep the row split.
+Pass means no reset, no hang, no `Brownout detector was triggered` message and no mismatch in any pass. If the PSRAM case on both cores hangs or mismatches, keep the row split. Test with the board powered the way it will be used (the same cable, port or supply, and with the radio, display or I2S load you will have), because the margin moves with it.
 
-## Choosing the split
+## Opting in to the full split
 
-`s3_gemm_dual` (declared in `firmware/main/kernels_s3.h`) is a runtime variable that defaults to 1. To make the row split the default of a build, define `S3_GEMM_DUAL_DEFAULT=0` through the firmware's `ITOFS_EXTRA_DEFS` hook: `idf.py -D ITOFS_EXTRA_DEFS="S3_GEMM_DUAL_DEFAULT=0" build` (a fresh build directory, so that CMake picks it up). The boot self-test, the benchmark and every synthesis then run the GEMM on core 0 and the row loops on both cores. The prebuilt image keeps the full split.
+Two equivalent ways, both at build time. Rebuild from a fresh build directory so that CMake and Kconfig pick the change up.
+
+1. **menuconfig (preferred).** `idf.py menuconfig`, then `Ito` then `Run the int8 GEMM on both cores (full split)`. Or add `CONFIG_ITOFS_GEMM_FULL_SPLIT=y` to your `sdkconfig.defaults`. Rebuild with `esp32/tools/build_fw.sh`, or by hand in `esp32/firmware`.
+2. **A compile definition.** `idf.py -B build -D ITOFS_EXTRA_DEFS="S3_GEMM_DUAL_DEFAULT=1" build`. The definition wins over the menuconfig option, in both directions (`S3_GEMM_DUAL_DEFAULT=0` forces the row split).
+
+The boot log prints `GEMM split: full (...)` or `GEMM split: row (...)`, so you can see which one a running image uses. The boot self-test, the board benchmark, the boot calibration and every synthesis all follow the active mode. The prebuilt image is built with the row split; the full split needs a rebuild.
 
 ## Limits of this finding
 
 - One failing board, one session of stress tests per case, a handful of retests. The threshold ladder has seven coarse steps.
-- Whether a given board fails depends on its regulator, its bulk capacitance, its cable and its host port. The published Ito numbers were taken on a board where the full split is stable (see the root README, "Stability on the board"). Both statements are true.
+- Whether a given board fails depends on its regulator, its bulk capacitance, its cable and its host port. The published full-split Ito numbers were taken on a board where the full split is stable (see the root README, "Stability on the board"). Both statements are true.
 - Nothing here was measured with a scope or a current probe.
