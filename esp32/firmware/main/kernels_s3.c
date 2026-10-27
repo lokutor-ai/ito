@@ -43,7 +43,10 @@
 #define TILE_SLACK 128          // GDMA moves 64-byte aligned supersets of the tile
 
 volatile int s3_dual_enabled = 1;
-volatile int s3_gemm_dual = 1;
+#ifndef S3_GEMM_DUAL_DEFAULT
+#define S3_GEMM_DUAL_DEFAULT 1   // 0: GEMM on core 0 only (the row split); see DUAL_CORE_POWER.md
+#endif
+volatile int s3_gemm_dual = S3_GEMM_DUAL_DEFAULT;
 volatile int s3_wmode = 0;
 volatile int s3_dma_errors = 0;
 s3_stats_t s3_stats;
