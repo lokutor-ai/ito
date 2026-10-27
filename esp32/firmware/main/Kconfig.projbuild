@@ -1,0 +1,18 @@
+menu "Ito"
+
+    config ITOFS_GEMM_FULL_SPLIT
+        bool "Run the int8 GEMM on both cores (full split)"
+        default n
+        help
+            Off (the default): the row split. Every GEMM call runs on core 0 and only the row-parallel loops (GELU,
+            normalisation, depthwise convolutions, source features) use both cores. The output is bit-identical to the
+            full split and the peak current is lower.
+
+            On: the full split. Both cores run the GEMM. This is the fastest mode, but dense SIMD on both cores can
+            collapse the 3.3 V rail of a board with a weak regulator or too little bulk capacitance, which shows up
+            as hangs, brownout resets or wrong results. Enable it only on a board that passes the stress test in
+            esp32/tools/stress (see esp32/DUAL_CORE_POWER.md).
+
+            A compile definition S3_GEMM_DUAL_DEFAULT=0 or 1 (for example through ITOFS_EXTRA_DEFS) overrides this option.
+
+endmenu

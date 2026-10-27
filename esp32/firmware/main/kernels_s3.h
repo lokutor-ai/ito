@@ -8,7 +8,7 @@ void s3_kernels_init(void);
 void s3_qgemm4(const int8_t *x, int rows, int ldx, int in, const uint8_t *w4, int rs, int out, int32_t *acc, void *user);   // int4-weight rows (see itofs.h)
 void s3_qgemm(const int8_t *x, int rows, int ldx, int in, const int8_t *w, int out, int32_t *acc, void *user);
 extern volatile int s3_dual_enabled;
-extern volatile int s3_gemm_dual;         // 0: GEMM calls stay on core 0 while the row-parallel loops (s3_par) still use both cores
+extern volatile int s3_gemm_dual;         // 0 (default): GEMM calls stay on core 0 while the row-parallel loops (s3_par) still use both cores; 1: the full split, both cores run the GEMM (opt-in)
 extern volatile int s3_w4_pie;            // 1: PIE unpack of int4 rows (verified against the C unpack at boot), 0: C unpack; the `unpack` command switches it
 extern volatile int s3_wmode;             // 0 direct (through the cache), 1 copy (memcpy tiles), 2 gdma (double-buffered tiles), 3 gdma + cross-call prefetch
 extern volatile int s3_dma_errors;

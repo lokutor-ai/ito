@@ -1070,6 +1070,7 @@ static void halt(void) { for (;;) vTaskDelay(1000); }
 void app_main(void)
 {
     printf("\n==== ItoFS TTS on ESP32-S3 ====\n");
+    printf("GEMM split: %s\n", s3_gemm_dual ? "full (the GEMM runs on both cores; opt-in, see esp32/DUAL_CORE_POWER.md)" : "row (the GEMM runs on core 0, the row loops on both cores; default)");
     int nvalid = 0, first = -1;
     size_t max_ext = 0;
     for (int i = 0; i < MAX_TIERS; i++) {

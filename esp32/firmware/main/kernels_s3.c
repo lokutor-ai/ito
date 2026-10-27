@@ -44,7 +44,11 @@
 
 volatile int s3_dual_enabled = 1;
 #ifndef S3_GEMM_DUAL_DEFAULT
-#define S3_GEMM_DUAL_DEFAULT 1   // 0: GEMM on core 0 only (the row split); see DUAL_CORE_POWER.md
+#ifdef CONFIG_ITOFS_GEMM_FULL_SPLIT
+#define S3_GEMM_DUAL_DEFAULT 1   // menuconfig "Ito > Run the int8 GEMM on both cores": the full split; see DUAL_CORE_POWER.md
+#else
+#define S3_GEMM_DUAL_DEFAULT 0   // the row split: GEMM on core 0 only, row loops on both cores; see DUAL_CORE_POWER.md
+#endif
 #endif
 volatile int s3_gemm_dual = S3_GEMM_DUAL_DEFAULT;
 volatile int s3_wmode = 0;
