@@ -30,6 +30,8 @@ Over the four female boots (8 October and these three) the self-test passed ever
 
 ## 9 October 2026, stability runs (same board, firmware `fedbd26` for the soak)
 
+**The files listed in this section are not in the repository** (they were never committed; the numbers they back are in the READMEs). The table is kept as the record of what was captured.
+
 | File | What it is |
 |---|---|
 | `soak_female_240MHz_2026-10-09_0343.raw.log` | Raw serial capture of the soak (female voice, 240 MHz, USB powered, nothing attached, I2S idle), about 2.5 hours. |
