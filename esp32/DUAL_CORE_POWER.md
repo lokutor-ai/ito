@@ -60,9 +60,14 @@ A step from about 0.2 V of droop to more than 0.8 V between two loads that diffe
 | the task stack or the weight-staging mode | a larger worker stack does not change it; direct reads and GDMA staging both fail (GDMA shows the brownout message) |
 | not enough core voltage | raising the digital core voltage within ESP-IDF's cap makes it worse (a borderline case goes from sporadic wrong sums to a hang): more voltage draws more current |
 | temperature | the die sensor read 26 to 40 degrees C at the start and end of every case |
-| an errata item | none of the published ESP32-S3 errata matches this pattern, and the dependence on load density and frequency points at the supply. This is absence of evidence, not a statement from the vendor |
+| an errata item | the [published ESP32-S3 SoC errata](https://docs.espressif.com/projects/esp-chip-errata/en/latest/esp32s3/03-errata-description/index.html) contain no matching item: none covers PIE, PSRAM, MSPI, temperature or a dual-core hang. The only cache item, CACHE-126 (a hit error during a software-triggered write-back), is unrelated and is worked around by ESP-IDF 5.5 (`esp_rom/patches/esp_rom_cache_writeback_esp32s3.S`). The dependence on load density and frequency points at the supply |
 
-Two further notes. One core of dense PIE on internal SRAM already browns out on the failing board, so the problem is not specific to two-core code. And the lazy save of the coprocessor state in ESP-IDF was checked by experiment (the two-task test above), not by auditing its source.
+Two further notes. One core of dense PIE on internal SRAM already browns out on the failing board, so the problem is not specific to two-core code. And the lazy save of the coprocessor state in ESP-IDF was checked both in the source (ESP-IDF v5.5.5) and by experiment (the two-task test above):
+
+- `tie.h` for the ESP32-S3 defines `XCHAL_CP_MASK` as `0x09`: coprocessor 0 (the FPU) and coprocessor 3 (the AI/PIE coprocessor), whose save area is 208 bytes, 16-byte aligned.
+- `_xt_coproc_exc` in `components/xtensa/xtensa_vectors.S` saves the state lazily, on first use after a switch, with a per-core owner array guarded by a cross-core spinlock.
+- `_frxt_coproc_exc_hook` in the FreeRTOS `portasm.S` pins a task to its core on its first coprocessor use.
+- `vPortCleanUpCoprocArea` in the FreeRTOS xtensa `port.c` releases the ownership when a task is deleted.
 
 ## What to do
 
