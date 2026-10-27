@@ -389,6 +389,7 @@ Timings printed under QEMU are emulator wall-clock times and say nothing about t
 
 ```
 engine/      itofs.c / itofs.h: portable C99 engine (also reads the older arch-2 blob format and int4 weights); itofs_sched.c / .h: boot calibration and start-delay policy; BLOB_FORMAT.md: the weight blob format
+BENCHMARKING.md      what the published speed numbers depend on, a second-board run, a proposed benchmark protocol
 DUAL_CORE_POWER.md   two-core PIE load and the 3.3 V supply: symptoms, measurements, the row split, a stress test
 firmware/    ESP-IDF app: main.c (I2S, serial commands, self-test, board benchmark, weight sets and boot self-calibration, start-delay planning), kernels_s3.c (PIE int8 GEMM via esp-nn, int4 unpack), partitions.csv (three weight partitions)
 host/        Makefile, ito_cli.c, host_test_v3.c, gen_selftest.c, opcount_v3.c, w4_dump.c (int4 GEMM test helper), host_test_sched.c (policy test with simulated timings), golden/ (test references)
