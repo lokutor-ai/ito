@@ -1,6 +1,6 @@
 # Two-core PIE load and the 3.3 V supply (ESP32-S3)
 
-**Short version.** Ito runs its int8 GEMM in one of two ways, and **the default is the safer, slower one: the row split**. The faster **full split** is an opt-in. Running dense PIE (`EE.*`) integer GEMM on both cores of an ESP32-S3 at 240 MHz can draw enough current to pull the 3.3 V rail down on some development boards: weak regulators, long or thin USB cables, or too little bulk capacitance next to the module. The result is not a clean crash. It looks like a software bug. If your board hangs, resets or gives wrong results only when both cores run the GEMM, you are on the wrong side of this page; the default build already avoids it.
+**Short version.** Ito runs its int8 GEMM in one of two ways, and **the default is the safer, slower one: the row split**. The faster **full split** is an opt-in. Running dense PIE (`EE.*`) integer GEMM on both cores of an ESP32-S3 at 240 MHz can draw enough current to pull the 3.3 V rail down on some development boards: weak regulators, long or thin USB cables, or too little bulk capacitance next to the module. The result is not a clean crash. It looks like a software bug. If your board hangs, resets or gives wrong results only when both cores run the GEMM, you are on the wrong side of this page. The default build reduces the load, because only one core runs the dense GEMM at a time. It does not fix a failing supply: on the affected board the row split ran for weeks, but later even single-core int16 runs stopped once the supply degraded further.
 
 **Breaking change.** Earlier builds, including the earlier prebuilt image, defaulted to the full split, and the headline numbers in the root README were measured with it. The default is now the row split. Speed on a board with a good supply drops (RTF about 0.66 with the full split and the shipped chunk ramp, about 0.84 to 0.90 with the row split on another board and fixed chunk sizes; see "Cost" below for exactly what each number is). Output audio is unchanged, bit for bit. To get the old behaviour back, see "Opting in to the full split".
 
@@ -114,7 +114,7 @@ Two further notes. One core of dense PIE on internal SRAM already browns out on 
    - a short, thick USB cable, a different host port or a powered hub, or a 5 V feed on the 5 V pin from a supply that can deliver an ampere;
    - or a different board.
    Changing the cable alone did not fix the board that failed.
-4. **160 MHz is a software remedy**, safe on the failing board but slower than the row split at 240 MHz (at 8-frame chunks on the second board: RTF 1.547 against 1.056 for the row split at 240 MHz), so it is not recommended unless you need the power savings anyway.
+4. **160 MHz is a software remedy**, safe on the failing board but slower than the row split at 240 MHz (at 8-frame chunks on the second board: RTF 1.547 for the row split at 160 MHz against 1.056 for the row split at 240 MHz; both are the row split). The full split at 160 MHz on that board measured RTF 1.121 at chunk 8. It passed in those runs, but in other reruns it hung twice, so 160 MHz lowers the load without removing the failure. It is not recommended unless you need the power savings anyway.
 
 ## Check your board
 
