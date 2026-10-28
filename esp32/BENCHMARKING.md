@@ -51,6 +51,30 @@ What it says:
 
 These are not comparable one to one with the 0.66 above: a different board, a different harness, the GEMM on one core, a different chunk plan and a different first-chunk definition. They show how far a board that cannot run the full split is from the published figure, and that the chunk size matters.
 
+### A second board, configuration sweep
+
+One change per build on the same second board and harness, everything else as in the table above (female main int8 set, 5.59 s sentence, 240 MHz unless stated, PSRAM at 80 MHz, direct weight reads, hot arena in internal SRAM, every output bit-identical to the host reference). RTF for one core at 8 frames per chunk / row split at 8 / row split at 16. The baseline is 1.323 / 1.057 / 0.902.
+
+| Change | RTF (one core, 8 / row split, 8 / row split, 16) |
+|---|---|
+| `-funroll-loops` | 1.309 / 1.060 / 0.905 |
+| D-cache 32 KB instead of 64 KB | 1.326 / 1.061 / 0.905 |
+| D-cache 4 ways instead of 8 | 1.323 / 1.057 / 0.902 |
+| D-cache line 32 B instead of 64 B | 1.507 / 1.240 / 1.021 |
+| I-cache 16 KB instead of 32 KB | 1.331 / 1.086 / 0.928 |
+| CPU 160 MHz | 1.817 / 1.547 / 1.392 |
+| PSRAM 40 MHz | 1.642 / 1.711 / 1.478 |
+
+The PSRAM 40 MHz row split at 8 frames (1.711) comes from this sweep; the 1.380 in the table above is a different run of the same change.
+
+Also measured on that board:
+
+- **GDMA staging.** An 8 KB tile instead of 4 KB takes one-core GDMA mode from 1.520 to 1.372, still slower than direct reads (1.323). One-core memcpy to SRAM is 1.371 and one-core GDMA 1.516.
+- **A 20-frame steady chunk after an 8-frame first chunk** gives RTF 0.862 and a 220 ms first chunk.
+- **Check where the hot arena lands.** A hot arena that spills to PSRAM costs RTF 1.205 against 1.056 at chunk 8 (row split). Start the kernels' worker before reserving the arena, so that it gets internal SRAM.
+
+Provenance of this section: the lokutor bench harness, a second board, female_main (5.59 s), 240 MHz unless stated, PSRAM at 80 MHz. The raw logs are not included in this repository; the numbers are copied from the harness notes.
+
 ## Proposed protocol
 
 Goal: any two numbers produced by it can be compared, and any number can be reproduced from its record.
