@@ -10,7 +10,7 @@ void s3_gemm_rows(const int8_t *x, int rows, int ldx, int in16, const int8_t *w,
 int s3_kernel_check(int bench);           // kernel_check_s3.c (build with ITOFS_KCHECK): every kernel variant against a C reference, optionally cycles per MAC
 void s3_qgemm(const int8_t *x, int rows, int ldx, int in, const int8_t *w, int out, int32_t *acc, void *user);
 extern volatile int s3_dual_enabled;
-extern volatile int s3_gemm_dual;         // 0 (default): GEMM calls stay on core 0 while the row-parallel loops (s3_par) still use both cores; 1: the full split, both cores run the GEMM (opt-in)
+extern volatile int s3_gemm_dual;         // 0 (the row split, the start value): GEMM calls stay on core 0 while the row-parallel loops (s3_par) still use both cores; 1: the full split, both cores run the GEMM (chosen at run time, see itofs_split.h)
 extern volatile int s3_w4_pie;            // 1: PIE unpack of int4 rows (verified against the C unpack at boot), 0: C unpack; the `unpack` command switches it
 extern volatile int s3_wmode;             // 0 direct (through the cache), 1 copy (memcpy tiles), 2 gdma (double-buffered tiles), 3 gdma + cross-call prefetch
 extern volatile int s3_dma_errors;
@@ -22,6 +22,10 @@ const char *s3_wmode_name(int m);
 typedef struct { int64_t us; double macs, wbytes; long calls, pf_hit, pf_miss, pf_free; } s3_stats_t;   // pf_*: staged calls whose weights were already announced / announced differently / not announced
 extern s3_stats_t s3_stats;               // accumulated by s3_qgemm: wall time inside GEMM calls, int8 MACs, weight bytes
 void s3_stats_reset(void);
+// Supply test: the full split (both cores in the GEMM) on the engine's own shapes, with weights streamed from PSRAM, repeated for ms and compared bit for bit with the
+// one-core result of the same call. scratch: idle memory of at least 160 KB (the engine's hot arena before the first synthesis). Returns 1 if every pass was exact (*passes
+// = passes made), else 0. The caller arms the watchdog around it: a hang is not detected here, it resets the board. Leaves s3_gemm_dual as it found it.
+int s3_supply_test(const void *wbase, size_t wbytes, void *scratch, size_t sbytes, int ms, long *passes);
 void s3_bench(const void *wbase, size_t wbytes);
 void s3_par(void *user, itofs_body_fn body, void *arg, int n);   // itofs_ctx_t.par: rows split across both cores   // PSRAM bandwidth + the engine's GEMM shapes, every mode, 1 and 2 cores
 // Optional cycle accounting (compile with -DS3_PROF; CCOUNT cycles, each field written by one core). Fields, in order, as uint64:

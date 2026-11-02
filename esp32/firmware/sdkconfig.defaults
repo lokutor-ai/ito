@@ -28,7 +28,9 @@ CONFIG_ESP32S3_DATA_CACHE_64KB=y
 CONFIG_ESP32S3_DATA_CACHE_8WAYS=y
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 
-# Long synthesis loops on both cores: no task watchdog
+# Long synthesis loops on both cores: no task watchdog (it would be starved by design). A hang is recovered by the RTC watchdog armed in main/guard.c,
+# fed from the chunk loops, and the brownout detector stays on: both resets are counted and can latch the row split (itofs_split.h)
+CONFIG_ESP_BROWNOUT_DET=y
 CONFIG_ESP_TASK_WDT_EN=n
 CONFIG_ESP_TASK_WDT_INIT=n
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
@@ -44,6 +46,9 @@ CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
 CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
 CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# Reproducible build: no build time, date or paths in the image, so that the same sources and ESP-IDF give the same bytes
+CONFIG_APP_REPRODUCIBLE_BUILD=y
 
 # Optimized (PIE / assembly) kernels
 CONFIG_NN_OPTIMIZED=y

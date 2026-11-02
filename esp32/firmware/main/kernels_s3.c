@@ -33,6 +33,7 @@
 #include "esp_cache.h"
 #include "common_functions.h"   // esp-nn: esp_nn_dot_s8_unaligned_esp32s3
 #include "itofs.h"
+#include "guard.h"
 
 #define TOC 8
 #define DUAL_MIN_MACS 32768
@@ -43,14 +44,7 @@
 #define TILE_SLACK 128          // GDMA moves 64-byte aligned supersets of the tile
 
 volatile int s3_dual_enabled = 1;
-#ifndef S3_GEMM_DUAL_DEFAULT
-#ifdef CONFIG_ITOFS_GEMM_FULL_SPLIT
-#define S3_GEMM_DUAL_DEFAULT 1   // menuconfig "Ito > Run the int8 GEMM on both cores": the full split; see DUAL_CORE_POWER.md
-#else
-#define S3_GEMM_DUAL_DEFAULT 0   // the row split: GEMM on core 0 only, row loops on both cores; see DUAL_CORE_POWER.md
-#endif
-#endif
-volatile int s3_gemm_dual = S3_GEMM_DUAL_DEFAULT;
+volatile int s3_gemm_dual = 0;       // the row split until main.c decides (itofs_split.h)
 volatile int s3_wmode = 0;
 volatile int s3_dma_errors = 0;
 s3_stats_t s3_stats;
@@ -601,6 +595,46 @@ static void qgemm_common(const int8_t *x, int rows, int ldx, int in, const int8_
     s3_stats.calls++;
 }
 
+static uint64_t hash_words(const int32_t *p, size_t n)
+{
+    uint64_t h = 1469598103934665603ull;
+    for (size_t i = 0; i < n; i++) { h ^= (uint32_t)p[i]; h *= 1099511628211ull; }
+    return h;
+}
+
+int s3_supply_test(const void *wbase_v, size_t wbytes, void *scratch, size_t sbytes, int ms, long *passes)
+{
+    static const struct { int rows, in, out; } sh[] = { {24, 192, 576}, {24, 576, 192}, {24, 704, 176}, {8, 1216, 256} };   // vocoder pointwise layers and the 704-wide case of the stress program
+    enum { NS = sizeof sh / sizeof sh[0], STRIDE = 256 * 1024 };
+    const int8_t *w = (const int8_t *)(((uintptr_t)wbase_v + 63) & ~(uintptr_t)63);
+    int32_t *acc = (int32_t *)(((uintptr_t)scratch + 15) & ~(uintptr_t)15);
+    int8_t *x = (int8_t *)(acc + 24 * 576);
+    *passes = 0;
+    if (wbytes < (size_t)NS * STRIDE + 128 || (uint8_t *)(x + 24 * 704) > (uint8_t *)scratch + sbytes) return 0;
+    for (int i = 0; i < 24 * 704; i++) x[i] = (int8_t)(i * 40503u >> 8);
+    const int saved = s3_gemm_dual;
+    uint64_t ref[NS];
+    s3_gemm_dual = 0;                                          // the one-core result of each call is the reference
+    for (int s = 0; s < NS; s++) {
+        s3_qgemm(x, sh[s].rows, sh[s].in, sh[s].in, w + (size_t)s * STRIDE, sh[s].out, acc, NULL);
+        ref[s] = hash_words(acc, (size_t)sh[s].rows * sh[s].out);
+    }
+    s3_gemm_dual = 1;
+    int ok = 1;
+    const int64_t t_end = esp_timer_get_time() + (int64_t)ms * 1000;
+    do {
+        for (int s = 0; s < NS && ok; s++) {
+            memset(acc, 0, sizeof(int32_t) * (size_t)sh[s].rows * sh[s].out);
+            s3_qgemm(x, sh[s].rows, sh[s].in, sh[s].in, w + (size_t)s * STRIDE, sh[s].out, acc, NULL);
+            ok = hash_words(acc, (size_t)sh[s].rows * sh[s].out) == ref[s];
+        }
+        (*passes)++;
+        guard_wdt_feed();
+    } while (ok && esp_timer_get_time() < t_end);
+    s3_gemm_dual = saved;
+    return ok;
+}
+
 // Row-parallel engine loops (itofs_ctx_t.par): rows [n/2, n) on core 1, [0, n/2) on core 0. The engine's bodies write
 // disjoint rows with per-core scratch, so the result is the same bit for bit (host test D checks every split).
 void s3_par(void *user, itofs_body_fn body, void *arg, int n)
@@ -718,6 +752,7 @@ void s3_bench(const void *wbase_v, size_t wbytes)
         {"prosody conv w16a16 96->96", 96, 96, 16}, {"text conv w16a16 128->128", 128, 128, 16},
     };
     for (size_t s = 0; s < sizeof sh / sizeof sh[0]; s++) {
+        guard_wdt_feed();
         const int rws = sh[s].rows < brow ? sh[s].rows : brow;
         printf("BENCH_GEMM %-28s rows %2d |", sh[s].name, rws);
         for (int mode = 0; mode < 3; mode++) {

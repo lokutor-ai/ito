@@ -114,7 +114,7 @@ static void bench_all(void)
         { 8, 1, 64 }, { 8, 2, 64 }, { 8, 4, 64 }, { 8, 8, 64 }, { 8, 16, 64 }, { 8, 48, 32 },
         { 20, 16, 64 }, { 20, 6, 64 }, { 20, 11, 64 }, { 20, 48, 32 }, { 4, 16, 64 },
     };
-    const size_t WS_SRAM = 32 * 1024, WS_PSRAM = 4096 * 1024;
+    const size_t WS_SRAM = 32 * 1024, WS_PSRAM = 3072 * 1024;
     int8_t *x = heap_caps_aligned_alloc(16, 24 * 76 * 16 + 64, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     int32_t *acc = heap_caps_aligned_alloc(16, 24 * 80 * 4, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     int8_t *ws = heap_caps_aligned_alloc(64, WS_SRAM, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);

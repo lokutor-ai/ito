@@ -1,18 +1,60 @@
 menu "Ito"
 
-    config ITOFS_GEMM_FULL_SPLIT
-        bool "Run the int8 GEMM on both cores (full split)"
-        default n
+    choice ITOFS_SPLIT_POLICY
+        prompt "Initial policy of the GEMM split"
+        default ITOFS_SPLIT_AUTO
         help
-            Off (the default): the row split. Every GEMM call runs on core 0 and only the row-parallel loops (GELU,
-            normalisation, depthwise convolutions, source features) use both cores. The output is bit-identical to the
-            full split and the peak current is lower.
+            The int8 GEMM runs either as the row split (core 0 only; the row-parallel loops use both cores) or as the full split (both cores in the
+            GEMM, about 28 % faster, but dense SIMD on both cores can collapse the 3.3 V rail of a board with a weak regulator or too little bulk
+            capacitance: hangs, brownout resets or wrong results). The output is bit-identical in both.
 
-            On: the full split. Both cores run the GEMM. This is the fastest mode, but dense SIMD on both cores can
-            collapse the 3.3 V rail of a board with a weak regulator or too little bulk capacitance, which shows up
-            as hangs, brownout resets or wrong results. Enable it only on a board that passes the stress test in
-            esp32/tools/stress (see esp32/DUAL_CORE_POWER.md).
+            This is the policy for a board whose NVS holds no record (first boot, or after erasing it); afterwards the stored record decides, and the
+            console command `split auto|row|full` changes it. See esp32/DUAL_CORE_POWER.md.
 
-            A compile definition S3_GEMM_DUAL_DEFAULT=0 or 1 (for example through ITOFS_EXTRA_DEFS) overrides this option.
+        config ITOFS_SPLIT_AUTO
+            bool "Auto: row split until a supply self-test has passed, then the full split"
+        config ITOFS_SPLIT_ROW
+            bool "Row split only (the full split can still be forced with `split full`)"
+        config ITOFS_SPLIT_FULL
+            bool "Full split without a test (a brownout, watchdog or hash failure still latches the row split)"
+    endchoice
+
+    choice ITOFS_AUDIO_OUT
+        prompt "Audio output"
+        default ITOFS_AUDIO_PLAIN_I2S
+        help
+            Where the 24 kHz audio goes. A plain I2S DAC or class-D amplifier (MAX98357A and the like) needs no setup: BCLK GPIO15, LRCLK GPIO16,
+            DOUT GPIO17, no master clock. The ESP_S3-AUDIN shield has an ES8388 codec that must be configured over I2C and fed a master clock.
+
+        config ITOFS_AUDIO_PLAIN_I2S
+            bool "Plain I2S DAC or amplifier (GPIO15 / 16 / 17)"
+        config ITOFS_AUDIO_ES8388
+            bool "ES8388 codec on the ESP_S3-AUDIN shield"
+    endchoice
+
+    if ITOFS_AUDIO_ES8388
+        config ITOFS_ES8388_PIN_SDA
+            int "I2C SDA GPIO"
+            default 14
+        config ITOFS_ES8388_PIN_SCL
+            int "I2C SCL GPIO"
+            default 47
+        config ITOFS_ES8388_PIN_MCLK
+            int "I2S MCLK GPIO (256 x fs = 6.144 MHz)"
+            default 8
+        config ITOFS_ES8388_PIN_BCLK
+            int "I2S BCLK GPIO"
+            default 3
+        config ITOFS_ES8388_PIN_WS
+            int "I2S LRCK GPIO"
+            default 9
+        config ITOFS_ES8388_PIN_DOUT
+            int "I2S data to the codec (DSDIN) GPIO"
+            default 46
+        config ITOFS_ES8388_VOLUME
+            int "Output volume register of the codec (0..33; 30 = 0 dB, 1.5 dB per step)"
+            range 0 33
+            default 24
+    endif
 
 endmenu

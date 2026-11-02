@@ -9,8 +9,10 @@
 //   serial (UART0, 115200): "say 0,72,156,..."  speak token ids (tools/say.py)
 //                           "style <0-63>" | "act <8|16>" | "demo" | "demo <k>" | "test" | "stats" | "bench" |
 //                           "wmode <0|1|2>" (weight staging: direct / copy / gdma) | "first <n>" (frames in the
-//                           low-latency first chunk, default 2 = 25 ms) | "help"
-//   I2S: BCLK GPIO15, LRCLK GPIO16, DOUT GPIO17, sample rate from the blob (24 kHz), 16-bit, mono duplicated to stereo.
+//                           first chunk) | "split [auto|row|full]" (GEMM split, see DUAL_CORE_POWER.md) | "cancel" (stop the
+//                           utterance being spoken) | "rep <n> [k]" (n silent repetitions of the demos, with timing and hash) |
+//                           "reboot" | "help"
+//   I2S: sample rate from the blob (24 kHz), 16-bit, mono duplicated to stereo. Pins: BCLK GPIO15, LRCLK GPIO16, DOUT GPIO17 (plain DAC, default), or the ES8388 shield's.
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -36,12 +38,26 @@
 #include "itofs_sched.h"
 #include "kernels_s3.h"
 #include "demo_sentences.h"
+#include "itofs_split.h"
+#include "guard.h"
+#ifdef CONFIG_ITOFS_AUDIO_ES8388
+#include "es8388.h"
+#endif
 
+#ifdef CONFIG_ITOFS_AUDIO_ES8388       // the ESP_S3-AUDIN shield: ES8388 codec, I2C control, I2S with MCLK (esp32/README.md, "Audio output")
+#define PIN_MCLK CONFIG_ITOFS_ES8388_PIN_MCLK
+#define PIN_BCLK CONFIG_ITOFS_ES8388_PIN_BCLK
+#define PIN_WS CONFIG_ITOFS_ES8388_PIN_WS
+#define PIN_DOUT CONFIG_ITOFS_ES8388_PIN_DOUT
+#else                                  // a plain I2S DAC / amplifier: BCLK GPIO15, LRCLK GPIO16, DOUT GPIO17, no MCLK
+#define PIN_MCLK I2S_GPIO_UNUSED
 #define PIN_BCLK 15
 #define PIN_WS 16
 #define PIN_DOUT 17
+#endif
 #define PIN_BOOT 0
 #define MAX_TOKENS 400
+#define TAIL_SAMPLES 120             // end of an utterance: the last sample decays to zero over 5 ms (the engine's PCM ends at up to -45 dBFS, not at zero: a step would click)
 #define I2S_SLICE 480                // samples per I2S write (20 ms = one DMA descriptor); a chunk (up to 300 ms) goes out in slices
 #ifndef STEADY_FRAMES
 #define STEADY_FRAMES 24             // frames per chunk once the start-up ramp is over (24 frames = 300 ms): every chunk reads each weight
@@ -51,10 +67,9 @@
                                      // (the start-delay planner models this pool: production of chunk k waits for the buffer of chunk k - NBUF)
 // Start-up schedule (gapless speech from the first chunk). Time to first audio is the time of chunk 0; for playback never to starve, every later chunk
 // must be ready before the audio of the chunks before it has played, and each chunk costs a fixed weight pass plus about 6.5 ms (central) per frame.
-// A first chunk of 2 frames is out after about 145 ms (central) but its 25 ms of audio is gone long before the 24-frame chunk after it (about 230 ms
-// later) is ready, so the speech has a gap. The ramp below starts with 10 frames (125 ms of audio), then 11, 12, 14, 18 and 24: each chunk takes
-// less time to make than the one before it takes to play, so playback can start with the first chunk and never starves (estimates, see the
-// README). The text side advances in steps of 8 tokens meanwhile (a 24-token step would make one chunk 65 ms slower than its neighbours). The audio
+// A first chunk of 2 frames is out early but its 25 ms of audio is gone long before the 24-frame chunk after it is ready, so the speech has a gap unless
+// playback is delayed. The ramp below starts with FIRST_FRAMES, then 11, 12, 14, 18 and 24, and the start delay is planned from the measured chunk times
+// (itofs_sched.h), so playback never starves (measured: 0 underruns, esp32/BENCHMARKING.md). The text side advances in steps of 8 tokens meanwhile (a 24-token step would make one chunk 65 ms slower than its neighbours). The audio
 // is bit-identical to any other chunking (host test G).
 #ifndef RAMP_LIST
 #define RAMP_LIST 11, 12, 14, 18     // frames of chunks 1, 2, ... after the first one, then STEADY_FRAMES
@@ -63,8 +78,15 @@
 #define TEXT_STEP_LIST 8, 8, 8, 8, 8, 8, 8, 8   // text-side tokens added per step in chunk 0, 1, ... (0 or past the list: the engine's default, 24)
 #endif
 #ifndef FIRST_FRAMES
-#define FIRST_FRAMES 10              // frames of the first chunk (10 = 125 ms of audio). `first <n>` changes it (n >= chunk = no ramp at all); `first 2` is the
-                                     // lowest-latency start (about 145 ms central) but not gapless
+#define FIRST_FRAMES 10              // frames of the first chunk (10 = 125 ms of audio) for a weight set that is fast enough for it to be the best start. `first <n>` changes it (n >= chunk = no ramp at all)
+#endif
+#ifndef FIRST_SMALL_FRAMES
+#define FIRST_SMALL_FRAMES 4         // first chunk of a set whose measured RTF is above FIRST_SMALL_ABOVE_RTF: the planner then needs to delay playback less (measured on the board, esp32/BENCHMARKING.md:
+                                     // full split main set 249 -> 210 ms, row split light set 392..476 -> 344..370 ms, main set 511..697 -> 414..596 ms, 0 underruns); a fast set (full split, light) starts
+                                     // sooner with 10 (167 against 191 ms); 2 frames gave an underrun
+#endif
+#ifndef FIRST_SMALL_ABOVE_RTF
+#define FIRST_SMALL_ABOVE_RTF 0.63
 #endif
 #ifndef START_DELAY_MS
 #define START_DELAY_MS -1            // -1: the start delay is planned per utterance from the boot calibration (itofs_sched.h); >= 0 fixes it in ms (the `delay <ms>` command does the same at run time)
@@ -72,8 +94,25 @@
 #ifndef ITOFS_ACT_BITS
 #define ITOFS_ACT_BITS 8             // activations of the int8-weight layers: 8 (one int8 plane, default) or 16; `act` command
 #endif
+// Initial policy of the GEMM split (the stored record takes over after the first boot): menuconfig "Ito > Initial split policy"; the compile definition
+// S3_GEMM_DUAL_DEFAULT=0 / 1 (ITOFS_EXTRA_DEFS) forces row / full.
+#if defined(S3_GEMM_DUAL_DEFAULT)
+#define SPLIT_POLICY (S3_GEMM_DUAL_DEFAULT ? ITOFS_PREF_FULL : ITOFS_PREF_ROW)
+#elif defined(CONFIG_ITOFS_SPLIT_ROW)
+#define SPLIT_POLICY ITOFS_PREF_ROW
+#elif defined(CONFIG_ITOFS_SPLIT_FULL)
+#define SPLIT_POLICY ITOFS_PREF_FULL
+#else
+#define SPLIT_POLICY ITOFS_PREF_AUTO
+#endif
+#define WDT_RUN_MS 15000             // the hardware watchdog resets the chip when no synthesis loop has fed it for this long (a chunk takes about 0.25 s)
+#define WDT_TEST_MS 4000             // the same during the supply test (a pass of the test takes about 50 ms)
+#define SUPPLY_TEST_MS 3000          // long supply test (first boot, `split auto`)
+#define SUPPLY_CHECK_MS 250          // quick re-check of a passed verdict at every boot
 
 static itofs_model_t s_model;
+static const void *s_blob; static size_t s_blob_size;     // the active weight set
+static void *s_hot, *s_bulk; static size_t s_hb, s_bb;      // the engine's hot (internal SRAM) and bulk (PSRAM) arenas
 static itofs_ctx_t s_ctx;
 static int s_hop, s_sr, s_chunk_frames, s_chunk_samples, s_style, s_first = FIRST_FRAMES;
 static const int s_ramp_default[] = { RAMP_LIST };
@@ -103,6 +142,8 @@ static const int32_t *s_st, *s_st16; // self-test records from the blob ("selfte
 typedef struct { int16_t *pcm; int n; } buf_t;      // n = samples, 0 = end of utterance
 static QueueHandle_t s_free_q, s_full_q, s_req_q, s_done_q;
 static volatile int s_underruns, s_playing;
+static volatile int s_cancel, s_speaking;   // `cancel`: set by the console while an utterance is spoken; the synthesis stops at the next chunk, the player drops what it holds and flushes the I2S ring
+static volatile int64_t s_cancel_t;         // esp_timer time of the cancel command
 static volatile int64_t s_utt_t0;       // esp_timer time (us) at which the current utterance was handed to the engine
 static int s_delay_override_ms = START_DELAY_MS;   // >= 0: hold the DAC until this long after the text arrived, whatever the plan says (`delay <ms>`); -1: use the plan (`delay auto`)
 static volatile int64_t s_cur_delay_us;            // the planned start delay of the current utterance (from its text arrival); raised while the player waits if the chunks come slower than calibrated
@@ -110,7 +151,7 @@ static int s_active = -1, s_selected = -1, s_degraded;   // weight set in use / 
 #define PLAN_MAX_DELAY_US 4000000.0
 static double s_obs_us[ITOFS_SCHED_MAXCH];         // production times of the chunks of the current utterance so far
 
-typedef struct { int kind; int n; int16_t tok[MAX_TOKENS]; } req_t;   // 0 say, 1 demos, 2 self-test, 3 style, 4 act bits, 5 bench, 6 wmode, 7 icprof, 8 first
+typedef struct { int kind; int n; int16_t tok[MAX_TOKENS]; } req_t;   // 0 say, 1 demos, 2 self-test, 3 style, 4 act bits, 5 bench, 6 wmode, 7 icprof, 8 first, 9 tier, 10 recal, 11 status, 13 no-op, 14 rep, 15 split, 16 hang (test builds)
 static req_t s_req_tmp;
 
 static double ms(int64_t us) { return us / 1000.0; }
@@ -119,8 +160,9 @@ static void mem_report(const char *tag)
 {
     size_t pt = heap_caps_get_total_size(MALLOC_CAP_SPIRAM), pmin = heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM);
     size_t it = heap_caps_get_total_size(MALLOC_CAP_INTERNAL), imin = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
-    printf("MEM %s: peak PSRAM used %u / %u KB, peak internal SRAM used %u / %u KB\n", tag,
-           (unsigned)((pt - pmin) / 1024), (unsigned)(pt / 1024), (unsigned)((it - imin) / 1024), (unsigned)(it / 1024));
+    printf("MEM %s: peak PSRAM used %u / %u KB, peak internal SRAM used %u / %u KB | free now: PSRAM %u KB, internal SRAM %u KB\n", tag,
+           (unsigned)((pt - pmin) / 1024), (unsigned)(pt / 1024), (unsigned)((it - imin) / 1024), (unsigned)(it / 1024),
+           (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024), (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));
 }
 
 // ------------------------------------------------------------------------------------------------------------------
@@ -138,13 +180,30 @@ static void i2s_setup(void)
     i2s_std_config_t sc = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(24000),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
-        .gpio_cfg = { .mclk = I2S_GPIO_UNUSED, .bclk = PIN_BCLK, .ws = PIN_WS, .dout = PIN_DOUT, .din = I2S_GPIO_UNUSED,
+        .gpio_cfg = { .mclk = PIN_MCLK, .bclk = PIN_BCLK, .ws = PIN_WS, .dout = PIN_DOUT, .din = I2S_GPIO_UNUSED,
                       .invert_flags = { .mclk_inv = false, .bclk_inv = false, .ws_inv = false } },
     };
     sc.clk_cfg.sample_rate_hz = (uint32_t)s_sr;
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(s_tx, &sc));
     ESP_ERROR_CHECK(i2s_channel_enable(s_tx));
+#ifdef CONFIG_ITOFS_AUDIO_ES8388
+    const int e = es8388_init(CONFIG_ITOFS_ES8388_PIN_SDA, CONFIG_ITOFS_ES8388_PIN_SCL, CONFIG_ITOFS_ES8388_VOLUME);   // the clocks run, so the codec can lock to them
+    if (e) printf("ERROR ES8388 codec %s: nothing will be heard\n", e == -1 ? "does not answer on the I2C bus" : "bus error");
+    else { vTaskDelay(pdMS_TO_TICKS(50)); es8388_mute(0); printf("audio: ES8388 codec, MCLK GPIO%d, BCLK GPIO%d, LRCK GPIO%d, DOUT GPIO%d, output volume register %d\n", PIN_MCLK, PIN_BCLK, PIN_WS, PIN_DOUT, CONFIG_ITOFS_ES8388_VOLUME); }
+#endif
 }
+
+// Cancel: drop the audio queued in the DMA ring (about 120 ms): stop the channel, fill the ring with silence, start again.
+static void cancel_flush(int16_t *st)
+{
+    memset(st, 0, sizeof(int16_t) * 2 * (size_t)I2S_SLICE);
+    i2s_channel_disable(s_tx);
+    for (int i = 0; i < 6; i++) { size_t n = 0; i2s_channel_preload_data(s_tx, st, sizeof(int16_t) * 2 * (size_t)I2S_SLICE, &n); }
+    i2s_channel_enable(s_tx);
+    printf("CANCEL: audio flushed %.1f ms after the command\n", ms(esp_timer_get_time() - s_cancel_t));
+}
+#else
+static void cancel_flush(int16_t *st) { (void)st; }
 #endif
 
 static void play_task(void *arg)
@@ -152,6 +211,7 @@ static void play_task(void *arg)
     (void)arg;
     int16_t *st = heap_caps_malloc(sizeof(int16_t) * 2 * (size_t)I2S_SLICE + 64, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);   // one 20 ms slice
     buf_t b;
+    int16_t last = 0;                // the last sample handed to the I2S in this utterance
     int64_t end_us = 0;              // when the audio handed to the I2S so far has been played out (the DMA ring holds ~120 ms, and i2s_channel_write returns once the data is queued, not played)
     for (;;) {
         int starved = 0;
@@ -161,9 +221,24 @@ static void play_task(void *arg)
         } else if (!s_playing) {
             xQueueReceive(s_full_q, &b, portMAX_DELAY);
         }
-        if (b.n == 0) { s_playing = 0; xQueueSend(s_done_q, &b, portMAX_DELAY); continue; }
+        if (b.n == 0) {
+#ifndef ITOFS_QEMU
+            if (s_playing && !s_cancel && last) {          // end of the utterance: a short ramp from the last sample to zero instead of a step
+                for (int i = 0; i < TAIL_SAMPLES; i++) st[2 * i] = st[2 * i + 1] = (int16_t)((int32_t)last * (TAIL_SAMPLES - i) / TAIL_SAMPLES);
+                size_t wr = 0;
+                i2s_channel_write(s_tx, st, sizeof(int16_t) * 2 * TAIL_SAMPLES, &wr, portMAX_DELAY);
+            }
+#endif
+            last = 0; s_playing = 0; xQueueSend(s_done_q, &b, portMAX_DELAY); continue;
+        }
+        if (s_cancel) {                                    // cancelled: chunks still arriving are dropped until the end marker
+            if (s_playing) { cancel_flush(st); s_playing = 0; }
+            xQueueSend(s_free_q, &b, portMAX_DELAY);
+            continue;
+        }
         if (!s_playing) {                                  // pre-roll: the first chunk waits for the delay, later chunks keep arriving meanwhile
             for (;;) {                                     // (re-read in <= 10 ms steps: the synthesis task may raise the planned delay)
+                if (s_cancel) break;
                 const int64_t d = s_delay_override_ms >= 0 ? (int64_t)s_delay_override_ms * 1000 : s_cur_delay_us;
                 const int64_t wait = s_utt_t0 + d - esp_timer_get_time();
                 if (wait <= 1000) break;
@@ -178,12 +253,14 @@ static void play_task(void *arg)
         s_playing = 1;
         end_us += (int64_t)b.n * 1000000 / s_sr;
 #ifndef ITOFS_QEMU
-        for (int o = 0; o < b.n; o += I2S_SLICE) {
+        for (int o = 0; o < b.n && !s_cancel; o += I2S_SLICE) {
             const int m = b.n - o < I2S_SLICE ? b.n - o : I2S_SLICE;
             for (int i = 0; i < m; i++) { st[2 * i] = b.pcm[o + i]; st[2 * i + 1] = b.pcm[o + i]; }
             size_t wr = 0;
             i2s_channel_write(s_tx, st, sizeof(int16_t) * 2 * (size_t)m, &wr, portMAX_DELAY);
         }
+        last = b.pcm[b.n - 1];
+        if (s_cancel) { cancel_flush(st); s_playing = 0; }
 #else
         (void)st;
 #endif
@@ -194,14 +271,15 @@ static void play_task(void *arg)
 // ------------------------------------------------------------------------------------------------------------------
 // synthesis
 // ------------------------------------------------------------------------------------------------------------------
-typedef struct { double ttfa_ms, begin_ms, compute_ms, audio_s; int frames, tok_first; double plan_delay_ms; int plan_underruns, plan_feasible; } stats_t;
+typedef struct { double ttfa_ms, begin_ms, compute_ms, audio_s; int frames, tok_first; double plan_delay_ms; int plan_underruns, plan_feasible; uint32_t hash; int cancelled; } stats_t;
 
 // Synthesise tokens; stream chunks to the player (play=1) or into out[] (play=0).
 static int tier_plan(int n_tok, int nobs, itofs_plan_t *pl);       // below: start-delay plan from the active weight set's calibration
 static int speak(const int *tok, int n, int style, uint32_t seed, int play, int16_t *out, long out_max, stats_t *S)
 {
-    S->tok_first = 0; S->plan_delay_ms = -1; S->plan_underruns = 0; S->plan_feasible = 1;
+    S->tok_first = 0; S->plan_delay_ms = -1; S->plan_underruns = 0; S->plan_feasible = 1; S->hash = 2166136261u; S->cancelled = 0;
     s_cur_delay_us = 0;
+    s_cancel = 0; s_speaking = play;
     int64_t t0 = esp_timer_get_time();
     s_utt_t0 = t0;
     s3_stats_reset();
@@ -214,7 +292,9 @@ static int speak(const int *tok, int n, int style, uint32_t seed, int play, int1
     s_underruns = 0;
     for (;;) {
         buf_t b = { NULL, 0 };
+        guard_wdt_feed();
         if (play) xQueueReceive(s_free_q, &b, portMAX_DELAY);
+        if (s_cancel) { if (play) xQueueSend(s_free_q, &b, portMAX_DELAY); break; }
         int16_t *dst = play ? b.pcm : out + pos;
         s_ctx.text_step = text_step_for(kch);
         const int want = chunk_frames_for(kch++) * s_hop;                                  // low-latency first chunk, ramp, steady state
@@ -226,6 +306,7 @@ static int speak(const int *tok, int n, int style, uint32_t seed, int play, int1
         if (got <= 0) { if (play) xQueueSend(s_free_q, &b, portMAX_DELAY); break; }
         if (ttfa < 0) { ttfa = e - t0; S->tok_first = s_ctx.n_done; }
         pos += got;
+        for (int i = 0; i < got; i++) { S->hash ^= (uint16_t)dst[i]; S->hash *= 16777619u; }
         if (play) {
             if (kch - 1 < ITOFS_SCHED_MAXCH) s_obs_us[kch - 1] = (double)(e - a);
             if (!s_playing) {          // adaptive pre-buffer: plan (kch == 1) or re-plan the start delay with the chunk times actually seen in this utterance
@@ -243,6 +324,7 @@ static int speak(const int *tok, int n, int style, uint32_t seed, int play, int1
         xQueueSend(s_full_q, &end, portMAX_DELAY);
         xQueueReceive(s_done_q, &end, portMAX_DELAY);
     }
+    S->cancelled = s_cancel; s_cancel = 0; s_speaking = 0;
     s_ctx.text_step = 0;
     S->begin_ms = ms(t1 - t0); S->ttfa_ms = ms(ttfa); S->compute_ms = ms(compute);
     S->frames = s_ctx.T; S->audio_s = (double)pos / s_sr; (void)T;
@@ -251,12 +333,13 @@ static int speak(const int *tok, int n, int style, uint32_t seed, int play, int1
 
 static void print_timing(const char *what, const stats_t *S, int n_tok, int style)
 {
+    if (S->cancelled) printf("CANCELLED %s after %.2f s of audio\n", what, S->audio_s);
     printf("TIMING %s: %d tokens, style %d, %.2f s audio | first chunk %.1f ms (begin %.1f ms; %s text side, %d tokens final at first chunk) | "
-           "compute %.1f ms, RTF %.3f | underruns %d (start delay %s %.0f ms%s) | weight set %d | weight staging %s: %ld GEMM calls, %ld announced ahead, %ld not\n",
+           "compute %.1f ms, RTF %.3f | underruns %d (start delay %s %.0f ms%s) | weight set %d | split %s | weight staging %s: %ld GEMM calls, %ld announced ahead, %ld not | pcm fnv32 %08lx\n",
            what, n_tok, style, S->audio_s, S->ttfa_ms, S->begin_ms, s_ctx.text_incr ? "incremental" : "whole-sentence", S->tok_first,
            S->compute_ms, S->compute_ms / 1000.0 / S->audio_s, s_underruns, s_delay_override_ms >= 0 ? "fixed" : "planned",
-           s_delay_override_ms >= 0 ? (double)s_delay_override_ms : S->plan_delay_ms, s_delay_override_ms >= 0 || S->plan_feasible ? "" : ", model predicts underruns", s_active, s3_wmode_name(s3_wmode),
-           s3_stats.calls, s3_stats.pf_hit, s3_stats.pf_miss + s3_stats.pf_free);
+           s_delay_override_ms >= 0 ? (double)s_delay_override_ms : S->plan_delay_ms, s_delay_override_ms >= 0 || S->plan_feasible ? "" : ", model predicts underruns", s_active, s3_gemm_dual ? "full" : "row", s3_wmode_name(s3_wmode),
+           s3_stats.calls, s3_stats.pf_hit, s3_stats.pf_miss + s3_stats.pf_free, (unsigned long)S->hash);
     mem_report(what);
 }
 
@@ -338,13 +421,80 @@ static void self_test_one(const int32_t *s_st, int both, int dump)
     heap_caps_free(pcm);
 }
 
+// ------------------------------------------------------------------------------------------------------------------
+// GEMM split: row (safe) or full (both cores in the GEMM). The decision, the supply test and the persistence are described in itofs_split.h
+// and in DUAL_CORE_POWER.md; s3_gemm_dual is what the kernels read.
+// ------------------------------------------------------------------------------------------------------------------
+static itofs_split_rec_t s_split;
+static const char *s_rst_name = "?";
+static itofs_split_plan_t s_plan;               // what the record asked for at this boot (set in app_main, applied by the synthesis task)
+static int s_split_changed;                   // the split changed after the weight sets were measured: the measurements must be redone
+
+static void split_save(void)
+{
+    if (guard_rec_save(&s_split)) printf("WARNING: the split record could not be stored in NVS (the verdict will not survive a reset)\n");
+}
+
+static void split_print(void)
+{
+    const itofs_split_rec_t *r = &s_split;
+    printf("SPLIT mode=%s pref=%s verdict=%s why=\"%s\" policy=%s | boots %u, tests %u (passed %u, failed %u), brownout resets %u, watchdog/panic resets %u, hash mismatches %u, interrupted tests %u | last reset: %s\n",
+           s3_gemm_dual ? "full" : "row", itofs_split_pref_name(r->pref), itofs_split_verdict_name(r->verdict), itofs_split_why_name(r->why), itofs_split_pref_name(SPLIT_POLICY),
+           (unsigned)r->boots, (unsigned)r->tests, (unsigned)r->passes, (unsigned)r->fails, (unsigned)r->brownouts, (unsigned)r->wdt_resets, (unsigned)r->mismatches, (unsigned)r->interrupted, s_rst_name);
+}
+
+// The supply test on the active weights; the watchdog is tightened around it, so a hang or a collapse resets the board and the next boot reads the record.
+static int supply_test(int dur_ms)
+{
+#ifdef ITOFS_QEMU
+    (void)dur_ms;
+    printf("SUPPLY_TEST skipped: QEMU has no PIE current draw, counted as PASS (the dual-core path is exercised by the self-test)\n");
+    return 1;
+#else
+    long passes = 0;
+    guard_wdt_arm(WDT_TEST_MS);
+    const int64_t t0 = esp_timer_get_time();
+    const int ok = s3_supply_test(s_blob, s_blob_size, s_hot, s_hb, dur_ms, &passes);
+    guard_wdt_arm(WDT_RUN_MS);
+    printf("SUPPLY_TEST %s: full split on the engine's shapes, %ld passes in %.0f ms, every result %s the one-core result\n", dur_ms == SUPPLY_TEST_MS ? "long" : "quick", passes,
+           ms(esp_timer_get_time() - t0), ok ? "equal to" : "DIFFERENT FROM");
+    return ok;
+#endif
+}
+
+// Apply what the record asks for: run the test it asks for, store the outcome, set the split.
+static void split_apply(itofs_split_plan_t p)
+{
+    int full = p.full;
+    if (p.save) split_save();                     // before the test: a reset during it must find testing = 1
+    if (p.test == 2) { full = itofs_split_test_done(&s_split, supply_test(SUPPLY_TEST_MS)); split_save(); }
+    else if (p.test == 1 && full && !supply_test(SUPPLY_CHECK_MS)) { itofs_split_fail(&s_split, ITOFS_WHY_RUN_MISMATCH); full = 0; split_save(); }
+    if (full != s3_gemm_dual) s_split_changed = 1;
+    s3_gemm_dual = full;
+    split_print();
+}
+
+// Evidence against the full split while it runs: latch the row split.
+static void split_latch_row(itofs_why_t why)
+{
+    itofs_split_fail(&s_split, why);
+    split_save();
+    s3_gemm_dual = 0; s_split_changed = 1;
+    printf("SPLIT: %s -> the row split is latched; `split auto|full` re-enables the full split\n", itofs_split_why_name(why));
+    split_print();
+}
+
 static void self_test(int both)
 {
-    s_selftest_ok = 1;
-    if (!s_st) { printf("SELFTEST skipped: this weight blob has no self-test record\n"); s_tested = 1; return; }
-    self_test_one(s_st, both, 1);
-    if (both && s_st16) self_test_one(s_st16, 0, 0);
-    s_tested = 1;
+    for (int attempt = 0; attempt < 2; attempt++) {
+        s_selftest_ok = 1;
+        if (!s_st) { printf("SELFTEST skipped: this weight blob has no self-test record\n"); s_tested = 1; return; }
+        self_test_one(s_st, both, 1);
+        if (both && s_st16) self_test_one(s_st16, 0, 0);
+        s_tested = 1;
+        if (s_selftest_ok || !s3_gemm_dual) return;
+        split_latch_row(ITOFS_WHY_RUN_MISMATCH);                  // the same test in the row split decides between a bad split and a bad weight set
+    }
 }
 
 static void play_demos(int only)
@@ -411,6 +561,7 @@ static void tts_bench(void)
             const int64_t t2 = esp_timer_get_time();
             const double o8f = ctx_ops(0) - o8a, off = ctx_ops(1) - ofa, gus_first = (double)s3_stats.us;
             while (got > 0) {
+                guard_wdt_feed();
                 pos += got; s_ctx.text_step = text_step_for(kc); got = itofs_next_chunk(&s_ctx, pcm, chunk_frames_for(kc++) * s_hop);
                 for (int i = 0; i < got; i++) { hh ^= (uint16_t)pcm[i]; hh *= 16777619u; }
             }
@@ -632,8 +783,6 @@ static void icprof(int quick)
 }
 #endif
 
-static const void *s_blob; static size_t s_blob_size;
-
 static void board_bench(void)
 {
     s3_bench(s_blob, s_blob_size);
@@ -645,9 +794,9 @@ static void board_bench(void)
 // weight sets ("tiers") and the boot self-calibration
 //
 // Up to three ItoFS blobs sit in flash, best quality first: `weights` (main, int8), `weights_b` (main, int4 blocks), `weights_c` (light: 4 blocks, int4).
-// Only one is in PSRAM at a time. At boot the firmware activates them in that order, synthesises a representative sentence (the blob's self-test sentence)
+// Only one is in PSRAM at a time. At boot the firmware activates them in that order (all of them are measured), synthesises a representative sentence (the blob's self-test sentence)
 // without playback with the shipped chunk schedule, records the real time of every chunk (compute plus weight fetch from PSRAM), turns that into a measured
-// real-time factor, and keeps the first set whose RTF is <= 0.85 (itofs_sched.h). If none is, it keeps the fastest and says so; if that one is still
+// real-time factor. Among the sets whose RTF is <= 0.85 it keeps the one with the lowest planned start delay (itofs_sched.h). If none is, it keeps the fastest and says so; if that one is still
 // >= 0.95 it prints a WARNING line and sets the degraded flag instead of silently stuttering. The same measured chunk times plan, per utterance, the
 // playback start delay (an adaptive jitter pre-buffer: the first audio is released as soon as the model says the speaker cannot run dry).
 // `simtime a b c` replaces the measured chunk times by modelled ones (RTF a, b, c for the three sets) so the whole logic can be exercised in QEMU.
@@ -655,7 +804,7 @@ static void board_bench(void)
 #define MAX_TIERS 3
 typedef struct {
     const esp_partition_t *p; size_t ext; int valid;
-    int calibrated; double rtf, rtf_steady, rtf_whole; itofs_cal_t cal;
+    int calibrated, first; double rtf, rtf_steady, rtf_whole; itofs_cal_t cal;       // first: frames of the first chunk the set was calibrated with
     int blocks; long n_int4; char desc[48];
 } tier_t;
 static tier_t s_tier[MAX_TIERS];
@@ -663,7 +812,6 @@ static const char *const s_tier_label[MAX_TIERS] = { "weights", "weights_b", "we
 static itofs_tier_status_t s_tstatus = ITOFS_TIER_OK;
 static uint8_t *s_wbuf;                       // PSRAM copy of the active set (NULL: running memory-mapped from flash)
 static esp_partition_mmap_handle_t s_map_h; static int s_mapped;
-static void *s_hot, *s_bulk; static size_t s_hb, s_bb;
 static itofs_limits_t s_lim;
 static int s_sim; static double s_sim_rtf[MAX_TIERS] = { 0.9, 0.8, 0.7 };
 
@@ -715,6 +863,7 @@ static int activate_tier(int i)
     if (s_mapped) { esp_partition_munmap(s_map_h); s_mapped = 0; }
     if (s_wbuf) {
         for (size_t o = 0; o < T->ext; o += 65536) {      // flash read API in 64 KB pieces
+            guard_wdt_feed();
             size_t n = T->ext - o < 65536 ? T->ext - o : 65536;
             if (esp_partition_read(T->p, o, s_wbuf + o, n) != ESP_OK) { printf("ERROR reading weights '%s'\n", T->p->label); return -1; }
         }
@@ -784,6 +933,7 @@ static void calibrate_tier(int i)
     c->begin_us = (double)(t1 - t0);
     int kc = 0;
     for (;;) {
+        guard_wdt_feed();
         s_ctx.text_step = text_step_for(kc);
         const int want = chunk_frames_for(kc) * s_hop;
         const int64_t a = esp_timer_get_time();
@@ -816,45 +966,61 @@ static int tier_plan(int n_tok, int nobs, itofs_plan_t *pl)
     return 1;
 }
 
-static void self_test(int both);
+// The weight sets are judged equivalent by ear (Dani's blind tests: the 192 int8, int4 and light sets, both voices), so the choice among the sets that meet
+// the RTF target looks at speed alone: the lowest planned start delay, then the lowest first chunk (itofs_sched_pick).
+#define SETS_EQUIVALENT 1
 static void tiers_select(void)
 {
-    double rtf[MAX_TIERS];
+    itofs_set_score_t sc[MAX_TIERS];
     itofs_tier_status_t st = ITOFS_TIER_OK;
     int pick = -1;
     for (int attempt = 0; attempt < MAX_TIERS; attempt++) {
-        for (int i = 0; i < MAX_TIERS; i++) rtf[i] = -1;
-        for (int i = 0; i < MAX_TIERS; i++) {                 // best quality first; stop at the first set that meets the target
+        s_split_changed = 0;
+        for (int i = 0; i < MAX_TIERS; i++) sc[i] = (itofs_set_score_t){ -1, 0, 0, SETS_EQUIVALENT };
+        for (int i = 0; i < MAX_TIERS; i++) {                 // measure every set (the choice needs their start delays), in the split in force
             if (!s_tier[i].valid) continue;
             if (s_active != i && activate_tier(i)) { s_tier[i].valid = 0; continue; }
+            s_first = FIRST_FRAMES;
             calibrate_tier(i);
-            rtf[i] = s_tier[i].rtf;
-            if (rtf[i] >= 0 && rtf[i] <= ITOFS_RTF_TARGET) break;
+            if (s_tier[i].calibrated && s_tier[i].rtf > FIRST_SMALL_ABOVE_RTF) { s_first = FIRST_SMALL_FRAMES; calibrate_tier(i); }   // slower sets start sooner with a small first chunk
+            s_tier[i].first = s_first;
+            sc[i].rtf = s_tier[i].rtf;
+            if (s_tier[i].calibrated) {
+                itofs_plan_t pl;
+                itofs_sched_plan(&s_tier[i].cal, s_tier[i].cal.n_tok, 0, NBUF, ITOFS_SCHED_SAFETY, PLAN_MAX_DELAY_US, NULL, 0, &pl);
+                sc[i].start_delay_us = pl.start_delay_us; sc[i].first_chunk_us = s_tier[i].cal.begin_us + s_tier[i].cal.t_us[0];
+            }
         }
-        pick = itofs_sched_pick(rtf, MAX_TIERS, ITOFS_RTF_TARGET, ITOFS_RTF_DEGRADED, &st);
+        pick = itofs_sched_pick(sc, MAX_TIERS, ITOFS_RTF_TARGET, ITOFS_RTF_DEGRADED, &st);
         if (pick < 0) { printf("TIER_SELECT ERROR: no weight set could be measured\n"); s_degraded = 1; return; }
         if (pick != s_active && activate_tier(pick)) { s_tier[pick].valid = 0; continue; }
         if (!s_tested) {                                      // the chosen set must reproduce the host engine's PCM bit for bit
             self_test(0);
+            if (s_split_changed) continue;                    // the full split failed here: measure everything again in the row split
             if (!s_selftest_ok) { printf("TIER_SELECT: weight set %d FAILED its self-test and is excluded\n", pick); s_tier[pick].valid = 0; s_tested = 0; continue; }
         }
         break;
     }
+    s_first = s_tier[pick].first;
     s_selected = pick; s_tstatus = st; s_degraded = st == ITOFS_TIER_DEGRADED;
-    printf("TIER_SELECT chosen=%d ('%s', %s) measured_rtf=%.3f target=%.2f status=%s degraded=%d%s | measured:", pick, s_tier[pick].p->label, s_tier[pick].desc, rtf[pick],
-           ITOFS_RTF_TARGET, st == ITOFS_TIER_OK ? "OK" : st == ITOFS_TIER_MARGINAL ? "MARGINAL" : "DEGRADED", s_degraded, s_sim ? " (SIMULATED TIMES)" : "");
-    for (int i = 0; i < MAX_TIERS; i++) { if (rtf[i] >= 0) printf(" set%d %.3f", i, rtf[i]); else if (s_tier[i].valid) printf(" set%d not needed", i); else printf(" set%d absent", i); }
+    printf("TIER_SELECT chosen=%d ('%s', %s) measured_rtf=%.3f target=%.2f status=%s degraded=%d split=%s first=%d%s | measured (RTF, planned start delay for %d tokens, first chunk):", pick, s_tier[pick].p->label, s_tier[pick].desc, sc[pick].rtf,
+           ITOFS_RTF_TARGET, st == ITOFS_TIER_OK ? "OK" : st == ITOFS_TIER_MARGINAL ? "MARGINAL" : "DEGRADED", s_degraded, s3_gemm_dual ? "full" : "row", s_first, s_sim ? " (SIMULATED TIMES)" : "",
+           s_tier[pick].cal.n_tok);
+    for (int i = 0; i < MAX_TIERS; i++) {
+        if (sc[i].rtf >= 0) printf(" set%d %.3f, %.0f ms, %.0f ms;", i, sc[i].rtf, sc[i].start_delay_us / 1e3, sc[i].first_chunk_us / 1e3);
+        else printf(" set%d %s;", i, s_tier[i].valid ? "not measured" : "absent");
+    }
     printf("\n");
     if (st == ITOFS_TIER_MARGINAL)
-        printf("NOTE: no weight set reaches RTF %.2f; the best (set %d) measures %.3f. Speech is planned with a start delay (gapless if the measurement holds), but there is little margin.\n", ITOFS_RTF_TARGET, pick, rtf[pick]);
+        printf("NOTE: no weight set reaches RTF %.2f; the best (set %d) measures %.3f. Speech is planned with a start delay (gapless if the measurement holds), but there is little margin.\n", ITOFS_RTF_TARGET, pick, sc[pick].rtf);
     if (s_degraded)
         printf("WARNING: DEGRADED: even the fastest weight set runs at RTF %.3f (>= %.2f). Speech may stutter or fall behind on long sentences; the start delay grows with the sentence (capped at %.0f s). The firmware exposes this as degraded=1 in TIER_SELECT and `status`.\n",
-               rtf[pick], ITOFS_RTF_DEGRADED, PLAN_MAX_DELAY_US / 1e6);
+               sc[pick].rtf, ITOFS_RTF_DEGRADED, PLAN_MAX_DELAY_US / 1e6);
 }
 
 static void tier_status(void)
 {
-    printf("STATUS active_set=%d selected_set=%d degraded=%d status=%s start_delay=%s%s", s_active, s_selected, s_degraded,
+    printf("STATUS split=%s active_set=%d selected_set=%d degraded=%d status=%s start_delay=%s%s", s3_gemm_dual ? "full" : "row", s_active, s_selected, s_degraded,
            s_tstatus == ITOFS_TIER_OK ? "OK" : s_tstatus == ITOFS_TIER_MARGINAL ? "MARGINAL" : "DEGRADED", s_delay_override_ms >= 0 ? "fixed" : "planned", s_sim ? " SIMULATED_TIMES" : "");
     for (int i = 0; i < MAX_TIERS; i++) {
         if (!s_tier[i].valid) { printf(" | set%d ('%s'): absent", i, s_tier_label[i]); continue; }
@@ -864,6 +1030,48 @@ static void tier_status(void)
     printf("\n");
 }
 
+// `rep <n> [k]`: n silent repetitions of the demo sentences (all, or only k): first chunk, RTF and the PCM hash of every run (the hash must not change), then
+// mean (sd) [min..max] per sentence and the memory before and after (a leak shows as a difference).
+#define REP_MAX_SAMPLES (12 * 24000)
+static void repeat_demos(int n, int only)
+{
+    int16_t *pcm = heap_caps_malloc(sizeof(int16_t) * REP_MAX_SAMPLES, MALLOC_CAP_SPIRAM);
+    if (!pcm) { printf("REP ERROR: no memory\n"); return; }
+    double sf[MAX_DEMOS] = {0}, sff[MAX_DEMOS] = {0}, sr[MAX_DEMOS] = {0}, srr[MAX_DEMOS] = {0};
+    double f_min[MAX_DEMOS], f_max[MAX_DEMOS] = {0}, r_min[MAX_DEMOS], r_max[MAX_DEMOS] = {0};
+    uint32_t h0[MAX_DEMOS] = {0};
+    int bad[MAX_DEMOS] = {0}, cnt[MAX_DEMOS] = {0};
+    for (int k = 0; k < MAX_DEMOS; k++) f_min[k] = r_min[k] = 1e30;
+    const size_t p0 = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) + sizeof(int16_t) * REP_MAX_SAMPLES, i0 = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    for (int r = 0; r < n; r++)
+        for (int k = 0; k < s_ndemo; k++) {
+            if (only >= 0 && k != only) continue;
+            demo_tokens(k, s_tok_buf);
+            stats_t S;
+            const int got = speak(s_tok_buf, s_demo_len[k], s_demo_style[k], 1u + (uint32_t)k, 0, pcm, REP_MAX_SAMPLES, &S);
+            if (got <= 0) continue;
+            const double rtf = S.compute_ms / 1000.0 / S.audio_s;
+            if (!cnt[k]) h0[k] = S.hash;
+            const int ok = S.hash == h0[k];
+            bad[k] += !ok;
+            printf("REP %d demo %d: %d tokens, first chunk %.1f ms, RTF %.3f, pcm fnv32 %08lx %s\n", r + 1, k, s_demo_len[k], S.ttfa_ms, rtf, (unsigned long)S.hash, ok ? "(same)" : "(DIFFERENT)");
+            sf[k] += S.ttfa_ms; sff[k] += S.ttfa_ms * S.ttfa_ms; sr[k] += rtf; srr[k] += rtf * rtf; cnt[k]++;
+            if (S.ttfa_ms < f_min[k]) f_min[k] = S.ttfa_ms;
+            if (S.ttfa_ms > f_max[k]) f_max[k] = S.ttfa_ms;
+            if (rtf < r_min[k]) r_min[k] = rtf;
+            if (rtf > r_max[k]) r_max[k] = rtf;
+        }
+    for (int k = 0; k < s_ndemo; k++) {
+        if (!cnt[k]) continue;
+        const double c = cnt[k], mf = sf[k] / c, mr = sr[k] / c;
+        printf("REP_SUMMARY demo %d (%d tokens, split %s, set %d): n %d | first chunk %.1f ms (sd %.2f) [%.1f..%.1f] | RTF %.3f (sd %.4f) [%.3f..%.3f] | pcm fnv32 %08lx, %d runs different\n", k, s_demo_len[k],
+               s3_gemm_dual ? "full" : "row", s_active, cnt[k], mf, sqrt(fmax(0.0, sff[k] / c - mf * mf)), f_min[k], f_max[k], mr, sqrt(fmax(0.0, srr[k] / c - mr * mr)), r_min[k], r_max[k], (unsigned long)h0[k], bad[k]);
+    }
+    heap_caps_free(pcm);
+    printf("REP memory: free PSRAM %u -> %u KB, free internal SRAM %u -> %u KB\n", (unsigned)(p0 / 1024), (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024),
+           (unsigned)(i0 / 1024), (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));
+}
+
 static void halt(void);
 static void synth_task(void *arg)
 {
@@ -871,6 +1079,7 @@ static void synth_task(void *arg)
     int first = -1;
     for (int i = 0; i < MAX_TIERS && first < 0; i++) if (s_tier[i].valid) first = i;
     if (first < 0 || activate_tier(first)) { printf("ERROR no usable weight set\n"); halt(); }
+    split_apply(s_plan);                 // the supply test (if due) runs on the first weight set, before anything else uses both cores
     self_test(0);
     if (!s_selftest_ok) { printf("WARNING: the first weight set FAILED its self-test and is excluded; the other sets are tried below\n"); s_tier[first].valid = 0; }
 #ifndef ITOFS_QEMU
@@ -880,7 +1089,8 @@ static void synth_task(void *arg)
     play_demos(-1);
     printf("READY (BOOT button = demos, serial: say <ids> | style <k> | demo [k] | test | stats | tier [k] | status | help)\n");
     for (;;) {
-        xQueueReceive(s_req_q, &s_req_tmp, portMAX_DELAY);
+        while (xQueueReceive(s_req_q, &s_req_tmp, pdMS_TO_TICKS(1000)) != pdTRUE) guard_wdt_feed();      // idle: the watchdog is fed once a second
+        guard_wdt_feed();
         if (s_req_tmp.kind == 0) {
             for (int i = 0; i < s_req_tmp.n; i++) s_tok_buf[i] = s_req_tmp.tok[i];
             stats_t S;
@@ -909,7 +1119,7 @@ static void synth_task(void *arg)
             if (k < 0) tier_status();
             else if (k >= MAX_TIERS || !s_tier[k].valid) printf("ERROR weight set %d is absent\n", k);
             else if (activate_tier(k)) printf("ERROR could not activate set %d\n", k);
-            else { s_selected = k; printf("OK weight set %d active\n", k); self_test(0); }
+            else { s_selected = k; if (s_tier[k].calibrated) s_first = s_tier[k].first; printf("OK weight set %d active (first chunk %d frames)\n", k, s_first); self_test(0); }
         } else if (s_req_tmp.kind == 10) {           // recal: measure again and re-select (with simulated times if `simtime` is on)
             for (int i = 0; i < MAX_TIERS; i++) s_tier[i].calibrated = 0;
             tiers_select();
@@ -917,6 +1127,19 @@ static void synth_task(void *arg)
             tier_status();
         } else if (s_req_tmp.kind == 13) {
             ;
+        } else if (s_req_tmp.kind == 14) {
+            repeat_demos(s_req_tmp.n >> 8, (s_req_tmp.n & 0xFF) - 1);
+        } else if (s_req_tmp.kind == 15) {           // split auto|row|full
+            split_apply(itofs_split_set_pref(&s_split, (itofs_pref_t)s_req_tmp.n));
+            if (s3_gemm_dual) self_test(0);          // the full split must reproduce the host engine's PCM before it is trusted
+            if (s_split_changed) tiers_select();     // the measurements of the weight sets belong to the split they were made in
+#ifdef ITOFS_INJECT_HANG
+        } else if (s_req_tmp.kind == 16) {           // test builds only: hang the synthesis task, with interrupts on (n = 0) or off (n = 1)
+            printf("HANG injected (interrupts %s): the watchdog must reset the board within %d s\n", s_req_tmp.n ? "off" : "on", WDT_RUN_MS / 1000);
+            fflush(stdout);
+            if (s_req_tmp.n) portDISABLE_INTERRUPTS();
+            for (;;) ;
+#endif
         } else {
             s_ctx.act_bits = s_req_tmp.n;
             printf("OK %d-bit activations for the int8-weight layers\n", s_ctx.act_bits);
@@ -967,6 +1190,39 @@ static void handle_line(char *line)
         xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
     } else if (!strncmp(line, "stats", 5)) {
         mem_report("now");
+    } else if (!strncmp(line, "cancel", 6)) {        // handled here, not by the synthesis task: it is busy with the utterance being cancelled
+        if (s_speaking) { s_cancel_t = esp_timer_get_time(); s_cancel = 1; printf("OK cancel\n"); }
+        else printf("OK nothing to cancel\n");
+    } else if (!strncmp(line, "split", 5)) {         // split: show; split auto|row|full: set the preference (stored in NVS)
+        const char *a = line + 5;
+        while (*a == ' ') a++;
+        if (!*a) split_print();
+        else if (!strncmp(a, "auto", 4) || !strncmp(a, "row", 3) || !strncmp(a, "full", 4)) {
+            s_in_req.kind = 15; s_in_req.n = a[0] == 'a' ? ITOFS_PREF_AUTO : a[0] == 'r' ? ITOFS_PREF_ROW : ITOFS_PREF_FULL;
+            xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
+        } else printf("ERROR split auto|row|full\n");
+#ifdef CONFIG_ITOFS_AUDIO_ES8388
+    } else if (!strncmp(line, "volume", 6)) {         // volume <0-33>: codec output volume (30 = 0 dB, 1.5 dB per step)
+        const int v = atoi(line + 6);
+        if (v < 0 || v > 33 || !line[6]) { printf("ERROR volume 0-33\n"); return; }
+        es8388_set_volume(v);
+        printf("OK volume %d\n", v);
+#endif
+    } else if (!strncmp(line, "rep", 3)) {            // rep <n> [k]
+        char *e; const long n = strtol(line + 3, &e, 10);
+        const long k = strtol(e, NULL, 10);
+        if (n < 1 || n > 1000) { printf("ERROR rep <n 1-1000> [demo]\n"); return; }
+        s_in_req.kind = 14; s_in_req.n = (int)(n << 8) | (*e && k >= 0 && k < s_ndemo ? (int)k + 1 : 0);
+        xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
+    } else if (!strncmp(line, "reboot", 6)) {
+        printf("rebooting\n");
+        vTaskDelay(pdMS_TO_TICKS(100));
+        esp_restart();
+#ifdef ITOFS_INJECT_HANG
+    } else if (!strncmp(line, "hang", 4)) {
+        s_in_req.kind = 16; s_in_req.n = strstr(line, "irq") != NULL;
+        xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
+#endif
     } else if (!strncmp(line, "bench", 5)) {
         s_in_req.kind = 5;
         xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
@@ -1016,7 +1272,7 @@ static void handle_line(char *line)
         xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
     } else if (line[0]) {
         printf("commands: say <comma-separated token ids> | style <0-%d> | act <8|16> | demo [0-%d] | test | stats | bench | "
-               "wmode <0 direct|1 copy|2 gdma|3 gdma+prefetch> | first <frames of the first chunk> | delay <ms before playback starts | auto> | tier [k] | status | recal | simtime <rtf0 rtf1 rtf2 | off>\n", s_model.n_styles - 1, s_ndemo - 1);
+               "wmode <0 direct|1 copy|2 gdma|3 gdma+prefetch> | first <frames of the first chunk> | split [auto|row|full] | cancel | rep <n> [demo] | reboot | delay <ms before playback starts | auto> | tier [k] | status | recal | simtime <rtf0 rtf1 rtf2 | off>\n", s_model.n_styles - 1, s_ndemo - 1);
     }
 }
 
@@ -1070,7 +1326,13 @@ static void halt(void) { for (;;) vTaskDelay(1000); }
 void app_main(void)
 {
     printf("\n==== ItoFS TTS on ESP32-S3 ====\n");
-    printf("GEMM split: %s\n", s3_gemm_dual ? "full (the GEMM runs on both cores; opt-in, see esp32/DUAL_CORE_POWER.md)" : "row (the GEMM runs on core 0, the row loops on both cores; default)");
+    guard_wdt_arm(WDT_RUN_MS);
+    {   // GEMM split: the stored verdict and the evidence of the reset that led here (see itofs_split.h); the row split runs until the supply test has passed
+        const itofs_rst_t rst = guard_reset_class(&s_rst_name);
+        if (guard_rec_load(&s_split)) { itofs_split_default(&s_split, SPLIT_POLICY); printf("SPLIT: no valid record in NVS, starting a new one (policy %s)\n", itofs_split_pref_name(SPLIT_POLICY)); }
+        s_plan = itofs_split_boot(&s_split, SPLIT_POLICY, rst);
+        s3_gemm_dual = 0;
+    }
     int nvalid = 0, first = -1;
     size_t max_ext = 0;
     for (int i = 0; i < MAX_TIERS; i++) {
@@ -1124,7 +1386,10 @@ void app_main(void)
            (unsigned)s_bb, s_chunk_frames, s_chunk_samples, s_lim.act_bits ? s_lim.act_bits : 8);
     s3_kernels_init();
 #ifdef ITOFS_KCHECK
+    heap_caps_free(s_hot); heap_caps_free(s_wbuf);   // the check needs the internal SRAM of the engine's hot arena and 4 MB of PSRAM; a check build does no synthesis
+    guard_wdt_arm(120000);
     s3_kernel_check(1);
+    halt();
 #endif
     (void)first;
 
