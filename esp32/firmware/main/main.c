@@ -56,6 +56,11 @@
 #define PIN_DOUT 17
 #endif
 #define PIN_BOOT 0
+#ifdef CONFIG_ITOFS_AUDIO_ES8388
+#define CODEC_MUTE(m) es8388_mute(m)       // the DAC is muted whenever nothing is spoken: a class-D amplifier makes no noise and no click on a silent, steady input
+#else
+#define CODEC_MUTE(m) ((void)0)
+#endif
 #define MAX_TOKENS 400
 #define TAIL_SAMPLES 120             // end of an utterance: the last sample decays to zero over 5 ms (the engine's PCM ends at up to -45 dBFS, not at zero: a step would click)
 #define I2S_SLICE 480                // samples per I2S write (20 ms = one DMA descriptor); a chunk (up to 300 ms) goes out in slices
@@ -214,12 +219,6 @@ static void i2s_setup(void)
 #endif
 }
 
-#ifdef CONFIG_ITOFS_AUDIO_ES8388
-#define CODEC_MUTE(m) es8388_mute(m)       // the DAC is muted whenever nothing is spoken: a class-D amplifier makes no noise and no click on a silent, steady input
-#else
-#define CODEC_MUTE(m) ((void)0)
-#endif
-
 // Cancel: drop the audio queued in the DMA ring (about 120 ms): stop the channel, fill the ring with silence, start again.
 static void cancel_flush(int16_t *st)
 {
@@ -299,7 +298,7 @@ static void play_task(void *arg)
         last = b.pcm[b.n - 1];
         if (s_cancel) { cancel_flush(st); s_playing = 0; }
 #else
-        (void)st;
+        (void)st; (void)last;
 #endif
         xQueueSend(s_free_q, &b, portMAX_DELAY);
     }
