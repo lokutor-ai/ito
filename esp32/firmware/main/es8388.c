@@ -9,6 +9,7 @@ enum { R_CONTROL1 = 0x00, R_CONTROL2 = 0x01, R_CHIPPOWER = 0x02, R_ADCPOWER = 0x
        R_DACCONTROL23 = 0x2D, R_LOUT1VOL = 0x2E, R_ROUT1VOL = 0x2F, R_LOUT2VOL = 0x30, R_ROUT2VOL = 0x31 };
 
 static i2c_master_dev_handle_t s_dev;
+static volatile int s_zero;                      // volume 0 is a true mute: the DAC stays muted, es8388_mute(0) of an utterance does not lift it
 
 static int wr(uint8_t reg, uint8_t val)
 {
@@ -61,10 +62,12 @@ void es8388_set_volume_percent(int pct)
 {
     if (pct < 0) pct = 0;
     if (pct > 100) pct = 100;
+    s_zero = pct == 0;
     es8388_set_volume((pct * 33 + 50) / 100);
+    if (s_zero) wr(R_DACCONTROL3, 0x24);          // the volume register alone only reaches -45 dB
 }
 
-void es8388_mute(int mute) { wr(R_DACCONTROL3, mute ? 0x24 : 0x20); }   // bit 5: the codec ramps its digital volume instead of stepping it (no pop)
+void es8388_mute(int mute) { wr(R_DACCONTROL3, mute || s_zero ? 0x24 : 0x20); }   // bit 5: the codec ramps its digital volume instead of stepping it (no pop)
 
 #ifdef CONFIG_ITOFS_AUDIO_LOOPBACK
 int es8388_adc_init(int sel, int gain)

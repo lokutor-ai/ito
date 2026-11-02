@@ -41,7 +41,7 @@ double itofs_cal_rtf(const itofs_cal_t *c, double *steady_us, double *whole);
 typedef enum { ITOFS_TIER_OK = 0, ITOFS_TIER_MARGINAL = 1, ITOFS_TIER_DEGRADED = 2 } itofs_tier_status_t;
 
 // What the boot measured for one weight set. Sets are in order of preference (index 0 = best quality). rtf < 0: not measured / unavailable.
-// equivalent: the set has been judged as good as the others by ear (the 192 int8, int4 and light sets are, for both voices), so the choice between
+// equivalent: the set has been judged as good as the others by ear, per voice (itofs_equiv.h: female main and int4, male main, int4 and light), so the choice between
 // them may look at speed alone. start_delay_us / first_chunk_us: the plan for a reference utterance (itofs_sched_plan) and the first chunk time.
 typedef struct { double rtf, start_delay_us, first_chunk_us; int equivalent; } itofs_set_score_t;
 

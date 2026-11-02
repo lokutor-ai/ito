@@ -19,9 +19,9 @@ itofs_rst_t guard_reset_class(const char **name)
                                      "deep sleep", "brownout", "SDIO", "USB", "JTAG", "eFuse", "power glitch", "CPU lockup" };
     if (name) *name = (unsigned)r < sizeof n / sizeof n[0] ? n[r] : "?";
     switch (r) {
-    case ESP_RST_BROWNOUT: return ITOFS_RST_BROWNOUT;
+    case ESP_RST_BROWNOUT: case ESP_RST_PWR_GLITCH: return ITOFS_RST_BROWNOUT;     // the power-glitch detector is a supply fault as well
     case ESP_RST_WDT: case ESP_RST_INT_WDT: case ESP_RST_TASK_WDT: return ITOFS_RST_WDT;
-    case ESP_RST_PANIC: return ITOFS_RST_PANIC;
+    case ESP_RST_PANIC: case ESP_RST_CPU_LOCKUP: return ITOFS_RST_PANIC;           // a CPU lock-up (double exception) is a crash
     default: return ITOFS_RST_BENIGN;
     }
 }
@@ -54,6 +54,26 @@ int guard_rec_save(itofs_split_rec_t *r)
     nvs_handle_t h;
     if (nvs_begin(&h, NVS_READWRITE)) return -1;
     const int ok = nvs_set_blob(h, NVS_KEY, r, sizeof *r) == ESP_OK && nvs_commit(h) == ESP_OK;
+    nvs_close(h); nvs_flash_deinit();
+    return ok ? 0 : -1;
+}
+
+int guard_u8_load(const char *key, uint8_t *v)
+{
+    nvs_handle_t h;
+    if (nvs_begin(&h, NVS_READWRITE)) return -1;
+    uint8_t t = 0;
+    const int ok = nvs_get_u8(h, key, &t) == ESP_OK;
+    nvs_close(h); nvs_flash_deinit();
+    if (ok) *v = t;
+    return ok ? 0 : -1;
+}
+
+int guard_u8_save(const char *key, uint8_t v)
+{
+    nvs_handle_t h;
+    if (nvs_begin(&h, NVS_READWRITE)) return -1;
+    const int ok = nvs_set_u8(h, key, v) == ESP_OK && nvs_commit(h) == ESP_OK;
     nvs_close(h); nvs_flash_deinit();
     return ok ? 0 : -1;
 }

@@ -1,4 +1,4 @@
-set(ITOFS_SRCS "main.c" "guard.c" "es8388.c" "kernels_s3.c" "dot_rows_s3.S" "../../engine/itofs.c" "../../engine/itofs_sched.c" "../../engine/itofs_split.c")
+set(ITOFS_SRCS "main.c" "guard.c" "es8388.c" "kernels_s3.c" "dot_rows_s3.S" "../../engine/itofs.c" "../../engine/itofs_sched.c" "../../engine/itofs_split.c" "../../engine/itofs_equiv.c")
 if(ITOFS_KCHECK)
   list(APPEND ITOFS_SRCS "kernel_check_s3.c")
 endif()

@@ -9,7 +9,8 @@
 //   serial (UART0, 115200): "say 0,72,156,..."  speak token ids (tools/say.py)
 //                           "style <0-63>" | "act <8|16>" | "demo" | "demo <k>" | "test" | "stats" | "bench" |
 //                           "wmode <0|1|2>" (weight staging: direct / copy / gdma) | "first <n>" (frames in the
-//                           first chunk) | "split [auto|row|full]" (GEMM split, see DUAL_CORE_POWER.md) | "cancel" (stop the
+//                           first chunk) | "split [auto|row|full]" (GEMM split, see DUAL_CORE_POWER.md) | "equiv [light on|off]" (weight sets validated by ear) |
+//                           "volume <0-100>" (ES8388 builds) | "cancel" (stop the
 //                           utterance being spoken) | "rep <n> [k]" (n silent repetitions of the demos, with timing and hash) |
 //                           "reboot" | "help"
 //   I2S: sample rate from the blob (24 kHz), 16-bit, mono duplicated to stereo. Pins: BCLK GPIO15, LRCLK GPIO16, DOUT GPIO17 (plain DAC, default), or the ES8388 shield's.
@@ -39,6 +40,7 @@
 #include "kernels_s3.h"
 #include "demo_sentences.h"
 #include "itofs_split.h"
+#include "itofs_equiv.h"
 #include "guard.h"
 #ifdef CONFIG_ITOFS_AUDIO_ES8388
 #include "es8388.h"
@@ -56,6 +58,11 @@
 #define PIN_DOUT 17
 #endif
 #define PIN_BOOT 0
+#ifdef CONFIG_ITOFS_AUDIO_ES8388
+#define VOLUME_HELP "volume <0-100> | "
+#else
+#define VOLUME_HELP ""
+#endif
 #ifdef CONFIG_ITOFS_AUDIO_ES8388
 #define CODEC_MUTE(m) es8388_mute(m)       // the DAC is muted whenever nothing is spoken: a class-D amplifier makes no noise and no click on a silent, steady input
 #else
@@ -947,6 +954,7 @@ typedef struct {
     const esp_partition_t *p; size_t ext; int valid;
     int calibrated; double rtf, rtf_steady, rtf_whole; itofs_cal_t cal;
     int blocks; long n_int4; char desc[48];
+    uint32_t id; int has_id;            // the blob's self-test hash: identifies voice and set (itofs_equiv.h)
 } tier_t;
 static tier_t s_tier[MAX_TIERS];
 static const char *const s_tier_label[MAX_TIERS] = { "weights", "weights_b", "weights_c" };
@@ -956,7 +964,7 @@ static esp_partition_mmap_handle_t s_map_h; static int s_mapped;
 static itofs_limits_t s_lim;
 static int s_sim; static double s_sim_rtf[MAX_TIERS] = { 0.9, 0.8, 0.7 };
 
-static int tier_ext(const esp_partition_t *p, size_t *ext, int quiet)
+static int tier_ext(const esp_partition_t *p, size_t *ext, uint32_t *id, int *has_id, int quiet)
 {
     uint8_t hdr[16];
     if (esp_partition_read(p, 0, hdr, sizeof hdr) != ESP_OK || memcmp(hdr, "ITF1", 4)) {
@@ -967,12 +975,17 @@ static int tier_ext(const esp_partition_t *p, size_t *ext, int quiet)
     uint32_t nt;
     if (esp_partition_read(p, 12 + cfg_len, &nt, 4) != ESP_OK || nt > 4096) { printf("ERROR bad blob header in '%s'\n", p->label); return -1; }
     size_t e = 0;
+    *has_id = 0;
     for (uint32_t i = 0; i < nt; i++) {
         uint8_t ent[104];
         if (esp_partition_read(p, 16 + cfg_len + (size_t)i * 104, ent, sizeof ent) != ESP_OK) return -1;
         uint32_t off, nb, so, dt, out;
         memcpy(&dt, ent + 64, 4); memcpy(&out, ent + 76, 4); memcpy(&off, ent + 88, 4); memcpy(&nb, ent + 92, 4); memcpy(&so, ent + 96, 4);
         if (off + nb > e) e = off + nb;
+        if (!strncmp((const char *)ent, "selftest", 9) && dt == 2 && nb >= 28) {       // the record's word 5 is the host engine's PCM hash: the set's identity
+            uint32_t w[6];
+            if (esp_partition_read(p, off, w, sizeof w) == ESP_OK && w[0] == 0x32525453u) { *id = w[5]; *has_id = 1; }
+        }
         if ((dt == 1 || dt == 3 || dt == 4) && so + 4 * out > e) e = so + 4 * out;
     }
     if (e > p->size) { printf("ERROR blob in '%s' larger than its partition\n", p->label); return -1; }
@@ -1112,9 +1125,24 @@ static int tier_plan(int n_tok, int nobs, itofs_plan_t *pl)
     return 1;
 }
 
-// The weight sets are judged equivalent by ear (Dani's blind tests: the 192 int8, int4 and light sets, both voices), so the choice among the sets that meet
-// the RTF target looks at speed alone: the lowest planned start delay, then the lowest first chunk (itofs_sched_pick).
-#define SETS_EQUIVALENT 1
+// Sets judged equivalent by ear (per voice, itofs_equiv.h: female main int8 and int4, male main, int4 and light) are chosen among on speed alone: the lowest planned
+// start delay, then the lowest first chunk (itofs_sched_pick). A set outside the list (the female light set until it is approved, or an unknown blob) is used only when no
+// listed set meets the RTF target. Approval of the light sets: CONFIG_ITOFS_APPROVE_LIGHT at build time, or `equiv light on` (stored in NVS).
+#ifdef CONFIG_ITOFS_APPROVE_LIGHT
+#define APPROVE_BUILD ITOFS_APPROVE_LIGHT
+#else
+#define APPROVE_BUILD 0u
+#endif
+static unsigned s_approve_nvs;                 // override stored in NVS (`equiv`)
+static unsigned approve_mask(void) { return APPROVE_BUILD | s_approve_nvs; }
+static int tier_equivalent(int i) { return s_tier[i].has_id && itofs_set_equivalent(s_tier[i].id, approve_mask()); }
+static const char *tier_who(int i, char *buf, size_t n)
+{
+    const itofs_set_info_t *si = s_tier[i].has_id ? itofs_set_lookup(s_tier[i].id) : NULL;
+    if (si) snprintf(buf, n, "%s %s, %s", si->voice, si->set, tier_equivalent(i) ? (si->validated ? "validated by ear" : "approved by override") : "not validated by ear");
+    else snprintf(buf, n, "unknown blob, not validated by ear");
+    return buf;
+}
 static void tiers_select(void)
 {
     itofs_set_score_t sc[MAX_TIERS];
@@ -1122,7 +1150,7 @@ static void tiers_select(void)
     int pick = -1;
     for (int attempt = 0; attempt < MAX_TIERS; attempt++) {
         s_split_changed = 0;
-        for (int i = 0; i < MAX_TIERS; i++) sc[i] = (itofs_set_score_t){ -1, 0, 0, SETS_EQUIVALENT };
+        for (int i = 0; i < MAX_TIERS; i++) sc[i] = (itofs_set_score_t){ -1, 0, 0, s_tier[i].valid && tier_equivalent(i) };
         for (int i = 0; i < MAX_TIERS; i++) {                 // measure every set (the choice needs their start delays), in the split in force
             if (!s_tier[i].valid) continue;
             if (s_active != i && activate_tier(i)) { s_tier[i].valid = 0; continue; }
@@ -1149,10 +1177,13 @@ static void tiers_select(void)
            ITOFS_RTF_TARGET, st == ITOFS_TIER_OK ? "OK" : st == ITOFS_TIER_MARGINAL ? "MARGINAL" : "DEGRADED", s_degraded, s3_gemm_dual ? "full" : "row", s_sim ? " (SIMULATED TIMES)" : "",
            s_tier[pick].cal.n_tok);
     for (int i = 0; i < MAX_TIERS; i++) {
-        if (sc[i].rtf >= 0) printf(" set%d %.3f, %.0f ms, %.0f ms;", i, sc[i].rtf, sc[i].start_delay_us / 1e3, sc[i].first_chunk_us / 1e3);
+        char who[64];
+        if (sc[i].rtf >= 0) printf(" set%d %.3f, %.0f ms, %.0f ms (%s);", i, sc[i].rtf, sc[i].start_delay_us / 1e3, sc[i].first_chunk_us / 1e3, tier_who(i, who, sizeof who));
         else printf(" set%d %s;", i, s_tier[i].valid ? "not measured" : "absent");
     }
     printf("\n");
+    if (!sc[pick].equivalent)
+        printf("NOTE: the chosen set %d is not on the list of sets validated by ear for its voice (`equiv`): no validated set meets RTF %.2f in this split.\n", pick, ITOFS_RTF_TARGET);
     if (st == ITOFS_TIER_MARGINAL)
         printf("NOTE: no weight set reaches RTF %.2f; the best (set %d) measures %.3f. Speech is planned with a start delay (gapless if the measurement holds), but there is little margin.\n", ITOFS_RTF_TARGET, pick, sc[pick].rtf);
     if (s_degraded)
@@ -1280,6 +1311,18 @@ static void synth_task(void *arg)
         } else if (s_req_tmp.kind == 18) {           // chunk <frames>: steady-state chunk size (at most the arena's STEADY_FRAMES); the weight sets must be measured again (`recal`)
             s_chunk_frames = s_req_tmp.n; s_chunk_samples = s_chunk_frames * s_hop;
             printf("OK steady chunk %d frames (%d ms of audio); `first %d` or more turns the start-up ramp off\n", s_chunk_frames, s_chunk_frames * s_hop * 1000 / s_sr, s_chunk_frames);
+        } else if (s_req_tmp.kind == 19) {           // equiv [light on|off]
+            if (s_req_tmp.n >= 0) {
+                s_approve_nvs = s_req_tmp.n ? ITOFS_APPROVE_LIGHT : 0;
+                if (guard_u8_save(NVS_KEY_APPROVE, (uint8_t)s_approve_nvs)) printf("WARNING: the override could not be stored in NVS\n");
+            }
+            for (int i = 0; i < MAX_TIERS; i++) {
+                char who[64];
+                if (s_tier[i].valid) printf("EQUIV set %d ('%s'): %s\n", i, s_tier_label[i], tier_who(i, who, sizeof who));
+            }
+            printf("EQUIV override: light sets %s (build option %s, stored override %s)\n", approve_mask() & ITOFS_APPROVE_LIGHT ? "approved" : "not approved",
+                   APPROVE_BUILD ? "on" : "off", s_approve_nvs ? "on" : "off");
+            if (s_req_tmp.n >= 0) { for (int i = 0; i < MAX_TIERS; i++) s_tier[i].calibrated = 0; tiers_select(); }
         } else if (s_req_tmp.kind == 15) {           // split auto|row|full
             split_apply(itofs_split_set_pref(&s_split, (itofs_pref_t)s_req_tmp.n));
             if (s3_gemm_dual) self_test(0);          // the full split must reproduce the host engine's PCM before it is trusted
@@ -1344,6 +1387,15 @@ static void handle_line(char *line)
     } else if (!strncmp(line, "cancel", 6)) {        // handled here, not by the synthesis task: it is busy with the utterance being cancelled
         if (s_speaking) { s_cancel_t = esp_timer_get_time(); s_cancel = 1; printf("OK cancel\n"); }
         else printf("OK nothing to cancel\n");
+    } else if (!strncmp(line, "equiv", 5)) {         // equiv: show which sets are validated by ear; equiv light on|off: approve the light sets of every voice (stored in NVS), then measure again
+        const char *a = line + 5;
+        while (*a == ' ') a++;
+        s_in_req.kind = 19;
+        if (!*a) s_in_req.n = -1;
+        else if (!strncmp(a, "light on", 8)) s_in_req.n = 1;
+        else if (!strncmp(a, "light off", 9)) s_in_req.n = 0;
+        else { printf("ERROR equiv [light on|off]\n"); return; }
+        xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
     } else if (!strncmp(line, "split", 5)) {         // split: show; split auto|row|full: set the preference (stored in NVS)
         const char *a = line + 5;
         while (*a == ' ') a++;
@@ -1356,8 +1408,7 @@ static void handle_line(char *line)
     } else if (!strncmp(line, "volume", 6)) {         // volume <0-100>: codec output volume in percent (91 = 0 dB, 100 = +4.5 dB); 0 mutes the DAC
         const int v = atoi(line + 6);
         if (v < 0 || v > 100 || !line[6]) { printf("ERROR volume 0-100\n"); return; }
-        es8388_set_volume_percent(v);
-        if (v == 0) es8388_mute(1);                  // 0 is a true mute (the codec's volume register alone only reaches -45 dB); the DAC is unmuted by the next utterance
+        es8388_set_volume_percent(v);                // 0 is a true mute that utterances do not lift (the codec's volume register alone only reaches -45 dB)
         printf("OK volume %d\n", v);
 #endif
 #ifdef CONFIG_ITOFS_AUDIO_LOOPBACK
@@ -1437,14 +1488,19 @@ static void handle_line(char *line)
         xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
     } else if (!strncmp(line, "delay", 5)) {
         if (!strncmp(line + 5, " auto", 5)) { s_delay_override_ms = -1; printf("OK start delay planned per utterance\n"); }
-        else { s_delay_override_ms = atoi(line + 5); printf("OK start delay fixed at %d ms\n", s_delay_override_ms); }
+        else {
+            int d = atoi(line + 5);
+            if (d < 0) d = 0;
+            if (d > (int)(PLAN_MAX_DELAY_US / 1000)) d = (int)(PLAN_MAX_DELAY_US / 1000);   // a longer hold would starve the watchdog (the synthesis waits for the player's buffers)
+            s_delay_override_ms = d; printf("OK start delay fixed at %d ms (at most %d)\n", d, (int)(PLAN_MAX_DELAY_US / 1000));
+        }
         s_in_req.kind = 13; xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
     } else if (!strncmp(line, "wmode", 5)) {
         s_in_req.kind = 6; s_in_req.n = atoi(line + 5);
         xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
     } else if (line[0]) {
         printf("commands: say <comma-separated token ids> | style <0-%d> | act <8|16> | demo [0-%d] | test | stats | bench | "
-               "wmode <0 direct|1 copy|2 gdma|3 gdma+prefetch> | first <frames of the first chunk> | chunk <steady frames> | cores <1|2> | trace <0|1> | split [auto|row|full] | cancel | rep <n> [demo] | reboot | delay <ms before playback starts | auto> | tier [k] | status | recal | simtime <rtf0 rtf1 rtf2 | off>\n", s_model.n_styles - 1, s_ndemo - 1);
+               "wmode <0 direct|1 copy|2 gdma|3 gdma+prefetch> | first <frames of the first chunk> | chunk <steady frames> | cores <1|2> | trace <0|1> | split [auto|row|full] | equiv [light on|off] | " VOLUME_HELP "cancel | rep <n> [demo] | reboot | delay <ms before playback starts | auto> | tier [k] | status | recal | simtime <rtf0 rtf1 rtf2 | off>\n", s_model.n_styles - 1, s_ndemo - 1);
     }
 }
 
@@ -1503,6 +1559,7 @@ void app_main(void)
         const itofs_rst_t rst = guard_reset_class(&s_rst_name);
         if (guard_rec_load(&s_split)) { itofs_split_default(&s_split, SPLIT_POLICY); printf("SPLIT: no valid record in NVS, starting a new one (policy %s)\n", itofs_split_pref_name(SPLIT_POLICY)); }
         s_plan = itofs_split_boot(&s_split, SPLIT_POLICY, rst);
+        { uint8_t a = 0; if (!guard_u8_load(NVS_KEY_APPROVE, &a)) s_approve_nvs = a & ITOFS_APPROVE_LIGHT; }
         s3_gemm_dual = 0;
     }
     int nvalid = 0, first = -1;
@@ -1511,7 +1568,7 @@ void app_main(void)
         tier_t *T = &s_tier[i];
         T->p = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, (esp_partition_subtype_t)(0x40 + i), s_tier_label[i]);
         if (!T->p) { if (i == 0) printf("ERROR no 'weights' partition\n"); continue; }
-        if (tier_ext(T->p, &T->ext, i > 0)) continue;
+        if (tier_ext(T->p, &T->ext, &T->id, &T->has_id, i > 0)) continue;
         T->valid = 1; nvalid++;
         if (first < 0) first = i;
         if (T->ext > max_ext) max_ext = T->ext;

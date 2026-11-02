@@ -7,6 +7,7 @@
 #include <string.h>
 #include <math.h>
 #include "itofs_sched.h"
+#include "itofs_equiv.h"
 
 #define HOP 300
 #define SR 24000
@@ -74,6 +75,45 @@ int main(void)
             const int got = itofs_sched_pick(sc, 3, ITOFS_RTF_TARGET, ITOFS_RTF_DEGRADED, &st);
             const int ok = got == T[i].want && (got < 0 || st == T[i].st);
             printf("pick %-60s -> set %d status %d %s\n", T[i].what, got, (int)st, ok ? "ok" : "FAIL");
+            fails += !ok;
+        }
+    }
+    // ---- 1b. equivalence per voice (itofs_equiv.c): female = {main int8, int4}, male = {main, int4, light}; the female light set only with the override
+    {
+        static const struct { uint32_t id; const char *voice, *set; int eq, eq_light_ok; } E[] = {
+            {0x023bd6b1u, "female", "main int8", 1, 1}, {0x363d7d98u, "female", "int4", 1, 1}, {0x5f12d5e1u, "female", "light", 0, 1},
+            {0x35f96c0bu, "male", "main int8", 1, 1}, {0xb46d58deu, "male", "int4", 1, 1}, {0xa14d1c89u, "male", "light", 1, 1},
+            {0x12345678u, "unknown blob", "-", 0, 0},
+        };
+        for (unsigned i = 0; i < sizeof E / sizeof E[0]; i++) {
+            const int a = itofs_set_equivalent(E[i].id, 0), b = itofs_set_equivalent(E[i].id, ITOFS_APPROVE_LIGHT);
+            const itofs_set_info_t *info = itofs_set_lookup(E[i].id);
+            const int ok = a == E[i].eq && b == E[i].eq_light_ok && (info != NULL) == (E[i].id != 0x12345678u) && (!info || (!strcmp(info->voice, E[i].voice) && !strcmp(info->set, E[i].set)));
+            printf("equivalent %-7s %-9s default %d with the light override %d %s\n", E[i].voice, E[i].set, a, b, ok ? "ok" : "FAIL");
+            fails += !ok;
+        }
+        // the table ids are unique
+        int dup = 0;
+        for (unsigned i = 0; i < 6; i++) for (unsigned j = i + 1; j < 6; j++) dup += E[i].id == E[j].id;
+        printf("table ids unique: %s\n", dup ? "FAIL" : "ok"); fails += dup != 0;
+        // the policy on each voice's timings of the board (row split: main 0.845 / int4 0.826 / light 0.776; planned start 513 / 514 / 416 ms): the female voice gets the best of
+        // main / int4 (never light), the male voice gets light; with the override the female voice gets light too; if neither validated female set fits the RTF target, light still
+        // beats a stutter
+        struct { uint32_t id[3]; unsigned approve; double r[3], d[3], f[3]; int want; const char *what; } P[] = {
+            {{0x023bd6b1u, 0x363d7d98u, 0x5f12d5e1u}, 0, {0.845, 0.826, 0.776}, {513, 514, 416}, {237, 232, 216}, 1, "female row split: main and int4 tie within 1 ms, the lower first chunk wins (int4), never light"},
+            {{0x023bd6b1u, 0x363d7d98u, 0x5f12d5e1u}, 0, {0.661, 0.648, 0.608}, {246, 221, 167}, {183, 179, 167}, 1, "female full split: int4 (221), not light (167)"},
+            {{0x023bd6b1u, 0x363d7d98u, 0x5f12d5e1u}, ITOFS_APPROVE_LIGHT, {0.661, 0.648, 0.608}, {246, 221, 167}, {183, 179, 167}, 2, "female full split, light approved: light"},
+            {{0x35f96c0bu, 0xb46d58deu, 0xa14d1c89u}, 0, {0.661, 0.648, 0.608}, {246, 221, 167}, {183, 179, 167}, 2, "male full split: light (validated)"},
+            {{0x023bd6b1u, 0x363d7d98u, 0x5f12d5e1u}, 0, {0.90, 0.88, 0.80}, {800, 700, 400}, {250, 240, 216}, 2, "female, only the unvalidated light set fits the target: it is used rather than a stutter"},
+            {{0x11111111u, 0x22222222u, 0x33333333u}, 0, {0.70, 0.60, 0.50}, {300, 250, 200}, {237, 232, 216}, 0, "unknown blobs: never equivalent, the first that fits"},
+        };
+        for (unsigned i = 0; i < sizeof P / sizeof P[0]; i++) {
+            itofs_set_score_t sc[3];
+            for (int k = 0; k < 3; k++) sc[k] = (itofs_set_score_t){ P[i].r[k], P[i].d[k] * 1e3, P[i].f[k] * 1e3, itofs_set_equivalent(P[i].id[k], P[i].approve) };
+            itofs_tier_status_t st = ITOFS_TIER_OK;
+            const int got = itofs_sched_pick(sc, 3, ITOFS_RTF_TARGET, ITOFS_RTF_DEGRADED, &st);
+            const int ok = got == P[i].want && st == ITOFS_TIER_OK;
+            printf("policy %-90s -> set %d %s\n", P[i].what, got, ok ? "ok" : "FAIL");
             fails += !ok;
         }
     }

@@ -33,8 +33,8 @@ opcount_v3: opcount_v3.c $(ENGINE)
 w4_dump: w4_dump.c $(ENGINE)
 	$(CC) $(CFLAGS) -D_ISOC11_SOURCE -o $@ w4_dump.c ../engine/itofs.c -lm
 
-host_test_sched: host_test_sched.c ../engine/itofs_sched.c ../engine/itofs_sched.h
-	$(CC) $(CFLAGS) -o $@ host_test_sched.c ../engine/itofs_sched.c -lm
+host_test_sched: host_test_sched.c ../engine/itofs_sched.c ../engine/itofs_sched.h ../engine/itofs_equiv.c ../engine/itofs_equiv.h
+	$(CC) $(CFLAGS) -o $@ host_test_sched.c ../engine/itofs_sched.c ../engine/itofs_equiv.c -lm
 test_sched: host_test_sched
 	./host_test_sched
 

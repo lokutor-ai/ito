@@ -7,6 +7,15 @@ menu "Ito"
             Off (the default): the board boots silent, measures itself and prints READY; the demos play only when asked (`demo`, or the BOOT button).
             On: after the boot calibration the three demo sentences are spoken, as in earlier releases.
 
+    config ITOFS_APPROVE_LIGHT
+        bool "Treat the light weight sets of every voice as judged equivalent by ear"
+        default n
+        help
+            The boot measures every weight set and, among the sets that meet the speed target, picks the one with the lowest planned start delay, but only
+            among the sets validated by ear for their voice (esp32/engine/itofs_equiv.c: male main, int4 and light; female main and int4). The female light
+            set is not validated yet, so by default it is used only when no validated set meets the speed target. Turn this on (or send `equiv light on` on the
+            console, which stores the choice in NVS) once the female light set has been approved by listening. An unknown blob (a retrained voice) is never on the list.
+
     choice ITOFS_SPLIT_POLICY
         prompt "Initial policy of the GEMM split"
         default ITOFS_SPLIT_AUTO
@@ -31,7 +40,8 @@ menu "Ito"
         default ITOFS_AUDIO_PLAIN_I2S
         help
             Where the 24 kHz audio goes. A plain I2S DAC or class-D amplifier (MAX98357A and the like) needs no setup: BCLK GPIO15, LRCLK GPIO16,
-            DOUT GPIO17, no master clock. The ESP_S3-AUDIN shield has an ES8388 codec that must be configured over I2C and fed a master clock.
+            DOUT GPIO17, no master clock, and no I2C access. The ESP_S3-AUDIN shield has an ES8388 codec that must be configured over I2C and fed a master clock;
+            only that choice touches the I2C and MCLK pins. If the codec does not answer, the firmware prints an error and runs on without sound.
 
         config ITOFS_AUDIO_PLAIN_I2S
             bool "Plain I2S DAC or amplifier (GPIO15 / 16 / 17)"
@@ -40,23 +50,30 @@ menu "Ito"
     endchoice
 
     if ITOFS_AUDIO_ES8388
+        comment "Defaults are the ESP_S3-AUDIN shield on an ESP32-S3-DevKitC-1 N16R8. GPIO3 and GPIO46 are strapping pins (read at reset, free afterwards); GPIO0 (BOOT), 19/20 (USB) and 35-37 (octal PSRAM) must not be used."
         config ITOFS_ES8388_PIN_SDA
             int "I2C SDA GPIO"
+            range 1 48
             default 14
         config ITOFS_ES8388_PIN_SCL
             int "I2C SCL GPIO"
+            range 1 48
             default 47
         config ITOFS_ES8388_PIN_MCLK
             int "I2S MCLK GPIO (256 x fs = 6.144 MHz)"
+            range 1 48
             default 8
         config ITOFS_ES8388_PIN_BCLK
-            int "I2S BCLK GPIO"
+            int "I2S BCLK GPIO (strapping pin GPIO3 on the shield)"
+            range 1 48
             default 3
         config ITOFS_ES8388_PIN_WS
             int "I2S LRCK GPIO"
+            range 1 48
             default 9
         config ITOFS_ES8388_PIN_DOUT
-            int "I2S data to the codec (DSDIN) GPIO"
+            int "I2S data to the codec (DSDIN) GPIO (strapping pin GPIO46 on the shield)"
+            range 1 48
             default 46
         config ITOFS_AUDIO_VOLUME
             int "Default output volume in percent (0..100; 91 = 0 dB at the codec, 100 = +4.5 dB)"
