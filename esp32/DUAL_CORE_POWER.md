@@ -1,14 +1,37 @@
 # Two-core PIE load and the 3.3 V supply (ESP32-S3)
 
-**Short version.** Ito runs its int8 GEMM in one of two ways, and **the default is the safer, slower one: the row split**. The faster **full split** is an opt-in. Running dense PIE (`EE.*`) integer GEMM on both cores of an ESP32-S3 at 240 MHz can draw enough current to pull the 3.3 V rail down on some development boards: weak regulators, long or thin USB cables, or too little bulk capacitance next to the module. The result is not a clean crash. It looks like a software bug. If your board hangs, resets or gives wrong results only when both cores run the GEMM, you are on the wrong side of this page. The default build reduces the load, because only one core runs the dense GEMM at a time. It does not fix a failing supply: on the affected board the row split ran for weeks, but later even single-core int16 runs stopped once the supply degraded further.
+**Short version.** Ito runs its int8 GEMM in one of two ways: the **row split** (safe, slower) and the **full split** (both cores in the GEMM, about 28 % faster, and the figures in the root README). Running dense PIE (`EE.*`) integer GEMM on both cores of an ESP32-S3 at 240 MHz can draw enough current to pull the 3.3 V rail down on some development boards: weak regulators, long or thin USB cables, or too little bulk capacitance next to the module. The result is not a clean crash; it looks like a software bug. **The firmware now decides at run time, per board** (see "Adaptive mode" below): it starts in the row split, runs a short supply self-test on the real kernels, and uses the full split only if the test passes and nothing has gone wrong since. Any brownout, watchdog or panic reset, or hash mismatch while the full split is active latches the board back to the row split until the owner says otherwise. The compile-time option is now only the initial policy. Output audio is the same, bit for bit, in every mode.
 
-**Breaking change.** Earlier builds, including the earlier prebuilt image, defaulted to the full split, and the headline numbers in the root README were measured with it. The default is now the row split. Speed on a board with a good supply drops (RTF about 0.66 with the full split and the shipped chunk ramp, about 0.84 to 0.90 with the row split on another board and fixed chunk sizes; see "Cost" below for exactly what each number is). Output audio is unchanged, bit for bit. To get the old behaviour back, see "Opting in to the full split".
+## Adaptive mode (default)
+
+Three parts: a verdict, a guard against hangs, and console control.
+
+**The verdict** lives in one NVS record (namespace `ito`, key `split`, a versioned and checksummed blob, `engine/itofs_split.h`). It holds the owner's preference (`auto`, `row`, `full`), the supply verdict (`untested`, `pass`, `fail`), the reason code of the last change, and counters (boots, tests, passes, failures, brownout resets, watchdog or panic resets, hash mismatches, interrupted tests).
+
+| Situation | What the firmware does |
+|---|---|
+| First boot, `auto`, no verdict | row split while the **long supply test** runs (about 3 s: the full split on the engine's own GEMM shapes, weights streamed from PSRAM, every result compared bit for bit with the one-core result of the same call). The record is written with `testing = 1` **before** the test. A pass stores `pass` and engages the full split; the golden-sentence self-test (`fnv32 023bd6b1`) then runs in the full split. |
+| Reset during the long test with a brownout, watchdog or panic reason | the next boot reads `testing = 1` and the reset reason: verdict `fail` (reason `supply test: hang / brownout / panic`), row split. |
+| Power cut or ordinary reset during the test | no verdict (counted as `interrupted`), the test runs again. |
+| Later boots, verdict `pass` | **quick re-check** (about 0.25 s, same test, fewer passes) at every boot. A mismatch sets `fail` and the row split. |
+| A brownout, watchdog or panic reset while the full split was engaged | verdict `fail`, reason `brownout / watchdog / panic reset in full split`, row split from then on (the record says the full split was active when the board went down). |
+| Hash mismatch of a self-test in the full split | verdict `fail`, row split, the same self-test is repeated in the row split. |
+| Reset of any of those kinds in the row split | counted, no verdict. |
+| `fail` | stays until the owner sends `split auto`, `split row` or `split full`, or the NVS record is erased (`esptool erase-region 0x9000 0x6000`). |
+
+`split` prints the mode, the preference, the verdict and why, and the counters. `split auto` clears a latch and runs the long test now; `split row` forces the row split; `split full` forces the full split without a test (the guard still applies: a brownout or hang while forced latches the row split, so a failing supply cannot cause a boot loop). Each of them re-measures the weight sets in the new split (`recal`). `reboot` restarts the board with a software reset, which is not held against the full split (an esptool watchdog reset after flashing is; erase the NVS record, or run `split auto`, after flashing over a board whose full split is engaged).
+
+**Hang recovery.** The task watchdog stays off (a 0.25 s chunk would starve the idle task by design). Instead the RTC watchdog is armed at 15 s, fed once per synthesised chunk, in every benchmark loop and once a second while the console is idle; during the supply test it is tightened to 4 s. A hang with interrupts on or off, in code or in a PIE instruction, resets the whole chip; the reset reason (`watchdog`) goes into the record as above. The brownout detector stays enabled (level 7) and its resets are counted. A test build (`-D ITOFS_EXTRA_DEFS="ITOFS_INJECT_HANG=1"`) has a `hang` and a `hang irq` console command to check it.
+
+**Initial policy.** menuconfig `Ito` then `Initial policy of the GEMM split`: `auto` (default), `row` (never tests; `split full` can still force it) or `full` (no test; the guards still apply). `-D ITOFS_EXTRA_DEFS="S3_GEMM_DUAL_DEFAULT=0"` or `=1` forces row or full. The policy applies when the record is new or was made by a build with another policy.
+
+QEMU has no PIE current draw, so the supply test is a no-op PASS there (the log says so) and the dual-core path is exercised by the self-test instead.
 
 ## The two modes
 
 Both modes run the same engine on the same weights and produce the same PCM. They differ only in which core executes the int8 GEMM calls (the matrix multiplies that hold nearly all the multiply-accumulates).
 
-| Work | Row split (default, `s3_gemm_dual = 0`) | Full split (opt-in, `s3_gemm_dual = 1`) |
+| Work | Row split (`s3_gemm_dual = 0`, safe, the start value) | Full split (`s3_gemm_dual = 1`, after a passed supply test) |
 |---|---|---|
 | int8 GEMM (PIE dot products) | core 0 only | core 0 and core 1, each half of the output channels |
 | Row-parallel float loops (GELU, normalisation, depthwise convolutions, source features) | core 0 and core 1, rows split in half | core 0 and core 1, rows split in half |
@@ -45,7 +68,7 @@ The full-split and row-split numbers are not a like-for-like pair: the ramp reac
 
 Any of these, often differing from run to run and moving when you change code layout, memory placement or timing:
 
-- A silent hang at the first synthesis call, with no panic. The task watchdog does not recover it (Ito's `sdkconfig.defaults` turns the task watchdog off for the long synthesis loops, so a hang stays a hang until you reset the board).
+- A silent hang at the first synthesis call, with no panic. The task watchdog is off by design (long synthesis loops); the firmware's RTC watchdog now resets the board after 15 s (4 s during the supply test) and the reset is recorded (see "Adaptive mode"). On a firmware without it, a hang stays a hang until you reset the board.
 - `E BOD: Brownout detector was triggered` on the console, then a reset, again after every reset.
 - An occasional `Cache error: MMU entry fault`.
 - Wrong results: the output hash differs from the host engine, sometimes only on some passes.
@@ -106,14 +129,14 @@ Two further notes. One core of dense PIE on internal SRAM already browns out on 
 
 ## What to do
 
-1. **Leave the default (row split) unless you have tested your board.** Nothing to configure. The GEMM stays on core 0 and only the row loops use both cores.
-2. **Test your board, then opt in if it passes** (see "Check your board" and "Opting in to the full split").
+1. **Leave the default (`auto`).** The firmware tests your board and keeps the row split if the test fails. Read `split` after the first boot: `mode=full verdict=pass` means this board's supply passed.
+2. **If you want to be sure, run the stress test** (see "Check your board") before relying on the full split in the field; the firmware's own test is short (3 s) and is a screen, not a proof.
 3. **Improve the supply** if you want the full split on a board that fails:
    - 220 to 470 uF of bulk capacitance on 3V3 as close to the module as you can (low-ESR electrolytic or polymer tantalum, plus the usual ceramic);
    - a 3.3 V regulator rated for at least 1 A (many development boards use a small regulator that is marginal at this load);
    - a short, thick USB cable, a different host port or a powered hub, or a 5 V feed on the 5 V pin from a supply that can deliver an ampere;
    - or a different board.
-   Changing the cable alone did not fix the board that failed.
+   Changing the cable alone did not fix the board that failed. After a hardware fix, `split auto` runs the test again.
 4. **160 MHz is a software remedy**, safe on the failing board but slower than the row split at 240 MHz (at 8-frame chunks on the second board: RTF 1.547 for the row split at 160 MHz against 1.056 for the row split at 240 MHz; both are the row split). The full split at 160 MHz on that board measured RTF 1.121 at chunk 8. It passed in those runs, but in other reruns it hung twice, so 160 MHz lowers the load without removing the failure. It is not recommended unless you need the power savings anyway.
 
 ## Check your board
@@ -135,14 +158,16 @@ It starts the second core with a spin flag and uses random data, so it exercises
 
 Pass means no reset, no hang, no `Brownout detector was triggered` message and no mismatch in any pass. If the PSRAM case on both cores hangs or mismatches, keep the row split. Test with the board powered the way it will be used (the same cable, port or supply, and with the radio, display or I2S load you will have), because the margin moves with it.
 
-## Opting in to the full split
+## Choosing the split by hand
 
-Two equivalent ways, both at build time. Rebuild from a fresh build directory so that CMake and Kconfig pick the change up.
+- At run time: `split auto|row|full` (stored in NVS, survives resets). `split` shows the state.
+- At build time, as the initial policy only: menuconfig `Ito` then `Initial policy of the GEMM split`, or `CONFIG_ITOFS_SPLIT_ROW=y` / `CONFIG_ITOFS_SPLIT_FULL=y` in `sdkconfig.defaults`, or `-D ITOFS_EXTRA_DEFS="S3_GEMM_DUAL_DEFAULT=0"` / `=1` (the definition wins over menuconfig). Rebuild from a fresh build directory so that CMake and Kconfig pick the change up. (`CONFIG_ITOFS_GEMM_FULL_SPLIT` of earlier builds no longer exists; it is ignored.)
 
-1. **menuconfig (preferred).** `idf.py menuconfig`, then `Ito` then `Run the int8 GEMM on both cores (full split)`. Or add `CONFIG_ITOFS_GEMM_FULL_SPLIT=y` to your `sdkconfig.defaults`. Rebuild with `esp32/tools/build_fw.sh`, or by hand in `esp32/firmware`.
-2. **A compile definition.** `idf.py -B build -D ITOFS_EXTRA_DEFS="S3_GEMM_DUAL_DEFAULT=1" build`. The definition wins over the menuconfig option, in both directions (`S3_GEMM_DUAL_DEFAULT=0` forces the row split).
+The boot log prints the last reset reason, the `SPLIT mode=... verdict=...` line, and the `SUPPLY_TEST` result. The boot self-test, the board benchmark, the boot calibration and every synthesis follow the active mode, and `TIMING` lines name it (`split row` / `split full`).
 
-The boot log prints `GEMM split: full (...)` or `GEMM split: row (...)`, so you can see which one a running image uses. The boot self-test, the board benchmark, the boot calibration and every synthesis all follow the active mode. The prebuilt image is built with the row split; the full split needs a rebuild.
+## Measured on the first board, 2 November 2026
+
+With the adaptive firmware on the board of the root README (DevKit N16R8 on an audio shield, speaker playing): the 3 s test passed (273 passes of the full split, all equal to the one-core result), the quick re-check passed at every boot (23 passes in 270 ms), one round of the stress program (422 s, six configurations) had 0 mismatches, and the full split ran for hours of synthesis (about 400 utterances with their PCM hashes equal to the host's) with 0 brownout and 0 watchdog resets, also with the codec at +4.5 dB and the speaker playing. A hang injected in the full split was reset by the RTC watchdog after 13.9 s and the next boot ran the row split with `why="watchdog reset in full split"`; with interrupts off the interrupt watchdog reset it after 0.4 s. The row split on this board: RTF 0.843 against 0.661 for the full split with the main set, first chunk 237 against 183 ms, planned start 511-697 against 246 ms. Details: [`BENCHMARKING.md`](BENCHMARKING.md), last section.
 
 ## Limits of this finding
 

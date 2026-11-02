@@ -1,5 +1,12 @@
 menu "Ito"
 
+    config ITOFS_BOOT_DEMOS
+        bool "Speak the three demo sentences at every boot"
+        default n
+        help
+            Off (the default): the board boots silent, measures itself and prints READY; the demos play only when asked (`demo`, or the BOOT button).
+            On: after the boot calibration the three demo sentences are spoken, as in earlier releases.
+
     choice ITOFS_SPLIT_POLICY
         prompt "Initial policy of the GEMM split"
         default ITOFS_SPLIT_AUTO
@@ -51,10 +58,23 @@ menu "Ito"
         config ITOFS_ES8388_PIN_DOUT
             int "I2S data to the codec (DSDIN) GPIO"
             default 46
-        config ITOFS_ES8388_VOLUME
-            int "Output volume register of the codec (0..33; 30 = 0 dB, 1.5 dB per step)"
-            range 0 33
-            default 24
+        config ITOFS_AUDIO_VOLUME
+            int "Default output volume in percent (0..100; 91 = 0 dB at the codec, 100 = +4.5 dB)"
+            range 0 100
+            default 91
+            help
+                The codec's analogue output gain. 0 dB is the loudest setting that cannot clip the DAC with the engine's PCM (its peaks reach about 92 % of full scale).
+                The console command `volume <0-100>` changes it at run time.
+        config ITOFS_AUDIO_LOOPBACK
+            bool "Test only: record the shield's microphones through the codec ADC (command `loopback`)"
+            default n
+            help
+                Compiled out of a production build. Adds an I2S receive channel on GPIO10 and the `loopback` / `micsel` / `micgain` commands, which play a demo sentence
+                and measure level, noise floor, clicks, dropouts and the delay from the first DAC sample to the first sound at the microphones.
+        config ITOFS_ES8388_PIN_DIN
+            int "I2S data from the codec's ADC (ASDOUT) GPIO, loopback only"
+            depends on ITOFS_AUDIO_LOOPBACK
+            default 10
     endif
 
 endmenu

@@ -12,11 +12,12 @@ static i2c_master_dev_handle_t s_dev;
 
 static int wr(uint8_t reg, uint8_t val)
 {
+    if (!s_dev) return -2;                       // no codec answered at start-up
     const uint8_t b[2] = { reg, val };
     return i2c_master_transmit(s_dev, b, 2, 100) == ESP_OK ? 0 : -2;
 }
 
-int es8388_init(int sda, int scl, int vol)
+int es8388_init(int sda, int scl, int vol_percent)
 {
     i2c_master_bus_handle_t bus;
     const i2c_master_bus_config_t bc = { .i2c_port = I2C_NUM_0, .sda_io_num = sda, .scl_io_num = scl, .clk_source = I2C_CLK_SRC_DEFAULT,
@@ -29,7 +30,7 @@ int es8388_init(int sda, int scl, int vol)
     if (i2c_master_bus_add_device(bus, &dc, &s_dev) != ESP_OK) return -2;
     printf("ES8388 codec answers at I2C 0x%02x (SDA %d, SCL %d)\n", addr, sda, scl);
     int e = 0;
-    e |= wr(R_DACCONTROL3, 0x04);                // DAC muted while it is configured
+    e |= wr(R_DACCONTROL3, 0x24);                // DAC muted (soft ramp on) while it is configured and until the first utterance
     e |= wr(R_CONTROL2, 0x50);
     e |= wr(R_CHIPPOWER, 0x00);                  // power up every block
     e |= wr(R_MASTERMODE, 0x00);                 // I2S slave: the ESP32 makes BCLK / LRCK / MCLK
@@ -42,7 +43,7 @@ int es8388_init(int sda, int scl, int vol)
     e |= wr(R_DACCONTROL17, 0x90); e |= wr(R_DACCONTROL20, 0x90);    // left DAC to the left mixer, right DAC to the right mixer
     e |= wr(R_DACCONTROL21, 0x80);               // the DAC uses the ADC's LRCK
     e |= wr(R_DACCONTROL23, 0x00);
-    es8388_set_volume(vol);
+    es8388_set_volume_percent(vol_percent);
     e |= wr(R_CHIPPOWER, 0xF0); e |= wr(R_CHIPPOWER, 0x00);          // restart the state machine
     e |= wr(R_ADCPOWER, 0xFF);                   // the microphone path stays off (not used)
     e |= wr(R_DACPOWER, 0x3C);                   // DAC and LOUT1 / ROUT1 / LOUT2 / ROUT2 on
@@ -56,4 +57,29 @@ void es8388_set_volume(int vol)
     wr(R_LOUT1VOL, (uint8_t)vol); wr(R_ROUT1VOL, (uint8_t)vol); wr(R_LOUT2VOL, (uint8_t)vol); wr(R_ROUT2VOL, (uint8_t)vol);
 }
 
-void es8388_mute(int mute) { wr(R_DACCONTROL3, mute ? 0x04 : 0x00); }
+void es8388_set_volume_percent(int pct)
+{
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    es8388_set_volume((pct * 33 + 50) / 100);
+}
+
+void es8388_mute(int mute) { wr(R_DACCONTROL3, mute ? 0x24 : 0x20); }   // bit 5: the codec ramps its digital volume instead of stepping it (no pop)
+
+#ifdef CONFIG_ITOFS_AUDIO_LOOPBACK
+int es8388_adc_init(int sel, int gain)
+{
+    if (gain < 0) gain = 0;
+    if (gain > 8) gain = 8;
+    int e = 0;
+    e |= wr(0x03, 0xFF);                         // ADC blocks off while they are set
+    e |= wr(0x09, (uint8_t)((gain << 4) | gain)); // PGA gain, left and right
+    e |= wr(0x0A, sel == 1 ? 0x50 : sel >= 2 ? 0xF0 : 0x00);   // input pair: 0 LIN1/RIN1, 1 LIN2/RIN2, 2 and 3 differential
+    e |= wr(0x0B, sel == 3 ? 0x82 : 0x02);       // 3: the differential pair LIN2-RIN2 instead of LIN1-RIN1
+    e |= wr(0x0C, 0x0C);                         // I2S, 16 bit
+    e |= wr(0x0D, 0x02);                         // MCLK = 256 x fs
+    e |= wr(0x10, 0x00); e |= wr(0x11, 0x00);    // digital volume 0 dB
+    e |= wr(0x03, 0x00);                         // ADC on
+    return e ? -2 : 0;
+}
+#endif

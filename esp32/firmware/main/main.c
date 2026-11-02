@@ -4,7 +4,7 @@
 //   boot: load the weight blob (flash partition "weights") into PSRAM (or run it memory-mapped from flash when it does
 //         not fit), run the self-test stored in the blob (the host C engine's PCM hash for golden sentence 0), run the
 //         board benchmark (hardware build only: kernels + the demo sentences in every weight-staging mode, then keep the
-//         fastest mode), then speak the demo sentences (stored in the blob; main/demo_sentences.h is the fallback).
+//         fastest mode), then, only with CONFIG_ITOFS_BOOT_DEMOS, speak the demo sentences (stored in the blob; main/demo_sentences.h is the fallback).
 //   BOOT button (GPIO0): speak the demo sentences again.
 //   serial (UART0, 115200): "say 0,72,156,..."  speak token ids (tools/say.py)
 //                           "style <0-63>" | "act <8|16>" | "demo" | "demo <k>" | "test" | "stats" | "bench" |
@@ -78,15 +78,8 @@
 #define TEXT_STEP_LIST 8, 8, 8, 8, 8, 8, 8, 8   // text-side tokens added per step in chunk 0, 1, ... (0 or past the list: the engine's default, 24)
 #endif
 #ifndef FIRST_FRAMES
-#define FIRST_FRAMES 10              // frames of the first chunk (10 = 125 ms of audio) for a weight set that is fast enough for it to be the best start. `first <n>` changes it (n >= chunk = no ramp at all)
-#endif
-#ifndef FIRST_SMALL_FRAMES
-#define FIRST_SMALL_FRAMES 4         // first chunk of a set whose measured RTF is above FIRST_SMALL_ABOVE_RTF: the planner then needs to delay playback less (measured on the board, esp32/BENCHMARKING.md:
-                                     // full split main set 249 -> 210 ms, row split light set 392..476 -> 344..370 ms, main set 511..697 -> 414..596 ms, 0 underruns); a fast set (full split, light) starts
-                                     // sooner with 10 (167 against 191 ms); 2 frames gave an underrun
-#endif
-#ifndef FIRST_SMALL_ABOVE_RTF
-#define FIRST_SMALL_ABOVE_RTF 0.63
+#define FIRST_FRAMES 10              // frames of the first chunk (10 = 125 ms of audio). `first <n>` changes it (n >= chunk = no ramp at all); a smaller first chunk is out sooner but the
+                                     // planner delays playback more (esp32/BENCHMARKING.md, "first chunk": 2 frames gave an underrun)
 #endif
 #ifndef START_DELAY_MS
 #define START_DELAY_MS -1            // -1: the start delay is planned per utterance from the boot calibration (itofs_sched.h); >= 0 fixes it in ms (the `delay <ms>` command does the same at run time)
@@ -147,6 +140,7 @@ static volatile int64_t s_cancel_t;         // esp_timer time of the cancel comm
 static volatile int64_t s_utt_t0;       // esp_timer time (us) at which the current utterance was handed to the engine
 static int s_delay_override_ms = START_DELAY_MS;   // >= 0: hold the DAC until this long after the text arrived, whatever the plan says (`delay <ms>`); -1: use the plan (`delay auto`)
 static volatile int64_t s_cur_delay_us;            // the planned start delay of the current utterance (from its text arrival); raised while the player waits if the chunks come slower than calibrated
+static int s_trace;                                // `trace 1`: print the chunk times of every utterance
 static int s_active = -1, s_selected = -1, s_degraded;   // weight set in use / chosen by the boot calibration / degraded flag (see the weight-set section)
 #define PLAN_MAX_DELAY_US 4000000.0
 static double s_obs_us[ITOFS_SCHED_MAXCH];         // production times of the chunks of the current utterance so far
@@ -170,13 +164,36 @@ static void mem_report(const char *tag)
 // ------------------------------------------------------------------------------------------------------------------
 #ifndef ITOFS_QEMU
 static i2s_chan_handle_t s_tx;
+#ifdef CONFIG_ITOFS_AUDIO_LOOPBACK
+// Test-only microphone loopback (see the `loopback` command below): the player records the level of what it hands to the I2S, in 10 ms frames, from the first slice on.
+static i2s_chan_handle_t s_rx;
+#define LB_ENV_MAX 2400                       // 24 s of 10 ms frames
+static volatile int s_lb_on;
+static volatile int64_t s_lb_first_us;        // esp_timer time at which the first slice of the utterance was handed to the I2S
+static float s_lb_env[LB_ENV_MAX];            // RMS of the played PCM per 10 ms frame, dBFS
+static int s_lb_env_n, s_lb_acc_n;
+static double s_lb_acc;
+static void lb_play_note(const int16_t *pcm, int n)
+{
+    if (s_lb_env_n == 0 && s_lb_acc_n == 0) s_lb_first_us = esp_timer_get_time();
+    for (int i = 0; i < n; i++) {
+        s_lb_acc += (double)pcm[i] * pcm[i];
+        if (++s_lb_acc_n == 240 && s_lb_env_n < LB_ENV_MAX) { s_lb_env[s_lb_env_n++] = (float)(10.0 * log10(s_lb_acc / 240 + 1.0) - 90.3); s_lb_acc = 0; s_lb_acc_n = 0; }
+        else if (s_lb_acc_n == 240) { s_lb_acc = 0; s_lb_acc_n = 0; }
+    }
+}
+#endif
 static void i2s_setup(void)
 {
     i2s_chan_config_t cc = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     cc.dma_desc_num = 6;
     cc.dma_frame_num = 480;
     cc.auto_clear = true;            // silence (not a repeated buffer) on underrun
+#ifdef CONFIG_ITOFS_AUDIO_LOOPBACK
+    ESP_ERROR_CHECK(i2s_new_channel(&cc, &s_tx, &s_rx));
+#else
     ESP_ERROR_CHECK(i2s_new_channel(&cc, &s_tx, NULL));
+#endif
     i2s_std_config_t sc = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(24000),
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
@@ -185,13 +202,23 @@ static void i2s_setup(void)
     };
     sc.clk_cfg.sample_rate_hz = (uint32_t)s_sr;
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(s_tx, &sc));
+#ifdef CONFIG_ITOFS_AUDIO_LOOPBACK
+    sc.gpio_cfg.dout = I2S_GPIO_UNUSED; sc.gpio_cfg.din = CONFIG_ITOFS_ES8388_PIN_DIN;
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(s_rx, &sc));          // the receive channel shares the transmit channel's clocks; it is enabled only during a `loopback`
+#endif
     ESP_ERROR_CHECK(i2s_channel_enable(s_tx));
 #ifdef CONFIG_ITOFS_AUDIO_ES8388
-    const int e = es8388_init(CONFIG_ITOFS_ES8388_PIN_SDA, CONFIG_ITOFS_ES8388_PIN_SCL, CONFIG_ITOFS_ES8388_VOLUME);   // the clocks run, so the codec can lock to them
+    const int e = es8388_init(CONFIG_ITOFS_ES8388_PIN_SDA, CONFIG_ITOFS_ES8388_PIN_SCL, CONFIG_ITOFS_AUDIO_VOLUME);   // the clocks run, so the codec can lock to them
     if (e) printf("ERROR ES8388 codec %s: nothing will be heard\n", e == -1 ? "does not answer on the I2C bus" : "bus error");
-    else { vTaskDelay(pdMS_TO_TICKS(50)); es8388_mute(0); printf("audio: ES8388 codec, MCLK GPIO%d, BCLK GPIO%d, LRCK GPIO%d, DOUT GPIO%d, output volume register %d\n", PIN_MCLK, PIN_BCLK, PIN_WS, PIN_DOUT, CONFIG_ITOFS_ES8388_VOLUME); }
+    else { printf("audio: ES8388 codec, MCLK GPIO%d, BCLK GPIO%d, LRCK GPIO%d, DOUT GPIO%d, output volume %d %%, DAC muted until the first utterance\n", PIN_MCLK, PIN_BCLK, PIN_WS, PIN_DOUT, CONFIG_ITOFS_AUDIO_VOLUME); }
 #endif
 }
+
+#ifdef CONFIG_ITOFS_AUDIO_ES8388
+#define CODEC_MUTE(m) es8388_mute(m)       // the DAC is muted whenever nothing is spoken: a class-D amplifier makes no noise and no click on a silent, steady input
+#else
+#define CODEC_MUTE(m) ((void)0)
+#endif
 
 // Cancel: drop the audio queued in the DMA ring (about 120 ms): stop the channel, fill the ring with silence, start again.
 static void cancel_flush(int16_t *st)
@@ -200,6 +227,7 @@ static void cancel_flush(int16_t *st)
     i2s_channel_disable(s_tx);
     for (int i = 0; i < 6; i++) { size_t n = 0; i2s_channel_preload_data(s_tx, st, sizeof(int16_t) * 2 * (size_t)I2S_SLICE, &n); }
     i2s_channel_enable(s_tx);
+    CODEC_MUTE(1);
     printf("CANCEL: audio flushed %.1f ms after the command\n", ms(esp_timer_get_time() - s_cancel_t));
 }
 #else
@@ -229,6 +257,11 @@ static void play_task(void *arg)
                 i2s_channel_write(s_tx, st, sizeof(int16_t) * 2 * TAIL_SAMPLES, &wr, portMAX_DELAY);
             }
 #endif
+            if (s_playing) {                               // the audio handed to the I2S has played out at end_us (+ the tail ramp); then the codec is muted
+                const int64_t w = end_us + (int64_t)TAIL_SAMPLES * 1000000 / s_sr + 60000 - esp_timer_get_time();
+                if (w > 0) vTaskDelay(pdMS_TO_TICKS((w + 999) / 1000));
+                CODEC_MUTE(1);
+            }
             last = 0; s_playing = 0; xQueueSend(s_done_q, &b, portMAX_DELAY); continue;
         }
         if (s_cancel) {                                    // cancelled: chunks still arriving are dropped until the end marker
@@ -237,6 +270,7 @@ static void play_task(void *arg)
             continue;
         }
         if (!s_playing) {                                  // pre-roll: the first chunk waits for the delay, later chunks keep arriving meanwhile
+            CODEC_MUTE(0);                                 // (the codec's volume ramp runs during the pre-roll, which is at least one chunk long)
             for (;;) {                                     // (re-read in <= 10 ms steps: the synthesis task may raise the planned delay)
                 if (s_cancel) break;
                 const int64_t d = s_delay_override_ms >= 0 ? (int64_t)s_delay_override_ms * 1000 : s_cur_delay_us;
@@ -256,6 +290,9 @@ static void play_task(void *arg)
         for (int o = 0; o < b.n && !s_cancel; o += I2S_SLICE) {
             const int m = b.n - o < I2S_SLICE ? b.n - o : I2S_SLICE;
             for (int i = 0; i < m; i++) { st[2 * i] = b.pcm[o + i]; st[2 * i + 1] = b.pcm[o + i]; }
+#ifdef CONFIG_ITOFS_AUDIO_LOOPBACK
+            if (s_lb_on) lb_play_note(b.pcm + o, m);
+#endif
             size_t wr = 0;
             i2s_channel_write(s_tx, st, sizeof(int16_t) * 2 * (size_t)m, &wr, portMAX_DELAY);
         }
@@ -271,13 +308,13 @@ static void play_task(void *arg)
 // ------------------------------------------------------------------------------------------------------------------
 // synthesis
 // ------------------------------------------------------------------------------------------------------------------
-typedef struct { double ttfa_ms, begin_ms, compute_ms, audio_s; int frames, tok_first; double plan_delay_ms; int plan_underruns, plan_feasible; uint32_t hash; int cancelled; } stats_t;
+typedef struct { double ttfa_ms, begin_ms, compute_ms, audio_s; int frames, tok_first; double plan_delay_ms; int plan_underruns, plan_feasible; uint32_t hash; int cancelled, chunks; } stats_t;
 
 // Synthesise tokens; stream chunks to the player (play=1) or into out[] (play=0).
 static int tier_plan(int n_tok, int nobs, itofs_plan_t *pl);       // below: start-delay plan from the active weight set's calibration
 static int speak(const int *tok, int n, int style, uint32_t seed, int play, int16_t *out, long out_max, stats_t *S)
 {
-    S->tok_first = 0; S->plan_delay_ms = -1; S->plan_underruns = 0; S->plan_feasible = 1; S->hash = 2166136261u; S->cancelled = 0;
+    S->tok_first = 0; S->plan_delay_ms = -1; S->plan_underruns = 0; S->plan_feasible = 1; S->hash = 2166136261u; S->cancelled = 0; S->chunks = 0;
     s_cur_delay_us = 0;
     s_cancel = 0; s_speaking = play;
     int64_t t0 = esp_timer_get_time();
@@ -304,11 +341,12 @@ static int speak(const int *tok, int n, int style, uint32_t seed, int play, int1
         int64_t e = esp_timer_get_time();
         compute += e - a;
         if (got <= 0) { if (play) xQueueSend(s_free_q, &b, portMAX_DELAY); break; }
+        S->chunks++;
+        if (kch - 1 < ITOFS_SCHED_MAXCH) s_obs_us[kch - 1] = (double)(e - a);
         if (ttfa < 0) { ttfa = e - t0; S->tok_first = s_ctx.n_done; }
         pos += got;
         for (int i = 0; i < got; i++) { S->hash ^= (uint16_t)dst[i]; S->hash *= 16777619u; }
         if (play) {
-            if (kch - 1 < ITOFS_SCHED_MAXCH) s_obs_us[kch - 1] = (double)(e - a);
             if (!s_playing) {          // adaptive pre-buffer: plan (kch == 1) or re-plan the start delay with the chunk times actually seen in this utterance
                 itofs_plan_t pl;
                 if (tier_plan(n, kch < ITOFS_SCHED_MAXCH ? kch : ITOFS_SCHED_MAXCH, &pl)) {
@@ -325,6 +363,11 @@ static int speak(const int *tok, int n, int style, uint32_t seed, int play, int1
         xQueueReceive(s_done_q, &end, portMAX_DELAY);
     }
     S->cancelled = s_cancel; s_cancel = 0; s_speaking = 0;
+    if (s_trace) {                                   // `trace 1`: the time of every chunk of this utterance
+        printf("CHUNKS %d (ms):", S->chunks);
+        for (int i = 0; i < S->chunks && i < ITOFS_SCHED_MAXCH; i++) printf(" %.1f", s_obs_us[i] / 1e3);
+        printf("\n");
+    }
     s_ctx.text_step = 0;
     S->begin_ms = ms(t1 - t0); S->ttfa_ms = ms(ttfa); S->compute_ms = ms(compute);
     S->frames = s_ctx.T; S->audio_s = (double)pos / s_sr; (void)T;
@@ -335,11 +378,11 @@ static void print_timing(const char *what, const stats_t *S, int n_tok, int styl
 {
     if (S->cancelled) printf("CANCELLED %s after %.2f s of audio\n", what, S->audio_s);
     printf("TIMING %s: %d tokens, style %d, %.2f s audio | first chunk %.1f ms (begin %.1f ms; %s text side, %d tokens final at first chunk) | "
-           "compute %.1f ms, RTF %.3f | underruns %d (start delay %s %.0f ms%s) | weight set %d | split %s | weight staging %s: %ld GEMM calls, %ld announced ahead, %ld not | pcm fnv32 %08lx\n",
+           "compute %.1f ms, RTF %.3f | underruns %d (start delay %s %.0f ms%s) | weight set %d | split %s | weight staging %s: %ld GEMM calls, %ld announced ahead, %ld not | %d chunks, %.1f MB of weights read | pcm fnv32 %08lx\n",
            what, n_tok, style, S->audio_s, S->ttfa_ms, S->begin_ms, s_ctx.text_incr ? "incremental" : "whole-sentence", S->tok_first,
            S->compute_ms, S->compute_ms / 1000.0 / S->audio_s, s_underruns, s_delay_override_ms >= 0 ? "fixed" : "planned",
            s_delay_override_ms >= 0 ? (double)s_delay_override_ms : S->plan_delay_ms, s_delay_override_ms >= 0 || S->plan_feasible ? "" : ", model predicts underruns", s_active, s3_gemm_dual ? "full" : "row", s3_wmode_name(s3_wmode),
-           s3_stats.calls, s3_stats.pf_hit, s3_stats.pf_miss + s3_stats.pf_free, (unsigned long)S->hash);
+           s3_stats.calls, s3_stats.pf_hit, s3_stats.pf_miss + s3_stats.pf_free, S->chunks, s3_stats.wbytes / 1e6, (unsigned long)S->hash);
     mem_report(what);
 }
 
@@ -508,6 +551,105 @@ static void play_demos(int only)
         print_timing("demo", &S, s_demo_len[k], s_demo_style[k]);
     }
 }
+
+#ifdef CONFIG_ITOFS_AUDIO_LOOPBACK
+// ------------------------------------------------------------------------------------------------------------------
+// Test-only microphone loopback (CONFIG_ITOFS_AUDIO_LOOPBACK): the shield's microphones sit next to the speaker and go to the ES8388 ADC. `loopback <k> [dump]` records
+// the codec ADC on the I2S receive channel (same clocks as the DAC, so the two timelines are sample-accurate relative to each other) while demo sentence k is spoken, and
+// reports the microphone's noise floor, DC offset, clipping, level, the delay from the first sample handed to the DAC to the first sound at the microphone, and how well the
+// microphone's 10 ms level follows the played level (dropouts: played loud, microphone silent; clicks: played silent, microphone jumps). `dump` prints the samples as hex.
+// ------------------------------------------------------------------------------------------------------------------
+static int s_mic_sel, s_mic_gain = 4;
+typedef struct { int16_t *buf; size_t cap_frames; volatile size_t got_frames; volatile int stop, done; } lb_cap_t;
+static void lb_rx_task(void *arg)
+{
+    lb_cap_t *c = arg;
+    while (!c->stop && c->got_frames + 480 <= c->cap_frames) {
+        size_t n = 0;
+        if (i2s_channel_read(s_rx, c->buf + 2 * c->got_frames, 480 * 4, &n, 100) == ESP_OK) c->got_frames += n / 4;
+    }
+    c->done = 1;
+    vTaskDelete(NULL);
+}
+
+static double lb_db(const int16_t *x, size_t from, size_t n, int ch, double *dc, int *peak)   // rms in dBFS of channel ch over n frames of the interleaved buffer
+{
+    double s = 0, sum = 0; int pk = 0;
+    for (size_t i = from; i < from + n; i++) { const int v = x[2 * i + ch]; s += (double)v * v; sum += v; if (abs(v) > pk) pk = abs(v); }
+    if (dc) *dc = sum / (double)n;
+    if (peak) *peak = pk;
+    return 10.0 * log10(s / (double)n + 1.0) - 90.3;
+}
+
+static void loopback_run(int k, int dump)
+{
+    const size_t fs = (size_t)s_sr, cap = fs * 17, warm = fs * 5 / 2;     // 2.5 s for the ADC's DC offset to settle, then the quiet microphone, then the utterance
+    lb_cap_t c = { heap_caps_malloc(cap * 4, MALLOC_CAP_SPIRAM), cap, 0, 0, 0 };
+    if (!c.buf) { printf("LOOPBACK ERROR: no memory\n"); return; }
+    if (es8388_adc_init(s_mic_sel, s_mic_gain)) { printf("LOOPBACK ERROR: the codec ADC could not be configured\n"); heap_caps_free(c.buf); return; }
+    s_lb_env_n = 0; s_lb_acc_n = 0; s_lb_acc = 0; s_lb_on = 1;
+    i2s_channel_enable(s_rx);
+    const int64_t t_rx0 = esp_timer_get_time();
+    xTaskCreatePinnedToCore(lb_rx_task, "itofs_rx", 4096, &c, 7, NULL, 0);
+    vTaskDelay(pdMS_TO_TICKS(3300));                                 // 2.5 s of settling, then the microphone alone: noise floor, DC offset
+    demo_tokens(k, s_tok_buf);
+    stats_t S;
+    speak(s_tok_buf, s_demo_len[k], s_demo_style[k], 1u + (uint32_t)k, 1, NULL, 0, &S);
+    vTaskDelay(pdMS_TO_TICKS(900));
+    c.stop = 1;
+    while (!c.done) vTaskDelay(1);
+    i2s_channel_disable(s_rx);
+    s_lb_on = 0;
+    const size_t got = c.got_frames, n0 = (size_t)((s_lb_first_us - t_rx0) * (int64_t)fs / 1000000), nplay = (size_t)s_lb_env_n * 240;
+    printf("LOOPBACK demo %d: %u frames recorded, first DAC sample at frame %u (%.1f ms after the receive channel started), %d played frames of 10 ms\n", k, (unsigned)got, (unsigned)n0, (s_lb_first_us - t_rx0) / 1e3, s_lb_env_n);
+    if (n0 < warm + 4800 || n0 + nplay + 4800 > got) { printf("LOOPBACK ERROR: the recording does not cover the utterance\n"); heap_caps_free(c.buf); return; }
+    int best = 0; double best_lvl = -200;
+    for (int ch = 0; ch < 2; ch++) {
+        double dc, dcs; int pk, pks;
+        const double nf = lb_db(c.buf, warm, n0 - warm - 480, ch, &dc, &pk), lvl = lb_db(c.buf, n0, nplay, ch, &dcs, &pks);
+        size_t clip = 0; for (size_t i = warm; i < got; i++) if (abs(c.buf[2 * i + ch]) >= 32700) clip++;
+        printf("LOOPBACK mic %c (input pair %d, PGA %d dB): noise floor %.1f dBFS rms, DC offset %.1f LSB, during speech: rms %.1f dBFS, peak %d (%.1f dBFS), clipped samples %u\n", ch ? 'R' : 'L', s_mic_sel, s_mic_gain * 3,
+               nf, dc, lvl, pks, 20.0 * log10(pks / 32768.0 + 1e-9), (unsigned)clip);
+        if (lvl > best_lvl) { best_lvl = lvl; best = ch; }
+    }
+    // 10 ms levels of the better channel, from the first DAC sample on
+    const int nfr = (int)((got - n0) / 240) - 1;
+    float *mic = malloc(sizeof(float) * (size_t)nfr);
+    if (!mic) { heap_caps_free(c.buf); return; }
+    for (int j = 0; j < nfr; j++) mic[j] = (float)lb_db(c.buf, n0 + (size_t)j * 240, 240, best, NULL, NULL);
+    double pmax = -200; for (int j = 0; j < s_lb_env_n; j++) if (s_lb_env[j] > pmax) pmax = s_lb_env[j];
+    double nf_db = lb_db(c.buf, warm, n0 - warm - 480, best, NULL, NULL);
+    int d_best = 0; double r_best = -2;
+    for (int d = 0; d <= 60 && d + s_lb_env_n < nfr; d++) {          // lag of the microphone behind the DAC, in 10 ms frames
+        double sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0; int n = 0;
+        for (int j = 0; j < s_lb_env_n; j++) if (s_lb_env[j] > pmax - 40) { const double x = s_lb_env[j], y = mic[j + d]; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; n++; }
+        const double r = (n * sxy - sx * sy) / (sqrt(n * sxx - sx * sx) * sqrt(n * syy - sy * sy) + 1e-9);
+        if (r > r_best) { r_best = r; d_best = d; }
+    }
+    int drop = 0, loud = 0, click = 0, quiet = 0;
+    for (int j = 0; j < s_lb_env_n && j + d_best < nfr; j++) {
+        if (s_lb_env[j] > pmax - 25) { loud++; if (mic[j + d_best] < nf_db + 6) drop++; }
+        else if (s_lb_env[j] < pmax - 50) { quiet++; if (mic[j + d_best] > nf_db + 15) click++; }
+    }
+    size_t first = 0;                                                  // first 1 ms window above the noise floor + 12 dB (two in a row)
+    for (size_t i = n0; i + 48 < got && !first; i += 24)
+        if (lb_db(c.buf, i, 24, best, NULL, NULL) > nf_db + 12 && lb_db(c.buf, i + 24, 24, best, NULL, NULL) > nf_db + 12) first = i;
+    printf("LOOPBACK result (mic %c): the microphone's level follows the played level with correlation %.2f at a lag of %d ms; first sound at the microphone %.1f ms after the first DAC sample; "
+           "dropouts %d of %d loud frames; clicks %d of %d silent frames; speech %.1f dB above the noise floor\n", best ? 'R' : 'L', r_best, d_best * 10, first ? (double)(first - n0) * 1000.0 / (double)fs : -1.0, drop, loud, click, quiet, best_lvl - nf_db);
+    if (dump) {
+        printf("LBDATA_BEGIN rate %d samples %u first_dac_sample %u channel %c\n", s_sr, (unsigned)got, (unsigned)n0, best ? 'R' : 'L');
+        for (size_t i = 0; i < got; i += 32) {
+            printf("LBDATA");
+            for (size_t j = i; j < i + 32 && j < got; j++) printf(" %04x", (uint16_t)c.buf[2 * j + best]);
+            printf("\n");
+            guard_wdt_feed();
+        }
+        printf("LBDATA_END\n");
+    }
+    free(mic);
+    heap_caps_free(c.buf);
+}
+#endif
 
 // ------------------------------------------------------------------------------------------------------------------
 // board benchmark: the demo sentences without playback, in every available weight-staging mode. Per sentence: time of
@@ -804,7 +946,7 @@ static void board_bench(void)
 #define MAX_TIERS 3
 typedef struct {
     const esp_partition_t *p; size_t ext; int valid;
-    int calibrated, first; double rtf, rtf_steady, rtf_whole; itofs_cal_t cal;       // first: frames of the first chunk the set was calibrated with
+    int calibrated; double rtf, rtf_steady, rtf_whole; itofs_cal_t cal;
     int blocks; long n_int4; char desc[48];
 } tier_t;
 static tier_t s_tier[MAX_TIERS];
@@ -950,6 +1092,11 @@ static void calibrate_tier(int i)
         c->begin_us = 6000.0;
     }
     double steady = 0, whole = 0;
+    if (s_trace) {
+        printf("CALIB_CHUNKS set %d (frames:ms):", i);
+        for (int k = 0; k < kc; k++) printf(" %d:%.1f", c->frames[k], c->t_us[k] / 1e3);
+        printf(" | text-side begin %.1f ms\n", c->begin_us / 1e3);
+    }
     T->rtf = itofs_cal_rtf(c, &steady, &whole);
     T->rtf_steady = steady > 0 ? steady / (c->steady_frames * (double)s_hop / s_sr * 1e6) : -1; T->rtf_whole = whole;
     T->calibrated = T->rtf >= 0;
@@ -980,10 +1127,7 @@ static void tiers_select(void)
         for (int i = 0; i < MAX_TIERS; i++) {                 // measure every set (the choice needs their start delays), in the split in force
             if (!s_tier[i].valid) continue;
             if (s_active != i && activate_tier(i)) { s_tier[i].valid = 0; continue; }
-            s_first = FIRST_FRAMES;
             calibrate_tier(i);
-            if (s_tier[i].calibrated && s_tier[i].rtf > FIRST_SMALL_ABOVE_RTF) { s_first = FIRST_SMALL_FRAMES; calibrate_tier(i); }   // slower sets start sooner with a small first chunk
-            s_tier[i].first = s_first;
             sc[i].rtf = s_tier[i].rtf;
             if (s_tier[i].calibrated) {
                 itofs_plan_t pl;
@@ -1001,10 +1145,9 @@ static void tiers_select(void)
         }
         break;
     }
-    s_first = s_tier[pick].first;
     s_selected = pick; s_tstatus = st; s_degraded = st == ITOFS_TIER_DEGRADED;
-    printf("TIER_SELECT chosen=%d ('%s', %s) measured_rtf=%.3f target=%.2f status=%s degraded=%d split=%s first=%d%s | measured (RTF, planned start delay for %d tokens, first chunk):", pick, s_tier[pick].p->label, s_tier[pick].desc, sc[pick].rtf,
-           ITOFS_RTF_TARGET, st == ITOFS_TIER_OK ? "OK" : st == ITOFS_TIER_MARGINAL ? "MARGINAL" : "DEGRADED", s_degraded, s3_gemm_dual ? "full" : "row", s_first, s_sim ? " (SIMULATED TIMES)" : "",
+    printf("TIER_SELECT chosen=%d ('%s', %s) measured_rtf=%.3f target=%.2f status=%s degraded=%d split=%s%s | measured (RTF, planned start delay for %d tokens, first chunk):", pick, s_tier[pick].p->label, s_tier[pick].desc, sc[pick].rtf,
+           ITOFS_RTF_TARGET, st == ITOFS_TIER_OK ? "OK" : st == ITOFS_TIER_MARGINAL ? "MARGINAL" : "DEGRADED", s_degraded, s3_gemm_dual ? "full" : "row", s_sim ? " (SIMULATED TIMES)" : "",
            s_tier[pick].cal.n_tok);
     for (int i = 0; i < MAX_TIERS; i++) {
         if (sc[i].rtf >= 0) printf(" set%d %.3f, %.0f ms, %.0f ms;", i, sc[i].rtf, sc[i].start_delay_us / 1e3, sc[i].first_chunk_us / 1e3);
@@ -1086,7 +1229,9 @@ static void synth_task(void *arg)
     board_bench();                   // hardware: measure, keep the fastest weight-staging mode (QEMU: `bench` command)
 #endif
     tiers_select();
+#ifdef CONFIG_ITOFS_BOOT_DEMOS
     play_demos(-1);
+#endif
     printf("READY (BOOT button = demos, serial: say <ids> | style <k> | demo [k] | test | stats | tier [k] | status | help)\n");
     for (;;) {
         while (xQueueReceive(s_req_q, &s_req_tmp, pdMS_TO_TICKS(1000)) != pdTRUE) guard_wdt_feed();      // idle: the watchdog is fed once a second
@@ -1119,7 +1264,7 @@ static void synth_task(void *arg)
             if (k < 0) tier_status();
             else if (k >= MAX_TIERS || !s_tier[k].valid) printf("ERROR weight set %d is absent\n", k);
             else if (activate_tier(k)) printf("ERROR could not activate set %d\n", k);
-            else { s_selected = k; if (s_tier[k].calibrated) s_first = s_tier[k].first; printf("OK weight set %d active (first chunk %d frames)\n", k, s_first); self_test(0); }
+            else { s_selected = k; printf("OK weight set %d active\n", k); self_test(0); }
         } else if (s_req_tmp.kind == 10) {           // recal: measure again and re-select (with simulated times if `simtime` is on)
             for (int i = 0; i < MAX_TIERS; i++) s_tier[i].calibrated = 0;
             tiers_select();
@@ -1129,6 +1274,13 @@ static void synth_task(void *arg)
             ;
         } else if (s_req_tmp.kind == 14) {
             repeat_demos(s_req_tmp.n >> 8, (s_req_tmp.n & 0xFF) - 1);
+        #ifdef CONFIG_ITOFS_AUDIO_LOOPBACK
+        } else if (s_req_tmp.kind == 17) {           // loopback <k> [dump]
+            loopback_run(s_req_tmp.n & 0xFF, s_req_tmp.n >> 8);
+#endif
+        } else if (s_req_tmp.kind == 18) {           // chunk <frames>: steady-state chunk size (at most the arena's STEADY_FRAMES); the weight sets must be measured again (`recal`)
+            s_chunk_frames = s_req_tmp.n; s_chunk_samples = s_chunk_frames * s_hop;
+            printf("OK steady chunk %d frames (%d ms of audio); `first %d` or more turns the start-up ramp off\n", s_chunk_frames, s_chunk_frames * s_hop * 1000 / s_sr, s_chunk_frames);
         } else if (s_req_tmp.kind == 15) {           // split auto|row|full
             split_apply(itofs_split_set_pref(&s_split, (itofs_pref_t)s_req_tmp.n));
             if (s3_gemm_dual) self_test(0);          // the full split must reproduce the host engine's PCM before it is trusted
@@ -1202,12 +1354,33 @@ static void handle_line(char *line)
             xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
         } else printf("ERROR split auto|row|full\n");
 #ifdef CONFIG_ITOFS_AUDIO_ES8388
-    } else if (!strncmp(line, "volume", 6)) {         // volume <0-33>: codec output volume (30 = 0 dB, 1.5 dB per step)
+    } else if (!strncmp(line, "volume", 6)) {         // volume <0-100>: codec output volume in percent (91 = 0 dB, 100 = +4.5 dB); 0 mutes the DAC
         const int v = atoi(line + 6);
-        if (v < 0 || v > 33 || !line[6]) { printf("ERROR volume 0-33\n"); return; }
-        es8388_set_volume(v);
+        if (v < 0 || v > 100 || !line[6]) { printf("ERROR volume 0-100\n"); return; }
+        es8388_set_volume_percent(v);
+        if (v == 0) es8388_mute(1);                  // 0 is a true mute (the codec's volume register alone only reaches -45 dB); the DAC is unmuted by the next utterance
         printf("OK volume %d\n", v);
 #endif
+#ifdef CONFIG_ITOFS_AUDIO_LOOPBACK
+    } else if (!strncmp(line, "loopback", 8)) {      // loopback <k> [dump]
+        char *e; const long k = strtol(line + 8, &e, 10);
+        if (k < 0 || k >= s_ndemo) { printf("ERROR loopback <demo 0-%d> [dump]\n", s_ndemo - 1); return; }
+        s_in_req.kind = 17; s_in_req.n = (int)k | (strstr(e, "dump") ? 256 : 0);
+        xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
+    } else if (!strncmp(line, "micsel", 6)) {        // micsel 0-3: the codec's input (single-ended pair 1 or 2, differential pair 1 or 2)
+        s_mic_sel = atoi(line + 6) & 3; printf("OK input pair %d (applies to the next loopback)\n", s_mic_sel);
+    } else if (!strncmp(line, "micgain", 7)) {       // micgain 0-8: PGA gain in steps of 3 dB
+        s_mic_gain = atoi(line + 7); if (s_mic_gain < 0) s_mic_gain = 0; if (s_mic_gain > 8) s_mic_gain = 8; printf("OK PGA gain %d dB (applies to the next loopback)\n", s_mic_gain * 3);
+#endif
+    } else if (!strncmp(line, "chunk", 5)) {
+        const int n = atoi(line + 5);
+        if (n < 2 || n > STEADY_FRAMES) { printf("ERROR chunk 2-%d\n", STEADY_FRAMES); return; }
+        s_in_req.kind = 18; s_in_req.n = n;
+        xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
+    } else if (!strncmp(line, "cores", 5)) {           // cores 1|2: one core for everything, or both (the split decides the GEMM); for measurement
+        s3_dual_enabled = atoi(line + 5) != 1; printf("OK %d core%s\n", s3_dual_enabled ? 2 : 1, s3_dual_enabled ? "s" : "");
+    } else if (!strncmp(line, "trace", 5)) {           // trace 0|1: print the time of every chunk
+        s_trace = atoi(line + 5) != 0; printf("OK chunk trace %s\n", s_trace ? "on" : "off");
     } else if (!strncmp(line, "rep", 3)) {            // rep <n> [k]
         char *e; const long n = strtol(line + 3, &e, 10);
         const long k = strtol(e, NULL, 10);
@@ -1272,7 +1445,7 @@ static void handle_line(char *line)
         xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
     } else if (line[0]) {
         printf("commands: say <comma-separated token ids> | style <0-%d> | act <8|16> | demo [0-%d] | test | stats | bench | "
-               "wmode <0 direct|1 copy|2 gdma|3 gdma+prefetch> | first <frames of the first chunk> | split [auto|row|full] | cancel | rep <n> [demo] | reboot | delay <ms before playback starts | auto> | tier [k] | status | recal | simtime <rtf0 rtf1 rtf2 | off>\n", s_model.n_styles - 1, s_ndemo - 1);
+               "wmode <0 direct|1 copy|2 gdma|3 gdma+prefetch> | first <frames of the first chunk> | chunk <steady frames> | cores <1|2> | trace <0|1> | split [auto|row|full] | cancel | rep <n> [demo] | reboot | delay <ms before playback starts | auto> | tier [k] | status | recal | simtime <rtf0 rtf1 rtf2 | off>\n", s_model.n_styles - 1, s_ndemo - 1);
     }
 }
 

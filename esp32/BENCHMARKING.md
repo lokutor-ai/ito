@@ -12,7 +12,7 @@ The root README and [`README.md`](README.md) §4a report, with the full split, f
 
 Read them with these qualifications:
 
-1. **They are for the full split, which is no longer the default.** Both cores run the GEMM (`s3_gemm_dual = 1`). The default build now uses the row split (the GEMM on core 0, the row loops on both cores), because the full split collapses the 3.3 V rail on some boards ([`DUAL_CORE_POWER.md`](DUAL_CORE_POWER.md)). The 0.66 is what you get after opting in on a board whose supply passes the stress test; the output audio is the same either way. A row-split figure from a different board is in the next section.
+1. **They are for the full split.** Both cores run the GEMM (`s3_gemm_dual = 1`). The firmware now chooses the split at run time: it uses the full split on a board whose supply passes its self-test and the row split (the GEMM on core 0, the row loops on both cores) on one that does not, because the full split collapses the 3.3 V rail on some boards ([`DUAL_CORE_POWER.md`](DUAL_CORE_POWER.md)). The 0.66 is what a board whose test passes runs at; the output audio is the same either way. A row-split figure from a different board is in the next section, and the row split on the first board is in the section at the end.
 2. **They depend on the chunk plan.** The 0.66 uses the firmware's ramp of 125 ms, then 11, 12, 14, 18 and 24-frame chunks. Every chunk streams the layers' weights from PSRAM again, so the chunk size sets the weight traffic, and with it the RTF. An independent run on another board (below) went from RTF 1.06 at 8 frames per chunk to 0.84 at 24. A number without its chunk plan cannot be compared.
 3. **They are one board, resets only, three sentences.** The repeat boots show repeatability on one chip, not a second board; none was a cold power-on; the spread reported is min to max over a handful of runs.
 4. **The pre-board estimate columns (optimistic / central / pessimistic) are estimates**, are labelled so, and were not changed by the measurements.
@@ -146,3 +146,109 @@ Findings from experiments on one board (cycles per MAC, 8 activation rows, 240 M
 
 - The dot kernel costs about 21 cycles per weight row for 1 or 2 vectors (a fixed cost) and roughly 3 cycles per vector beyond that, near the dependent-accumulate rate of ACCX. Unrolling the loop 4 times made it slower (0.96 against 0.67 cycles per MAC at 32 inputs). A version that alternates two register pairs and issues the next row's loads before reading ACCX was equal at 64 inputs and slower below it (0.81 against 0.67 at 32).
 - Starting the data cache preload engine (`EXTMEM_DCACHE_PRELOAD_*`) on PSRAM weights hung the board at its first use in this form; it is not used.
+
+## Re-measured on 2 November 2026 (ESP32-S3-DevKitC-1 N16R8, MAC f8:5b:1b:91:6d:a8, branch `production-runtime`)
+
+Same protocol as above where practical: n = 10 repetitions, the PCM hash of every run compared with the host C engine, the three demo sentences and the 84-token calibration sentence, both splits, three weight sets, ESP-IDF 5.5.1, 240 MHz, PSRAM octal 80 MHz, 64 KB data cache with 64-byte lines. The board sits on an ESP_S3-AUDIN shield with both USB-C cables connected. Every boot was a reset; the supply of this board passed everything (stress program round of 422 s with 0 mismatches, the firmware's own 3 s test, hours of synthesis, speaker playing at +4.5 dB: 0 brownout and 0 watchdog resets).
+
+### Headline: main as published against this branch (female voice, demo sentences, ramp 10,11,12,14,18,24, 0 underruns everywhere)
+
+| Firmware | Split | Set | First chunk ms | RTF (calibration sentence / demos) | Planned start delay ms (25/108/175 tokens) | Peak SRAM KB | Hash |
+|---|---|---|---|---|---|---|---|
+| main 9c8105d, prebuilt image (IDF 5.5.5), n=10 | row | main int8 | 236.8 | 0.845 / 0.843-0.860 | 513 / 697 / 657 | 366 of 374 | self-test fnv32 023bd6b1 = host, 31 of 31 |
+| same, `tier 1` / `tier 2` | row | int4 / light | 231.7 / 216.5 | 0.826 / 0.776 | not planned (the set was not calibrated by the boot) | 366 | self-test PASS 31 of 31 each |
+| main 9c8105d built with the full split (IDF 5.5.1), n=10 | full | main int8 | 183.1 (183.0-184.0) | 0.661 / 0.660-0.674 | 246 / 246 / 246 | 354 of 374 | 023bd6b1 = host, 31 of 31 |
+| same | full | int4 / light | 179.3 / 167.7 | 0.648 / 0.608 | not planned | 354 | PASS |
+| this branch, `auto` (the stress-passing board runs the full split) | full | light (chosen by the new policy) | 167.0 | 0.608 / 0.607-0.615 | 167 / 167 / 167 | 346 of 371 | demo hashes = host, 10 of 10 |
+| this branch, forced row | row | light (chosen) | 216.3 | 0.776 / 0.773-0.784 | 416 / 476 / 392 | 346 | = host |
+| this branch, forced row, main set | row | main | 236.5 | 0.844 / 0.841-0.858 | 511 / 696 / 646 | 346 | = host |
+
+First chunk is 125 ms of audio. The new set choice picks, among the sets that meet RTF 0.85 and are judged equivalent by ear, the lowest planned start delay: the light set, which cuts the start delay from 246 to 167 ms in the full split and from 511-697 to 392-476 ms in the row split. The three sets are indistinguishable by ear for both voices (Dani's blind tests); `SETS_EQUIVALENT` in `main.c` turns the choice back to the first set in quality order.
+
+### Protocol table, branch firmware, female voice (n = 10 silent repetitions per cell with the PCM hash of every run compared with the host C engine, then 3 played runs for the planned start delay and underruns)
+
+Modes `row` (forced), `full` (forced) and `auto` (verdict from the supply test; it ran the full split here, its rows are identical to `full` and listed once). The build of this run is the firmware of commit cea7be6 before the later additions (volume in percent, DAC mute, loopback, chunk/cores/trace commands, silent boot); the synthesis code is unchanged since.
+
+| Board id | Commit | Split | Weights | Chunk plan | Sentence | RTF mean (sd) [min..max] | First chunk ms mean (sd) | Planned start delay ms / underruns (3 played runs) | Peak PSRAM / SRAM KB | n | Hash vs host | Boots |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| f8:5b:1b:91:6d:a8 | cea7be6+wt | full | female set 0 | firmware ramp 10,11,12,14,18,24 | demo 0 (25 tok) | 0.673 (0.0005) [0.672..0.674] | 183.0 (0.19) | 249 / 0 | 5669 / 346 | 10 | a39e1a7b = host (played run: same) | 1 |
+| f8:5b:1b:91:6d:a8 | cea7be6+wt | full | female set 0 | firmware ramp 10,11,12,14,18,24 | demo 1 (108 tok) | 0.659 (0.0004) [0.659..0.660] | 182.8 (0.33) | 249 / 0 | 5669 / 346 | 10 | f6afba59 = host (played run: same) | 1 |
+| f8:5b:1b:91:6d:a8 | cea7be6+wt | full | female set 0 | firmware ramp 10,11,12,14,18,24 | demo 2 (175 tok) | 0.662 (0.0002) [0.662..0.663] | 182.9 (0.25) | 249 / 0 | 5669 / 346 | 10 | 18154ad5 = host (played run: same) | 1 |
+| f8:5b:1b:91:6d:a8 | cea7be6+wt | full | female set 1 | firmware ramp 10,11,12,14,18,24 | demo 0 (25 tok) | 0.656 (0.0002) [0.655..0.656] | 179.1 (0.12) | 221 / 0 | 5669 / 346 | 10 | 0284b26f = host (played run: same) | 1 |
+| f8:5b:1b:91:6d:a8 | cea7be6+wt | full | female set 1 | firmware ramp 10,11,12,14,18,24 | demo 1 (108 tok) | 0.646 (0.0002) [0.646..0.646] | 178.8 (0.17) | 221 / 0 | 5669 / 346 | 10 | 251a24a1 = host (played run: same) | 1 |
+| f8:5b:1b:91:6d:a8 | cea7be6+wt | full | female set 1 | firmware ramp 10,11,12,14,18,24 | demo 2 (175 tok) | 0.649 (0.0001) [0.649..0.650] | 178.8 (0.19) | 221 / 0 | 5669 / 346 | 10 | d18ddec4 = host (played run: same) | 1 |
+| f8:5b:1b:91:6d:a8 | cea7be6+wt | full | female set 2 | firmware ramp 10,11,12,14,18,24 | demo 0 (25 tok) | 0.615 (0.0003) [0.614..0.615] | 167.0 (0.09) | 167 / 0 | 5669 / 346 | 10 | 4961ecd4 = host (played run: same) | 1 |
+| f8:5b:1b:91:6d:a8 | cea7be6+wt | full | female set 2 | firmware ramp 10,11,12,14,18,24 | demo 1 (108 tok) | 0.607 (0.0002) [0.607..0.607] | 166.9 (0.18) | 167 / 0 | 5669 / 346 | 10 | 1be9e33a = host (played run: same) | 1 |
+| f8:5b:1b:91:6d:a8 | cea7be6+wt | full | female set 2 | firmware ramp 10,11,12,14,18,24 | demo 2 (175 tok) | 0.610 (0.0001) [0.610..0.610] | 167.1 (0.13) | 167 / 0 | 5669 / 346 | 10 | 98faff55 = host (played run: same) | 1 |
+| f8:5b:1b:91:6d:a8 | cea7be6+wt | row | female set 0 | firmware ramp 10,11,12,14,18,24 | demo 0 (25 tok) | 0.858 (0.0001) [0.857..0.858] | 236.6 (0.06) | 511 / 0 | 5669 / 346 | 10 | a39e1a7b = host (played run: same) | 1 |
+| f8:5b:1b:91:6d:a8 | cea7be6+wt | row | female set 0 | firmware ramp 10,11,12,14,18,24 | demo 1 (108 tok) | 0.841 (0.0001) [0.841..0.841] | 236.4 (0.07) | 696/697 / 0 | 5669 / 346 | 10 | f6afba59 = host (played run: same) | 1 |
+| f8:5b:1b:91:6d:a8 | cea7be6+wt | row | female set 0 | firmware ramp 10,11,12,14,18,24 | demo 2 (175 tok) | 0.844 (0.0001) [0.844..0.844] | 236.5 (0.05) | 646 / 0 | 5669 / 346 | 10 | 18154ad5 = host (played run: same) | 1 |
+| f8:5b:1b:91:6d:a8 | cea7be6+wt | row | female set 1 | firmware ramp 10,11,12,14,18,24 | demo 0 (25 tok) | 0.836 (0.0001) [0.836..0.837] | 231.6 (0.07) | 514/516 / 0 | 5669 / 346 | 10 | 0284b26f = host (played run: same) | 1 |
+| f8:5b:1b:91:6d:a8 | cea7be6+wt | row | female set 1 | firmware ramp 10,11,12,14,18,24 | demo 1 (108 tok) | 0.823 (0.0001) [0.823..0.823] | 231.5 (0.06) | 616/618 / 0 | 5669 / 346 | 10 | 251a24a1 = host (played run: same) | 1 |
+| f8:5b:1b:91:6d:a8 | cea7be6+wt | row | female set 1 | firmware ramp 10,11,12,14,18,24 | demo 2 (175 tok) | 0.826 (0.0001) [0.826..0.827] | 231.5 (0.07) | 571/572 / 0 | 5669 / 346 | 10 | d18ddec4 = host (played run: same) | 1 |
+| f8:5b:1b:91:6d:a8 | cea7be6+wt | row | female set 2 | firmware ramp 10,11,12,14,18,24 | demo 0 (25 tok) | 0.784 (0.0002) [0.784..0.784] | 216.3 (0.14) | 416 / 0 | 5669 / 346 | 10 | 4961ecd4 = host (played run: same) | 1 |
+| f8:5b:1b:91:6d:a8 | cea7be6+wt | row | female set 2 | firmware ramp 10,11,12,14,18,24 | demo 1 (108 tok) | 0.773 (0.0000) [0.773..0.773] | 216.2 (0.10) | 476/477 / 0 | 5669 / 346 | 10 | 1be9e33a = host (played run: same) | 1 |
+| f8:5b:1b:91:6d:a8 | cea7be6+wt | row | female set 2 | firmware ramp 10,11,12,14,18,24 | demo 2 (175 tok) | 0.776 (0.0001) [0.776..0.777] | 216.3 (0.15) | 392 / 0 | 5669 / 346 | 10 | 98faff55 = host (played run: same) | 1 |
+
+Calibration sentence (84 tokens, 5.59 s), 11 runs per cell, golden self-test PASS in every run: full split main 183.1 ms / RTF 0.662, int4 178.8 / 0.648, light 167.0 / 0.608; row split main 236.3 / 0.844, int4 231.3 / 0.826, light 216.3 / 0.776 (the first row-light cell has one outlier run during a split change, sd 17.8 ms). Hashes of all cells equal the host's (`ref/demo_ref`: female main a39e1a7b f6afba59 18154ad5; int4 0284b26f 251a24a1 d18ddec4; light 4961ecd4 1be9e33a 98faff55).
+
+Memory over 60 minutes of runs: free PSRAM stayed at 3098 KB and free internal SRAM at 53 KB after every `rep`, `demo` and `test` (no leak); `rep` prints the free memory before and after (`REP memory` lines in the logs).
+
+
+### Chunk size, clocks, kernels and the row to full split gain
+
+(A) Chunk sweep on this board (female main set, calibration sentence 5.59 s, fixed chunk size, `first` = chunk, 5 runs per cell, sd of the RTF <= 0.0005):
+
+| Steady chunk (frames) | chunks | weights read MB | MB per chunk | row RTF | row first chunk ms | full RTF | full first chunk ms |
+|---|---|---|---|---|---|---|---|
+| 8 | 56 | 151.1 | 2.70 | 1.032 | 218.5 | 0.821 | 168.0 |
+| 12 | 38 | 102.2 | 2.69 | 0.917 | 252.1 | 0.715 | 195.4 |
+| 14 | 32 | 102.6 | 3.21 | 0.919 | 268.0 | 0.722 | 208.4 |
+| 16 | 28 | 90.4 | 3.23 | 0.892 | 286.1 | 0.699 | 223.5 |
+| 18 | 25 | 81.6 | 3.26 | 0.873 | 309.5 | 0.691 | 243.8 |
+| 20 | 23 | 74.9 | 3.26 | 0.857 | 333.6 | 0.678 | 261.9 |
+| 24 | 19 | 64.3 | 3.38 | 0.833 | 377.3 | 0.655 | 296.6 |
+
+The bytes per chunk jump by 19 % between 12 and 14 frames on this board too (2.69 to 3.21 MB). Cause: `WIDE_ROWS = 12` in `engine/itofs.c`: the two wide layers (harm_proj and the output head, 1202 columns) process 12 rows per weight pass, so a chunk of more than 12 frames reads their weights twice. It is neither the ramp (there is none in this sweep) nor a counter issue. A fit of the whole-sentence time gives about 13.2 ms per MB of weights read (about 76 MB/s effective, 86-89 MB/s measured peak) and no per-chunk fixed cost (-1 ms per chunk; the 12 to 14 frame step has 6 fewer chunks at the same bytes and the time does not fall). The first chunk costs 132 ms + 10.0 ms per frame (row) and 98 ms + 8.1 ms per frame (full).
+
+(B) Per-chunk times, row split, main set, demo sentences (trace of this session, `s/nov02_final_boot5.log`): chunk times are 227 ms for a 24-frame chunk with a slow chunk of 340 ms (the text side advancing 24 tokens) at chunk indices 8, 13, 19, 22, 27, 31 and 34 depending on the sentence; the 25-token sentence has 10 chunks, the 108-token one 27, the 175-token one 38, and the plan (511 / 696 / 646 ms) is computed from the calibration trace by chunk index, so it follows where the slow chunks fall, not the length: the 108-token sentence meets a 340 ms chunk at index 8 while the buffer is thin, the 175-token one at index 8 too but with a different earlier chunk (the first ramp chunks differ by the text step). The model bound `RTF steady 0.76 x 1.25` applies to the steady chunks only; the plan also covers the ramp and the slow chunks. The dump is in the log; a cleaner per-chunk model is not done.
+
+(C) CPU frequency and PSRAM clock, same build, main set, fixed 8-frame chunks, demo 1 (108 tokens), 5 runs:
+
+| Config | one core RTF | row split RTF | full split RTF |
+|---|---|---|---|
+| 240 MHz, PSRAM 80 MHz | 1.284 | 1.034 | 0.823 |
+| 160 MHz | 1.762 (+37.2 %) | 1.380 (+33.5 %) | 1.080 (+31.2 %) |
+| PSRAM 40 MHz | 1.593 (+24.1 %) | 1.342 (+29.8 %) | 1.120 (+36.1 %) |
+
+With the light set and the shipped ramp (demo 1): 240 MHz 1.019 / 0.775 / 0.609, 160 MHz 1.464 / 1.093 / 0.861, PSRAM 40 MHz 1.148 / 0.906 / 0.711.
+
+(D) The cycle benchmark of `kernel_check_s3` (exactness: 972 of 972 shapes identical to the C reference on every variant) gives, in cycles per MAC with 8 rows: weights in SRAM 0.21-0.43, weights in PSRAM 0.33-0.59 (in=768: 0.209 against 0.527; in=256 at 20 rows: 0.243 against 0.371). The boot benchmark of the engine's own shapes (GMAC/s, 8 rows, weights in PSRAM, direct): one core 0.42-0.45; two cores 0.62-0.67 (full split); weights resident in SRAM, one core: 0.80. So one core is stalled for roughly 45 % of its GEMM time by PSRAM, and a second core adds 1.5x, not 2x. Hardware stall counters were not read (no counter access built).
+
+(E) Row to full split: 0.845 to 0.661 is -22 % on the calibration sentence with the ramp; the GEMM alone goes from 0.42-0.45 to 0.62-0.67 GMAC/s (+48 %) on the same bus, consistent with a shared PSRAM bus, while the non-GEMM time (47 % of the row-split time) is unchanged. A -31 % prediction needed a 2x GEMM scaling. Whether the limit is the bus itself or the cache refill ordering was not separated.
+
+(F) Core 1 in the row split: not measured by a counter. From the boot benchmark, GEMM calls take 53 % of the row-split wall time (944.7 of 1793.9 ms for demo 0; core 1 idle then) and the rest is split across both cores, so core 1 is busy at most 47 % of the time, "about a third" is consistent with part of that being single-core. `S3_PROF` was not built.
+
+### Comparison with the numbers published above (his value, this board, same configuration?, possible reason)
+
+| Item | Published value | This board | Same configuration? | Reason / note |
+|---|---|---|---|---|
+| Full split first chunk / RTF / start | 184 ms / 0.66 / 246 ms (fedbd26) | 183.1 ms / 0.661 / 246 ms (main 9c8105d, full split, IDF 5.5.1) | same board class, current main | reproduced |
+| Row split RTF, 24 frames | 0.836 (second board) | 0.833, 64.3 MB read | same plan | reproduced |
+| Row split RTF, 8 / 12 / 16 frames | 1.056 / 0.932 / 0.903 | 1.032 / 0.917 / 0.892 (runtime `chunk n`); 1.045 / 0.901 with compile-time 8 / 16 builds | same plan, other board | within 1-2 %; the run-time and compile-time 8-frame builds differ by 1.3 % |
+| First chunk, row, 8 frames | 246 ms | 218.5 (run time) / 243.3 (compile time 8) | | the compile-time build reproduces; the run-time chunk keeps the 24-frame arena |
+| Bytes per chunk jump 12 to 16 frames | +18 % (2.80 to 3.33 MB) | +19 % (2.69 to 3.21 MB at 14) | | `WIDE_ROWS = 12` |
+| Per-chunk fixed cost | about 35 ms with 13 ms per MB | about 0 ms per chunk, 13.2 ms per MB | | not reproduced here; the data are collinear (chunks and bytes), the 12 to 14 step separates them |
+| PSRAM bandwidth memcpy / GDMA / cache | 86 / 36 / 89 MB/s | 86.0 / 35.3 / 89.2 | | reproduced |
+| GDMA slower than direct reads | RTF 1.250 against 1.056 at 8 frames | boot bench RTF direct 0.849, copy 0.870, gdma 0.948 (row, ramp) | | reproduced: direct wins |
+| Internal SRAM peak | 354 of 374 KB (fedbd26) | 354 (main full split, IDF 5.5.1), 366 (prebuilt row, IDF 5.5.5), 346 of 371 (branch with ES8388) | different builds | layout differs by build; the margin of the prebuilt is 8 KB, so 354 does not describe the prebuilt |
+| int4 / light, full split | RTF 0.65 / 0.61, first chunk 180 / 168 ms | 0.648 / 0.608, 179.3 / 167.7 ms | | reproduced |
+| int4 / light, row split | not published | 0.826 / 0.776, first chunk 231.7 / 216.5 | | new |
+| 160 MHz one core / row | +37 % / +46 % | +37.2 % / +33.5 % | main set, 8 frames | one core reproduced; the row figure differs (other board, other harness) |
+| PSRAM 40 MHz one core / row | 1.642 / 1.711 (row slower than one core) | 1.593 / 1.342 (row faster) | main set, 8 frames | one core reproduced (+24 %); the row-slower-than-one-core result is not reproduced |
+| Kernel check | all identical | 972 of 972 identical | | reproduced (cycles per MAC in 5(D)) |
+| Stress test | 0 failures (one board, 21 min) | one round, 422 s, 6 configurations, 0 mismatches, 0 brownouts | same program | reproduced for one round |
+| Planned start 513 / 697 / 657 | | 513 / 697 / 657 | same | reproduced; see 5(B) for the shape |
+
+Not touched because nothing looked wrong: the second board and its supply history, the brownout ladder thresholds (need a scope), the instruction/data cache and line sweeps, the GDMA 8 KB tile, the 20-frame plan, the arena placement table; PSRAM at 120 MHz does not build with this module's QIO flash in ESP-IDF 5.5.1 (the timing tables need octal flash).
+
