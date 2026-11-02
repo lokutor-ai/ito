@@ -26,16 +26,21 @@ double itofs_cal_rtf(const itofs_cal_t *c, double *steady_us, double *whole)
     return m > w ? m : w;
 }
 
-int itofs_sched_pick(const double *rtf, int n, double target, double degraded, itofs_tier_status_t *status)
+int itofs_sched_pick(const itofs_set_score_t *s, int n, double target, double degraded, itofs_tier_status_t *status)
 {
-    int best = -1;
+    int best = -1, lowest = -1;
     for (int i = 0; i < n; i++) {
-        if (rtf[i] < 0) continue;
-        if (rtf[i] <= target) { if (status) *status = ITOFS_TIER_OK; return i; }
-        if (best < 0 || rtf[i] < rtf[best]) best = i;
+        if (s[i].rtf < 0) continue;
+        if (lowest < 0 || s[i].rtf < s[lowest].rtf) lowest = i;
+        if (s[i].rtf > target) continue;
+        if (best < 0) { best = i; continue; }
+        if (!s[best].equivalent || !s[i].equivalent) { if (!s[best].equivalent && s[i].equivalent) best = i; continue; }
+        const double dd = s[i].start_delay_us - s[best].start_delay_us;
+        if (dd < -1000.0 || (dd <= 1000.0 && s[i].first_chunk_us < s[best].first_chunk_us - 1000.0)) best = i;
     }
-    if (best >= 0 && status) *status = rtf[best] >= degraded ? ITOFS_TIER_DEGRADED : ITOFS_TIER_MARGINAL;
-    return best;
+    if (best >= 0) { if (status) *status = ITOFS_TIER_OK; return best; }
+    if (lowest >= 0 && status) *status = s[lowest].rtf >= degraded ? ITOFS_TIER_DEGRADED : ITOFS_TIER_MARGINAL;
+    return lowest;
 }
 
 int itofs_sched_simulate(const double *t_us, const double *a_us, int n, double begin_us, double start_delay_us, int nbuf, double *end_us)

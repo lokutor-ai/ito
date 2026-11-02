@@ -45,25 +45,35 @@ static void calibrate(const world_t *w, int total_frames, itofs_cal_t *c, int nt
 int main(void)
 {
     int fails = 0;
-    // ---- 1. weight-set choice
+    // ---- 1. weight-set choice: RTF target first, then the lowest planned start delay among equivalent sets (all sets of the table are equivalent unless stated)
     {
-        struct { double r[4]; int n, want; itofs_tier_status_t st; const char *what; } T[] = {
-            {{0.70, 0.60, 0.50}, 3, 0, ITOFS_TIER_OK, "main already fine"},
-            {{0.90, 0.80, 0.70}, 3, 1, ITOFS_TIER_OK, "second set fits"},
-            {{0.95, 0.90, 0.80}, 3, 2, ITOFS_TIER_OK, "light set fits"},
-            {{0.95, 0.90, 0.86}, 3, 2, ITOFS_TIER_MARGINAL, "none fits, best is marginal"},
-            {{1.20, 1.05, 0.97}, 3, 2, ITOFS_TIER_DEGRADED, "none fits, best >= 0.95: degraded"},
-            {{1.20, 1.05, 0.95}, 3, 2, ITOFS_TIER_DEGRADED, "exactly 0.95 is degraded"},
-            {{0.85, 0.80, 0.70}, 3, 0, ITOFS_TIER_OK, "exactly 0.85 is accepted"},
-            {{0.86, -1.0, 0.84}, 3, 2, ITOFS_TIER_OK, "a missing set is skipped"},
-            {{-1.0, -1.0, -1.0}, 3, -1, ITOFS_TIER_OK, "nothing measured"},
-            {{0.94, 0.93, 0.92}, 3, 2, ITOFS_TIER_MARGINAL, "lowest of three marginal sets"},
+        // rtf, start delay (ms), first chunk (ms) per set; a set with equal delays is chosen by first chunk, then by index (quality order)
+        struct { double r[3], d[3], f[3]; int eq[3], want; itofs_tier_status_t st; const char *what; } T[] = {
+            {{0.70, 0.60, 0.50}, {240, 237, 230}, {237, 235, 230}, {1, 1, 1}, 2, ITOFS_TIER_OK, "all fit: the lowest start delay (light)"},
+            {{0.845, 0.70, 0.55}, {513, 330, 250}, {237, 232, 228}, {1, 1, 1}, 2, ITOFS_TIER_OK, "row split, main at 0.845: the light set starts sooner"},
+            {{0.80, 0.70, 0.86}, {400, 300, 250}, {237, 232, 228}, {1, 1, 1}, 1, ITOFS_TIER_OK, "a set above the target is not a candidate"},
+            {{0.60, 0.55, 0.50}, {237, 237, 237}, {237, 237, 237}, {1, 1, 1}, 0, ITOFS_TIER_OK, "equal delays and chunks: the best quality (index 0)"},
+            {{0.60, 0.55, 0.50}, {237, 237, 236.5}, {237, 237, 237}, {1, 1, 1}, 0, ITOFS_TIER_OK, "delays within 1 ms are a tie"},
+            {{0.60, 0.55, 0.50}, {240, 239, 238}, {237, 236, 231}, {1, 1, 1}, 2, ITOFS_TIER_OK, "a lead of more than 1 ms in the delay wins"},
+            {{0.60, 0.55, 0.50}, {300, 300, 300}, {237, 236, 231}, {1, 1, 1}, 2, ITOFS_TIER_OK, "same delay: the lowest first chunk"},
+            {{0.60, 0.55, 0.50}, {500, 300, 250}, {237, 232, 228}, {1, 1, 0}, 1, ITOFS_TIER_OK, "a set not judged equivalent is only used when no equivalent one fits"},
+            {{0.60, 0.95, 0.99}, {500, 300, 250}, {237, 232, 228}, {0, 0, 0}, 0, ITOFS_TIER_OK, "no equivalent set: the first that fits"},
+            {{0.95, 0.90, 0.80}, {900, 700, 300}, {237, 232, 228}, {1, 1, 1}, 2, ITOFS_TIER_OK, "only the light set fits"},
+            {{0.95, 0.90, 0.86}, {900, 700, 500}, {237, 232, 228}, {1, 1, 1}, 2, ITOFS_TIER_MARGINAL, "none fits, best is marginal"},
+            {{1.20, 1.05, 0.97}, {900, 700, 500}, {237, 232, 228}, {1, 1, 1}, 2, ITOFS_TIER_DEGRADED, "none fits, best >= 0.95: degraded"},
+            {{1.20, 1.05, 0.95}, {900, 700, 500}, {237, 232, 228}, {1, 1, 1}, 2, ITOFS_TIER_DEGRADED, "exactly 0.95 is degraded"},
+            {{0.85, 0.80, 0.70}, {500, 400, 300}, {237, 232, 228}, {1, 1, 1}, 2, ITOFS_TIER_OK, "exactly 0.85 is accepted"},
+            {{0.86, -1.0, 0.84}, {500, 400, 300}, {237, 232, 228}, {1, 1, 1}, 2, ITOFS_TIER_OK, "a missing set is skipped"},
+            {{-1.0, -1.0, -1.0}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, -1, ITOFS_TIER_OK, "nothing measured"},
+            {{0.94, 0.93, 0.92}, {900, 700, 500}, {237, 232, 228}, {1, 1, 1}, 2, ITOFS_TIER_MARGINAL, "lowest of three marginal sets"},
         };
         for (unsigned i = 0; i < sizeof T / sizeof T[0]; i++) {
+            itofs_set_score_t sc[3];
+            for (int k = 0; k < 3; k++) sc[k] = (itofs_set_score_t){ T[i].r[k], T[i].d[k] * 1e3, T[i].f[k] * 1e3, T[i].eq[k] };
             itofs_tier_status_t st = ITOFS_TIER_OK;
-            const int got = itofs_sched_pick(T[i].r, T[i].n, ITOFS_RTF_TARGET, ITOFS_RTF_DEGRADED, &st);
+            const int got = itofs_sched_pick(sc, 3, ITOFS_RTF_TARGET, ITOFS_RTF_DEGRADED, &st);
             const int ok = got == T[i].want && (got < 0 || st == T[i].st);
-            printf("pick %-34s -> set %d status %d %s\n", T[i].what, got, (int)st, ok ? "ok" : "FAIL");
+            printf("pick %-60s -> set %d status %d %s\n", T[i].what, got, (int)st, ok ? "ok" : "FAIL");
             fails += !ok;
         }
     }

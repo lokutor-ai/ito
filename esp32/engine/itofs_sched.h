@@ -40,10 +40,16 @@ double itofs_cal_rtf(const itofs_cal_t *c, double *steady_us, double *whole);
 
 typedef enum { ITOFS_TIER_OK = 0, ITOFS_TIER_MARGINAL = 1, ITOFS_TIER_DEGRADED = 2 } itofs_tier_status_t;
 
-// Choose among weight sets in order of preference (index 0 = most preferred, the best quality): the first whose measured RTF is <= target
-// (default ITOFS_RTF_TARGET). If none is, the one with the lowest RTF; its status is MARGINAL (target < rtf < degraded) or DEGRADED
-// (rtf >= degraded, default ITOFS_RTF_DEGRADED). rtf[i] < 0 means "not measured / unavailable" and is skipped. Returns the index or -1.
-int itofs_sched_pick(const double *rtf, int n, double target, double degraded, itofs_tier_status_t *status);
+// What the boot measured for one weight set. Sets are in order of preference (index 0 = best quality). rtf < 0: not measured / unavailable.
+// equivalent: the set has been judged as good as the others by ear (the 192 int8, int4 and light sets are, for both voices), so the choice between
+// them may look at speed alone. start_delay_us / first_chunk_us: the plan for a reference utterance (itofs_sched_plan) and the first chunk time.
+typedef struct { double rtf, start_delay_us, first_chunk_us; int equivalent; } itofs_set_score_t;
+
+// Choose a weight set. Candidates are the measured sets whose RTF is <= target (default ITOFS_RTF_TARGET). Among the equivalent candidates the one with
+// the lowest planned start delay wins, then the lowest first chunk, then the lowest index (delays closer than 1 ms are a tie); if no equivalent set is a
+// candidate, the first other candidate in order. If no set meets the target, the one with the lowest RTF is returned; its status is MARGINAL
+// (target < rtf < degraded) or DEGRADED (rtf >= degraded, default ITOFS_RTF_DEGRADED). Returns the index or -1.
+int itofs_sched_pick(const itofs_set_score_t *s, int n, double target, double degraded, itofs_tier_status_t *status);
 
 // Playback plan for one utterance of n_tok tokens, from a calibration trace of the SAME weight set and schedule.
 typedef struct {

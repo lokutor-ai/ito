@@ -3,6 +3,7 @@
 #   make test       host test of the chip weights against golden/ (8- and 16-bit activations, ASan/UBSan); the weights
 #                   are fetched into models/ first (../tools/fetch_weights.sh: gated Hugging Face repo, or $ITO_WEIGHTS_DIR)
 #   make test VOICE=male   the same for the male voice (VOICE=g also works): ito_male_esp32s3.bin against golden/g/
+#   make test_split        the verdict state machine of the runtime split choice (engine/itofs_split.c) with simulated resets and test results
 #   make test_sched        the boot calibration / start-delay policy (engine/itofs_sched.c) against a model of the speaker, with simulated timings (no weights needed)
 CC ?= cc
 CFLAGS = -std=c99 -D_DEFAULT_SOURCE -O2 -ffp-contract=off -Wall -Wno-unused-function -I../engine
@@ -16,7 +17,7 @@ BLOB = ../../models/ito_male_esp32s3.bin
 GOLDEN = golden/g
 endif
 
-all: ito_cli host_test_v3 gen_selftest opcount_v3 w4_dump host_test_sched
+all: ito_cli host_test_v3 gen_selftest opcount_v3 w4_dump host_test_sched host_test_split
 
 ito_cli: ito_cli.c $(ENGINE)
 	$(CC) $(CFLAGS) -o $@ ito_cli.c ../engine/itofs.c -lm
@@ -37,6 +38,11 @@ host_test_sched: host_test_sched.c ../engine/itofs_sched.c ../engine/itofs_sched
 test_sched: host_test_sched
 	./host_test_sched
 
+host_test_split: host_test_split.c ../engine/itofs_split.c ../engine/itofs_split.h
+	$(CC) $(CFLAGS) -o $@ host_test_split.c ../engine/itofs_split.c
+test_split: host_test_split
+	./host_test_split
+
 $(BLOB):
 	VOICE=$(VOICE) ../tools/fetch_weights.sh
 
@@ -48,6 +54,6 @@ test: host_test_v3 host_test_v3_asan $(BLOB)
 	  else tail -1 asan.log; echo "ASan/UBSan: clean"; fi
 
 clean:
-	rm -f host_test_sched w4_dump ito_cli host_test_v3 host_test_v3_asan gen_selftest opcount_v3 asan.log golden/*.wav
+	rm -f host_test_split host_test_sched w4_dump ito_cli host_test_v3 host_test_v3_asan gen_selftest opcount_v3 asan.log golden/*.wav
 
-.PHONY: all test test_sched clean
+.PHONY: all test test_sched test_split clean
