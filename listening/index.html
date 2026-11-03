@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<title>Speech naturalness listening test</title>
+<style>
+:root{--bg:#ffffff;--ink:#1d1d1f;--muted:#5f6368;--rule:#d9d9d9;--link:#1a56b0;--accent:#A2525E;--danger:#a3262f;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141414;--ink:#ebe9e6;--muted:#a0a4a8;--rule:#3b3b3b;--link:#82b1f2;--accent:#d98895;--danger:#f08a92;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#141414;--ink:#ebe9e6;--muted:#a0a4a8;--rule:#3b3b3b;--link:#82b1f2;--accent:#d98895;--danger:#f08a92;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.6 Georgia,"Times New Roman",serif}
+.page{max-width:680px;margin:0 auto;padding-inline:20px;padding-block:36px 72px}
+h1{font-size:28px;font-weight:600;line-height:1.25;margin:0 0 6px;text-wrap:balance}
+h2{font-size:20px;font-weight:600;margin:30px 0 8px;text-wrap:balance}
+p{margin:0 0 12px}
+.sub{color:var(--muted);margin:0 0 24px}
+.note{color:var(--muted);font-size:15px}
+a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
+a:focus-visible,button:focus-visible,input:focus-visible+label,audio:focus-visible,textarea:focus-visible{outline:2px solid var(--link);outline-offset:3px}
+ul.plain{margin:0 0 14px;padding-left:1.2em}ul.plain li{margin-bottom:6px}
+fieldset{border:0;margin:0 0 22px;padding:0;min-width:0}
+legend{font-weight:600;padding:0;margin-bottom:6px}
+.opts{display:flex;flex-wrap:wrap;gap:4px 22px}
+.opts input{position:absolute;opacity:0;width:1px;height:1px}
+.opts label{display:inline-block;min-height:44px;padding-block:8px;border-bottom:2px solid transparent;cursor:pointer}
+.opts input:checked+label{border-bottom-color:var(--accent);color:var(--accent);font-weight:600}
+.check{display:flex;gap:10px;align-items:flex-start;margin:18px 0}
+.check input{margin-top:7px;width:18px;height:18px;accent-color:var(--accent);flex:none}
+.btn{font:inherit;color:var(--accent);background:none;border:0;border-bottom:2px solid var(--accent);padding:10px 2px;min-height:44px;cursor:pointer;font-weight:600}
+.btn[disabled]{color:var(--muted);border-bottom-color:var(--rule);cursor:not-allowed}
+.btn.plain{color:var(--link);border-bottom-color:transparent;font-weight:400}
+.row{display:flex;flex-wrap:wrap;gap:12px 26px;align-items:center;margin-top:18px}
+.lang{display:flex;justify-content:flex-end;gap:14px;font-size:15px;margin-bottom:10px}
+.lang button{font:inherit;background:none;border:0;color:var(--link);cursor:pointer;padding:8px 2px;min-height:36px}
+.lang button[aria-pressed="true"]{color:var(--ink);font-weight:600;cursor:default}
+.top{display:flex;justify-content:space-between;gap:12px;align-items:baseline;color:var(--muted);font-size:15px;border-bottom:1px solid var(--rule);padding-bottom:8px;margin-bottom:26px}
+.top span:first-child{white-space:nowrap}
+progress{width:100%;height:4px;appearance:none;-webkit-appearance:none;border:0;background:var(--rule);display:block;margin:0 0 6px}
+progress::-webkit-progress-bar{background:var(--rule)}progress::-webkit-progress-value{background:var(--accent)}progress::-moz-progress-bar{background:var(--accent)}
+audio{width:100%;height:44px;margin:4px 0 8px}
+.scale{display:grid;grid-template-columns:repeat(5,1fr);gap:0 6px;margin:6px 0 4px;padding:0;border:0}
+.scale input{position:absolute;opacity:0;width:1px;height:1px}
+.scale label{display:flex;flex-direction:column;align-items:center;text-align:center;min-height:76px;padding:8px 2px;border-bottom:2px solid var(--rule);cursor:pointer;font-size:14px;color:var(--muted);line-height:1.25}
+.scale label b{font-size:26px;font-weight:600;color:var(--ink);line-height:1.2}
+.scale input:checked+label{border-bottom-color:var(--accent);color:var(--accent)}
+.scale input:checked+label b{color:var(--accent)}
+.scale input:disabled+label{opacity:.45;cursor:not-allowed}
+.scale input:focus-visible+label{outline:2px solid var(--link);outline-offset:2px}
+.hint{min-height:1.6em;color:var(--muted);font-size:15px}
+.err{color:var(--danger)}
+textarea{width:100%;min-height:7em;font:13px/1.4 ui-monospace,Menlo,Consolas,monospace;color:var(--ink);background:var(--bg);border:1px solid var(--rule);padding:8px;resize:vertical}
+.sr{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.hp{position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden}
+footer{margin-top:44px;color:var(--muted);font-size:14px;border-top:1px solid var(--rule);padding-top:10px}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="lang" role="group" aria-label="Language / Idioma">
+    <button type="button" id="l-en" aria-pressed="true">English</button>
+    <button type="button" id="l-es" aria-pressed="false">Espa&ntilde;ol</button>
+  </div>
+  <div id="app" aria-live="polite"><p class="note">Loading.</p></div>
+  <noscript><p>This listening test needs JavaScript. / Esta prueba necesita JavaScript.</p></noscript>
+  <footer id="foot"></footer>
+</div>
+<script>
+(function () {
+  'use strict';
+  var APP = document.getElementById('app');
+  var VERSION = 'ito-lt-1';
+  var SB_URL = 'https://xegdqyfupzteryelgklo.supabase.co/rest/v1/ratings';
+  var SB_KEY = 'sb_publishable_NTfsUWA7KV4ANIDSfCzcLg_DK89MtEs';   // public by design; row level security allows insert only
+  var TEST = ["cde2286b6", "c271157bb", "c8e8ef91f", "c6c7ba16e", "ceee6cc97", "c6a0b3d02", "cada0ae77", "c252f9931", "c04ed00df", "c9ec7be60", "ca7dd17f2", "c131c95df", "c68addfff", "c233a7cbc", "cbc4cf819", "ca1416e69", "caa537aea", "c0b24668b", "c05c21266", "c9fb808d0", "c2c14b694", "c53bf942a", "cbba79831", "cdc6af097", "c73fffd8b", "c0e5b842b", "cd339631c", "c8d645179", "ca0b73507", "caa73ab21", "c7fb32357", "c74d5047e", "c718f7357", "c6060fec2", "cbced9358", "c30f78c80", "c5051e044", "c29fa3c2c", "c06d67a43", "cb2985aca", "cba217f93", "c46101a86", "ccdb88419", "c07f44814", "c1564a2d7", "c314af623", "c2afdda8d", "c0550974b", "c48b738e9", "c4f134bb9", "c9b060b7b", "c954b6884", "ca10c83df", "ce27f2fd7", "c804d9063", "c11b3bb32", "c3cc05a49", "cbcee73fb", "c409dc84b", "c5b4313b4", "c2a47c52f", "cc272c8d4", "ca452cfae", "c7eb23fdc", "cd1ddc582", "c3a346a22", "cef17fd03", "ca06557e5", "c29d07905", "c81d8cea8", "c75bad459", "c41a28e87"];
+  var ATT = ["c9c76b7e7", "cfc551be2"];
+  var N = TEST.length + ATT.length;
+  var LS_KEY = 'ito_lt_state_v1', LS_DONE = 'ito_lt_done_v1', LS_LANG = 'ito_lt_lang';
+  var S, cur = null, lang = 'en';
+
+  var STR = {
+    en: {
+      title: 'Speech naturalness listening test',
+      sub: 'About 8 minutes. Headphones recommended.',
+      intro: 'You will hear {n} short spoken clips (about {m} minutes of audio), one at a time, in a random order. After each clip you rate how natural and human it sounds, from 1 (very unnatural, robotic) to 5 (completely natural, like a real person). The clips come from different voices and speech systems, some good and some poor. You are not told which is which until the results are published.',
+      i1: 'Use headphones in a quiet room if you can. Set a comfortable volume on the first clip and leave it.',
+      i2: 'Listen to each clip to the end before rating. You can replay it.',
+      i3: 'Rate each clip on its own, not against the previous one. There are no right or wrong answers.',
+      i4: 'Two clips ask you to give a specific rating. Please follow what they say.',
+      i5: 'You start with two practice clips. They are rated like the others, you get no feedback, and the same clips may come up again later in the test.',
+      human: 'Some clips are real recordings of a person reading different sentences than the speech systems, so they show how natural real speech sounds and are not a same-sentence comparison.',
+      notice: 'Privacy notice',
+      n1: 'Taking part is voluntary and anonymous. You can stop at any time by closing the page; nothing is sent until you press submit at the end.',
+      n2: 'No name, email or other personal data is collected. You get a random participant code. We store your ratings, how many times and how long you listened, your order of clips, a coarse device type (phone, tablet or computer), and three answers about your listening setup.',
+      n3: 'The web hosts (GitHub Pages for this page and Supabase, in the EU, for the answers) may log technical data such as your IP address for security. We do not store it with your answers and cannot link it to them.',
+      n4: 'The results will be used in a research paper and in the README of the Ito text-to-speech project by Lokutor (Hashing Works, S.L.L.), Madrid. Only combined results are published. Individual answers are never shown to other participants.',
+      n5: 'Because answers are anonymous, we can delete yours later only if you send your participant code (shown at the end) to contact@lokutor.com.',
+      consent: 'I am 18 or older and I agree to take part on these terms.',
+      cont: 'Continue',
+      before: 'Before you start', beforeSub: 'Three questions about how you are listening.',
+      q1: 'Are you wearing headphones or earphones?', yes: 'Yes', no: 'No',
+      q2: 'Is English your first language?', pns: 'Prefer not to say',
+      q3: 'How is your listening environment?', quiet: 'Quiet', noisy: 'Noisy',
+      start: 'Start the practice clips',
+      practiceTag: 'Practice {i} of 2', practiceNote: 'Practice clip. You get no feedback.',
+      practiceDone: 'Practice done', practiceDoneSub: 'The real test starts now.',
+      practiceDoneP: 'You will rate {n} clips. Take your time; you can pause between clips and the page remembers where you are if you reload it.',
+      begin: 'Start the test',
+      clipOf: 'Clip {i} of {n}', question: 'How natural and human does this sound?',
+      l1: 'Bad', l2: 'Poor', l3: 'Fair', l4: 'Good', l5: 'Excellent',
+      d1: 'Very unnatural, robotic', d2: 'Mostly unnatural', d3: 'Some natural, some not', d4: 'Mostly natural', d5: 'Completely natural, human',
+      play: 'Play the clip to the end, then rate it.', pick: 'Pick a rating from 1 to 5. Keys 1 to 5 also work.',
+      audioErr: 'This clip could not be loaded.', retry: 'Try again',
+      next: 'Next clip', finish: 'Finish',
+      doneAll: 'All clips rated', notSent: 'Nothing has been sent yet.',
+      submitP: 'Pressing submit stores your {n} ratings, play counts and listening time, and your three setup answers under the random code {pid}. There is no name or email attached.',
+      submit: 'Submit my ratings', sending: 'Sending.',
+      failNet: 'The results could not be saved just now. Your answers are safe on this page. Try again in a moment, or copy the code below and email it to contact@lokutor.com.',
+      failRej: 'The server did not accept the results ({c}). Copy the code below and email it to contact@lokutor.com.',
+      copy: 'Copy code', copied: 'Copied', manual: 'Select and copy manually', codeLabel: 'Your results code',
+      thanks: 'Thank you', saved: 'Your ratings have been saved.', returning: 'This browser has already submitted a set of ratings.',
+      thanksP: 'Which system produced which clip will be published together with the combined results, in the Ito paper and README. You do not need to do anything else, and you can close this page.',
+      codeP: 'Your random participant code is {pid}. It is not linked to your identity. Keep it only if you may want your answers deleted.',
+      foot: 'Ito listening test, Lokutor. Contact: <a href="mailto:contact@lokutor.com">contact@lokutor.com</a>',
+      loadErr: 'The page could not start (your browser may block storage or scripts).'
+    },
+    es: {
+      title: 'Prueba de escucha: naturalidad del habla',
+      sub: 'Unos 8 minutos. Se recomiendan auriculares.',
+      intro: 'Oir&aacute;s {n} clips de voz cortos (unos {m} minutos de audio), uno por uno y en orden aleatorio. Tras cada clip valoras lo natural y humano que suena, de 1 (muy poco natural, rob&oacute;tico) a 5 (totalmente natural, como una persona real). Los clips vienen de distintas voces y sistemas de voz, unos buenos y otros malos. No se te dice cu&aacute;l es cu&aacute;l hasta que se publiquen los resultados.',
+      i1: 'Usa auriculares en una habitaci&oacute;n tranquila si puedes. Ajusta un volumen c&oacute;modo en el primer clip y no lo cambies.',
+      i2: 'Escucha cada clip hasta el final antes de valorarlo. Puedes repetirlo.',
+      i3: 'Valora cada clip por s&iacute; mismo, no frente al anterior. No hay respuestas correctas o incorrectas.',
+      i4: 'Dos clips te piden una valoraci&oacute;n concreta. Por favor, haz lo que dicen.',
+      i5: 'Empiezas con dos clips de pr&aacute;ctica. Se valoran igual, no recibes correcci&oacute;n, y los mismos clips pueden volver a salir m&aacute;s adelante en la prueba.',
+      human: 'Algunos clips son grabaciones reales de una persona que lee frases distintas a las de los sistemas de voz, as&iacute; que muestran lo natural que suena el habla real y no son una comparaci&oacute;n con la misma frase.',
+      notice: 'Aviso de privacidad',
+      n1: 'La participaci&oacute;n es voluntaria y an&oacute;nima. Puedes parar cuando quieras cerrando la p&aacute;gina; no se env&iacute;a nada hasta que pulses enviar al final.',
+      n2: 'No se recoge nombre, correo ni otros datos personales. Recibes un c&oacute;digo de participante aleatorio. Guardamos tus valoraciones, cu&aacute;ntas veces y cu&aacute;nto tiempo escuchaste, el orden de los clips, un tipo de dispositivo aproximado (m&oacute;vil, tableta u ordenador) y tres respuestas sobre c&oacute;mo escuchas.',
+      n3: 'Los servicios de alojamiento (GitHub Pages para esta p&aacute;gina y Supabase, en la UE, para las respuestas) pueden registrar datos t&eacute;cnicos como tu direcci&oacute;n IP por seguridad. No la guardamos con tus respuestas ni podemos vincularla a ellas.',
+      n4: 'Los resultados se usar&aacute;n en un art&iacute;culo cient&iacute;fico y en el README del proyecto de s&iacute;ntesis de voz Ito de Lokutor (Hashing Works, S.L.L.), Madrid. Solo se publican resultados agregados. Tus respuestas individuales no se muestran a otros participantes.',
+      n5: 'Como las respuestas son an&oacute;nimas, solo podremos borrar las tuyas si env&iacute;as tu c&oacute;digo de participante (se muestra al final) a contact@lokutor.com.',
+      consent: 'Tengo 18 a&ntilde;os o m&aacute;s y acepto participar en estas condiciones.',
+      cont: 'Continuar',
+      before: 'Antes de empezar', beforeSub: 'Tres preguntas sobre c&oacute;mo est&aacute;s escuchando.',
+      q1: '&iquest;Llevas auriculares o cascos?', yes: 'S&iacute;', no: 'No',
+      q2: '&iquest;El ingl&eacute;s es tu lengua materna?', pns: 'Prefiero no decirlo',
+      q3: '&iquest;C&oacute;mo es tu entorno de escucha?', quiet: 'Tranquilo', noisy: 'Ruidoso',
+      start: 'Empezar con los clips de pr&aacute;ctica',
+      practiceTag: 'Pr&aacute;ctica {i} de 2', practiceNote: 'Clip de pr&aacute;ctica. No recibes correcci&oacute;n.',
+      practiceDone: 'Pr&aacute;ctica terminada', practiceDoneSub: 'La prueba real empieza ahora.',
+      practiceDoneP: 'Valorar&aacute;s {n} clips. T&oacute;mate tu tiempo; puedes hacer pausas entre clips y la p&aacute;gina recuerda d&oacute;nde vas si la recargas.',
+      begin: 'Empezar la prueba',
+      clipOf: 'Clip {i} de {n}', question: '&iquest;Qu&eacute; tan natural y humano suena?',
+      l1: 'Malo', l2: 'Pobre', l3: 'Regular', l4: 'Bueno', l5: 'Excelente',
+      d1: 'Muy poco natural, rob&oacute;tico', d2: 'Mayormente poco natural', d3: 'En parte natural, en parte no', d4: 'Mayormente natural', d5: 'Totalmente natural, humano',
+      play: 'Reproduce el clip hasta el final y despu&eacute;s valora.', pick: 'Elige de 1 a 5. Tambi&eacute;n funcionan las teclas 1 a 5.',
+      audioErr: 'No se pudo cargar este clip.', retry: 'Reintentar',
+      next: 'Siguiente clip', finish: 'Terminar',
+      doneAll: 'Todos los clips valorados', notSent: 'Todav&iacute;a no se ha enviado nada.',
+      submitP: 'Al pulsar enviar se guardan tus {n} valoraciones, las reproducciones y el tiempo de escucha, y tus tres respuestas sobre el entorno, bajo el c&oacute;digo aleatorio {pid}. No hay nombre ni correo asociados.',
+      submit: 'Enviar mis valoraciones', sending: 'Enviando.',
+      failNet: 'No se pudieron guardar los resultados ahora mismo. Tus respuestas est&aacute;n a salvo en esta p&aacute;gina. Prueba otra vez en un momento, o copia el c&oacute;digo de abajo y env&iacute;alo a contact@lokutor.com.',
+      failRej: 'El servidor no acept&oacute; los resultados ({c}). Copia el c&oacute;digo de abajo y env&iacute;alo a contact@lokutor.com.',
+      copy: 'Copiar c&oacute;digo', copied: 'Copiado', manual: 'Selecciona y copia a mano', codeLabel: 'Tu c&oacute;digo de resultados',
+      thanks: 'Gracias', saved: 'Tus valoraciones se han guardado.', returning: 'Este navegador ya ha enviado un conjunto de valoraciones.',
+      thanksP: 'Qu&eacute; sistema produjo cada clip se publicar&aacute; junto con los resultados agregados, en el art&iacute;culo y el README de Ito. No tienes que hacer nada m&aacute;s y puedes cerrar la p&aacute;gina.',
+      codeP: 'Tu c&oacute;digo de participante aleatorio es {pid}. No est&aacute; vinculado a tu identidad. Gu&aacute;rdalo solo si quisieras que se borren tus respuestas.',
+      foot: 'Prueba de escucha de Ito, Lokutor. Contacto: <a href="mailto:contact@lokutor.com">contact@lokutor.com</a>',
+      loadErr: 'La p&aacute;gina no pudo arrancar (puede que tu navegador bloquee el almacenamiento o los scripts).'
+    }
+  };
+  function t(k, v) {
+    var s = (STR[lang][k] != null ? STR[lang][k] : STR.en[k]) || k;
+    if (v) for (var p in v) s = s.split('{' + p + '}').join(v[p]);
+    return s;
+  }
+  // strings contain only trusted static HTML entities; render through a text node decoder
+  var dec = document.createElement('textarea');
+  function T(k, v) { dec.innerHTML = t(k, v); return dec.value; }
+
+  function lsGet(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+  function rnd32() { try { var a = new Uint32Array(1); crypto.getRandomValues(a); return a[0]; } catch (e) { return Math.floor(Math.random() * 4294967296) >>> 0; } }
+  function uuid() {
+    try { if (crypto.randomUUID) return crypto.randomUUID(); } catch (e) {}
+    var b = []; for (var i = 0; i < 4; i++) b.push(rnd32().toString(16).padStart(8, '0'));
+    var h = b.join(''); return h.slice(0, 8) + '-' + h.slice(8, 12) + '-4' + h.slice(13, 16) + '-a' + h.slice(17, 20) + '-' + h.slice(20, 32);
+  }
+  function mulberry(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  function el(tag, attrs, kids) {
+    var e = document.createElement(tag);
+    for (var k in (attrs || {})) { if (k === 'text') e.textContent = attrs[k]; else if (k === 'class') e.className = attrs[k]; else if (k.slice(0, 2) === 'on') e.addEventListener(k.slice(2), attrs[k]); else e.setAttribute(k, attrs[k]); }
+    (kids || []).forEach(function (c) { if (c != null) e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+    return e;
+  }
+  function clear() { APP.textContent = ''; window.scrollTo(0, 0); }
+  function save() { if (S && !S.submitted) lsSet(LS_KEY, S); }
+  function devClass() {
+    var ua = navigator.userAgent || '';
+    if (/iPad|Tablet/i.test(ua)) return 'tablet';
+    if (/Mobi|iPhone|Android/i.test(ua)) return 'mobile';
+    return ua ? 'desktop' : 'other';
+  }
+
+  function newSession() {
+    var seed = rnd32(), r = mulberry(seed);
+    var ids = TEST.slice();
+    for (var i = ids.length - 1; i > 0; i--) { var j = Math.floor(r() * (i + 1)); var x = ids[i]; ids[i] = ids[j]; ids[j] = x; }
+    var p1 = Math.floor(ids.length * 0.25) + Math.floor(r() * 6), p2 = Math.floor(ids.length * 0.70) + Math.floor(r() * 6);
+    var a = ATT.slice(); if (r() < 0.5) a.reverse();
+    ids.splice(p2, 0, a[1]); ids.splice(p1, 0, a[0]);
+    // two practice clips: taken from the shuffled test list's tail so they are random, rated but discarded
+    var prac = [ids[ids.length - 1], ids[ids.length - 2]];
+    return { v: VERSION, pid: uuid(), seed: seed, order: ids, prac: prac, stage: 'intro', idx: 0, pidx: 0, setup: {}, ans: {}, pans: {}, startedAt: null };
+  }
+
+  /* ---------- screens ---------- */
+  function ul(keys) { return el('ul', { class: 'plain' }, keys.map(function (k) { return el('li', { text: T(k) }); })); }
+
+  function screenIntro() {
+    clear();
+    var cb = el('input', { type: 'checkbox', id: 'consent' });
+    var go = el('button', { class: 'btn', id: 'go', disabled: '', onclick: function () { S.stage = 'setup'; save(); render(); } }, [T('cont')]);
+    cb.addEventListener('change', function () { if (cb.checked) go.removeAttribute('disabled'); else go.setAttribute('disabled', ''); });
+    APP.append(
+      el('h1', { text: T('title') }),
+      el('p', { class: 'sub', text: T('sub') }),
+      el('p', { text: T('intro', { n: N, m: Math.round(402 / 60) }) }),
+      ul(['i1', 'i2', 'i3', 'i4', 'i5']),
+      el('p', { class: 'note', text: T('human') }),
+      el('h2', { text: T('notice') }),
+      ul(['n1', 'n2', 'n3', 'n4', 'n5']),
+      el('div', { class: 'check' }, [cb, el('label', { for: 'consent', text: T('consent') })]),
+      el('div', { class: 'row' }, [go])
+    );
+  }
+
+  function radioGroup(name, legend, opts, val, onpick) {
+    var fs = el('fieldset', {}, [el('legend', { text: legend })]);
+    var box = el('div', { class: 'opts' });
+    opts.forEach(function (o, i) {
+      var id = name + '_' + i;
+      var inp = el('input', { type: 'radio', name: name, id: id, value: o[0] });
+      if (val === o[0]) inp.checked = true;
+      inp.addEventListener('change', function () { onpick(o[0]); });
+      box.append(el('span', {}, [inp, el('label', { for: id, text: o[1] })]));
+    });
+    fs.append(box); return fs;
+  }
+
+  function screenSetup() {
+    clear();
+    var go = el('button', { class: 'btn', onclick: function () { S.stage = 'practice'; S.startedAt = S.startedAt || new Date().toISOString(); save(); render(); } }, [T('start')]);
+    function upd() { if (S.setup.headphones && S.setup.native && S.setup.environment) go.removeAttribute('disabled'); else go.setAttribute('disabled', ''); }
+    upd();
+    function pick(k) { return function (v) { S.setup[k] = v; save(); upd(); }; }
+    APP.append(
+      el('h1', { text: T('before') }),
+      el('p', { class: 'sub', text: T('beforeSub') }),
+      radioGroup('hp', T('q1'), [['yes', T('yes')], ['no', T('no')]], S.setup.headphones, pick('headphones')),
+      radioGroup('ne', T('q2'), [['yes', T('yes')], ['no', T('no')], ['prefer_not', T('pns')]], S.setup.native, pick('native')),
+      radioGroup('env', T('q3'), [['quiet', T('quiet')], ['noisy', T('noisy')]], S.setup.environment, pick('environment')),
+      el('div', { class: 'row' }, [go])
+    );
+  }
+
+  // one rating screen for both practice (isPrac) and real clips
+  function screenRate(isPrac) {
+    clear();
+    var n = S.order.length, id = isPrac ? S.prac[S.pidx] : S.order[S.idx];
+    var store = isPrac ? S.pans : S.ans;
+    var pos = isPrac ? S.pidx + 1 : S.idx + 1;
+    var a = store[id] || (store[id] = { r: null, plays: 0, ended: 0, ms: 0, changes: 0, pos: pos });
+    var audio = el('audio', { controls: '', preload: 'auto', 'aria-label': isPrac ? T('practiceTag', { i: pos }) : T('clipOf', { i: pos, n: n }) });
+    audio.src = 'mp3/' + id + '.mp3';
+    var hint = el('p', { class: 'hint', id: 'hint' });
+    var reload = el('button', { class: 'btn plain', style: 'display:none', onclick: function () { audio.load(); reload.style.display = 'none'; } }, [T('retry')]);
+    var last = isPrac ? S.pidx === 1 : S.idx === n - 1;
+    var next = el('button', { class: 'btn', id: 'next' }, [isPrac ? T('next') : (last ? T('finish') : T('next'))]);
+    var radios = [];
+    var fs = el('fieldset', { class: 'scale', 'aria-describedby': 'hint' }, [el('legend', { class: 'sr', text: T('question') })]);
+    for (var v = 1; v <= 5; v++) {
+      (function (v) {
+        var inp = el('input', { type: 'radio', name: 'rate', id: 'r' + v, value: String(v) });
+        if (a.r === v) inp.checked = true;
+        inp.addEventListener('change', function () { if (a.r !== v) { if (a.r !== null) a.changes++; a.r = v; } save(); sync(); });
+        radios.push(inp);
+        fs.append(el('span', {}, [inp, el('label', { for: 'r' + v }, [el('b', { text: String(v) }), T('l' + v), el('span', { class: 'sr', text: ': ' + T('d' + v) })])]));
+      })(v);
+    }
+    function sync() {
+      var heard = a.ended > 0;
+      radios.forEach(function (r) { r.disabled = !heard; });
+      if (!heard) { hint.textContent = T('play'); hint.className = 'hint'; }
+      else if (a.r === null) { hint.textContent = T('pick'); hint.className = 'hint'; }
+      else { hint.textContent = ''; }
+      if (heard && a.r !== null) next.removeAttribute('disabled'); else next.setAttribute('disabled', '');
+    }
+    audio.addEventListener('play', function () { if (audio.currentTime < 0.3) { a.plays++; save(); } });
+    audio.addEventListener('ended', function () { a.ended++; save(); sync(); });
+    audio.addEventListener('error', function () { hint.textContent = T('audioErr'); hint.className = 'hint err'; reload.style.display = ''; });
+    next.addEventListener('click', function () {
+      finishClip();
+      if (isPrac) { if (S.pidx < 1) S.pidx++; else S.stage = 'pracdone'; save(); render(S.stage === 'practice'); return; }
+      if (S.idx < n - 1) { S.idx++; save(); render(true); } else { S.stage = 'submit'; save(); render(); }
+    });
+    cur = { a: a, t0: performance.now() };
+    var left = isPrac ? T('practiceTag', { i: pos }) : T('clipOf', { i: pos, n: n });
+    APP.append(
+      el('div', { class: 'top' }, [el('span', { text: left }), el('span', { text: T('question') })]),
+      el('progress', { max: String(n), value: String(isPrac ? 0 : S.idx), 'aria-label': 'Progress' }),
+      isPrac ? el('p', { class: 'note', text: T('practiceNote') }) : document.createDocumentFragment(),
+      audio, reload, fs, hint,
+      el('div', { class: 'row' }, [next])
+    );
+    sync();
+    return audio;
+  }
+  function finishClip() { if (cur) { if (cur.t0 !== null) cur.a.ms += Math.round(performance.now() - cur.t0); cur = null; } }
+  document.addEventListener('visibilitychange', function () {
+    if (!cur) return;
+    if (document.hidden) { if (cur.t0 !== null) cur.a.ms += Math.round(performance.now() - cur.t0); cur.t0 = null; save(); }
+    else if (cur.t0 === null) cur.t0 = performance.now();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (!S || (S.stage !== 'rate' && S.stage !== 'practice') || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (/^[1-5]$/.test(e.key)) { var r = document.getElementById('r' + e.key); if (r && !r.disabled) { r.checked = true; r.dispatchEvent(new Event('change')); } }
+  });
+
+  function screenPracDone() {
+    clear();
+    APP.append(el('h1', { text: T('practiceDone') }), el('p', { class: 'sub', text: T('practiceDoneSub') }),
+      el('p', { text: T('practiceDoneP', { n: N }) }),
+      el('div', { class: 'row' }, [el('button', { class: 'btn', onclick: function () { S.stage = 'rate'; save(); render(true); } }, [T('begin')])]));
+  }
+
+  /* ---------- payload ---------- */
+  function build() {
+    var ratings = {}, attention = {}, clips = {}, practice = {}, tot = 0, plays = 0;
+    S.prac.forEach(function (id) { if (S.pans[id]) practice[id] = S.pans[id].r; });
+    S.order.forEach(function (id) {
+      var a = S.ans[id]; tot += a.ms; plays += a.plays;
+      (ATT.indexOf(id) >= 0 ? attention : ratings)[id] = a.r;
+      clips[id] = [a.pos, a.plays, a.ms, a.changes];
+    });
+    return {
+      participant_id: S.pid, test_version: VERSION, seed: S.seed, ratings: ratings, attention: attention,
+      meta: { headphones: S.setup.headphones, native_english: S.setup.native, quiet: S.setup.environment, user_agent_class: devClass(),
+              duration_s: Math.max(1, Math.round(tot / 1000)), plays: plays, lang: lang, started_at: S.startedAt, clips: clips, order: S.order, practice: practice }
+    };
+  }
+
+  function post(body, tries) {
+    return fetch(SB_URL, { method: 'POST', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Content-Type': 'application/json', Prefer: 'return=minimal' }, body: JSON.stringify(body), keepalive: false })
+      .then(function (r) {
+        if (r.status === 201 || r.status === 409) return 'ok';           // 409: this participant id is already stored (an earlier try arrived)
+        if (r.status >= 500 || r.status === 429) throw { retry: true, code: r.status };
+        throw { retry: false, code: r.status };
+      }, function () { throw { retry: true, code: 'network' }; })
+      .catch(function (e) {
+        if (e && e.retry && tries > 1) return new Promise(function (res) { setTimeout(res, 900 * (4 - tries) + Math.random() * 500); }).then(function () { return post(body, tries - 1); });
+        throw e;
+      });
+  }
+
+  function screenSubmit() {
+    clear();
+    var status = el('p', { class: 'hint', id: 'status' });
+    var hp = el('input', { type: 'text', name: 'website', id: 'website', tabindex: '-1', autocomplete: 'off', 'aria-hidden': 'true' });
+    var btn = el('button', { class: 'btn', onclick: submit }, [T('submit')]);
+    var fb = el('div', { id: 'fallback' });
+    function submit() {
+      btn.setAttribute('disabled', ''); status.className = 'hint'; status.textContent = T('sending');
+      var body = build();
+      var p = hp.value ? Promise.resolve('ok') : post(body, 4);    // honeypot filled: a bot; pretend success, store nothing
+      p.then(function () {
+        S.submitted = true; lsSet(LS_DONE, { pid: S.pid, at: new Date().toISOString() }); lsDel(LS_KEY); S.stage = 'done'; render();
+      }, function (err) {
+        status.className = 'hint err';
+        status.textContent = (err && err.retry === false) ? T('failRej', { c: err.code }) : T('failNet');
+        btn.removeAttribute('disabled');
+        fb.textContent = '';
+        var ta = el('textarea', { id: 'code', readonly: '', 'aria-label': T('codeLabel') });
+        try { ta.value = btoa(unescape(encodeURIComponent(JSON.stringify(body)))); } catch (e) { ta.value = JSON.stringify(body); }
+        var cp = el('button', { class: 'btn plain', onclick: function () {
+          var ok = function () { cp.textContent = T('copied'); }, no = function () { ta.focus(); ta.select(); cp.textContent = T('manual'); };
+          try { navigator.clipboard.writeText(ta.value).then(ok, no); } catch (e) { no(); }
+        } }, [T('copy')]);
+        fb.append(ta, el('div', { class: 'row' }, [cp]));
+      });
+    }
+    APP.append(
+      el('h1', { text: T('doneAll') }),
+      el('p', { class: 'sub', text: T('notSent') }),
+      el('p', { text: T('submitP', { n: ATT.length + TEST.length, pid: S.pid }) }),
+      el('div', { class: 'hp', 'aria-hidden': 'true' }, [el('label', { for: 'website', text: 'Leave this empty' }), hp]),
+      el('div', { class: 'row' }, [btn]), status, fb
+    );
+  }
+
+  function screenDone(returning) {
+    clear();
+    var pid = S ? S.pid : (lsGet(LS_DONE) || {}).pid;
+    APP.append(
+      el('h1', { text: T('thanks') }),
+      el('p', { class: 'sub', text: returning ? T('returning') : T('saved') }),
+      el('p', { text: T('thanksP') }),
+      el('p', { class: 'note', text: T('human') }),
+      pid ? el('p', { class: 'note', text: T('codeP', { pid: pid }) }) : document.createDocumentFragment()
+    );
+  }
+
+  function render(autoplay) {
+    document.documentElement.lang = lang;
+    document.title = T('title');
+    document.getElementById('foot').innerHTML = t('foot');
+    document.getElementById('l-en').setAttribute('aria-pressed', String(lang === 'en'));
+    document.getElementById('l-es').setAttribute('aria-pressed', String(lang === 'es'));
+    if (!S) return screenDone(true);
+    var st = S.stage;
+    if (st === 'intro') return screenIntro();
+    if (st === 'setup') return screenSetup();
+    if (st === 'practice' || st === 'rate') {
+      var a = screenRate(st === 'practice');
+      if (autoplay) { try { var p = a.play(); if (p && p.catch) p.catch(function () {}); } catch (e) {} }
+      return;
+    }
+    if (st === 'pracdone') return screenPracDone();
+    if (st === 'submit') return screenSubmit();
+    return screenDone(false);
+  }
+
+  function setLang(l) { lang = l; lsSet(LS_LANG, l); if (S && (S.stage === 'practice' || S.stage === 'rate')) {  } render(false); }
+  document.getElementById('l-en').addEventListener('click', function () { setLang('en'); });
+  document.getElementById('l-es').addEventListener('click', function () { setLang('es'); });
+
+  function boot() {
+    var sl = lsGet(LS_LANG);
+    lang = (sl === 'es' || sl === 'en') ? sl : (/^es/i.test(navigator.language || '') ? 'es' : 'en');
+    var done = lsGet(LS_DONE);
+    if (done && done.pid) { S = null; render(false); return; }
+    var saved = lsGet(LS_KEY);
+    var ok = saved && saved.v === VERSION && saved.order && saved.order.length === N && saved.prac && saved.stage !== 'done';
+    S = ok ? saved : newSession();
+    render(false);
+  }
+  try { boot(); } catch (e) { APP.textContent = T('loadErr'); }
+})();
+</script>
+</body>
+</html>
