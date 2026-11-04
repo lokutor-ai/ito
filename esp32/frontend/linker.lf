@@ -1,0 +1,6 @@
+# The static (.bss) data of the translator (phoneme list, clause buffers, parameter stacks, ...) goes to PSRAM:
+# needs CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y (esp32/firmware/sdkconfig.defaults)
+[mapping:frontend]
+archive: libfrontend.a
+entries:
+    * (extram_bss)

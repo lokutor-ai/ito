@@ -1,0 +1,7 @@
+# Phrases spoken at boot when CONFIG_ITOFS_BOOT_TEXT=y (and by the `phrases` command). One phrase per line; lines starting with # are ignored.
+# Plain English text: numbers, dates, times, currency, units and abbreviations are read out by the on-chip front end.
+Speaking on a debate on prison matters, he declared that
+Even the Caslon type when enlarged shows great shortcomings in this respect:
+He was in consequence put out of the protection of their internal law, end quote. Their code was a subject of some curiosity.
+Good morning! It is 7:30 am on Tuesday, 5 May 2026, and the coffee costs $3.50.
+Dr. Smith lives at 221B Baker St. and runs 12.5 km every day.

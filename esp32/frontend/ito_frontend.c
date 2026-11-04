@@ -11,11 +11,12 @@
 #include "ucd/ucd.h"
 #include "ito_symbols.inc"
 
-#define MAXCP 4096              /* code points in the working arrays (the tokenizer pads with spaces) */
+#define MAXCP 8192              /* code points in the working arrays (the tokenizer pads with spaces) */
 #define MAXPARTS 200
-#define POOL_BYTES 24576
+#define POOL_BYTES 32768
 #define PHBUF 8192              /* one phonemized chunk */
 #define TEXTB (ITOFE_MAX_TEXT + 16)
+#define FULLN (ITOFE_MAX_TEXT * 2)
 
 typedef struct {
     uint32_t *cp, *cp2;         /* [MAXCP] */
@@ -29,6 +30,7 @@ typedef struct {
     char *raw;                  /* [TEXTB*4] phonemizer output */
     char *tok;                  /* [TEXTB*4] tokenizer output */
     char *tmp;                  /* [TEXTB*4] */
+    uint8_t *full;              /* [FULLN] ids of a whole sentence before the 400 limit is applied */
 } ctx_t;
 static ctx_t C;
 static int inited;
@@ -55,7 +57,7 @@ static int pyspace(uint32_t c)
     if (c < 0x80) return (c >= 9 && c <= 13) || (c >= 0x1C && c <= 0x20);
     return c == 0x85 || c == 0xA0 || c == 0x1680 || (c >= 0x2000 && c <= 0x200A) || c == 0x2028 || c == 0x2029 || c == 0x202F || c == 0x205F || c == 0x3000;
 }
-static int isdig(uint32_t c) { return c >= '0' && c <= '9'; }   /* ASCII digits (Unicode digits are not normalised: documented limitation) */
+static int isdig(uint32_t c) { return c >= '0' && c <= '9'; }   /* [0-9] (phonemizer's decimal-separator rule) */
 static int isword(uint32_t c)
 {
     if (c < 0x80) return c == '_' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
@@ -98,90 +100,98 @@ static void sb_s(sb_t *b, const char *s) { sb_put(b, s, strlen(s)); }
 static void sb_init(sb_t *b, char *p, size_t cap) { b->p = p; b->n = 0; b->cap = cap; b->err = 0; if (cap) p[0] = 0; }
 
 /* ------------------------------------------------------------------ normalize: ito/text.py normalize(), then .strip().replace('"', "") */
+/* Python's \d is any Unicode decimal digit (category Nd) and int() reads them: zero code points of the Nd blocks of the BMP */
+static const uint16_t ND_ZERO[] = { 0x0660, 0x06F0, 0x07C0, 0x0966, 0x09E6, 0x0A66, 0x0AE6, 0x0B66, 0x0BE6, 0x0C66, 0x0CE6, 0x0D66, 0x0DE6, 0x0E50,
+    0x0ED0, 0x0F20, 0x1040, 0x1090, 0x17E0, 0x1810, 0x1946, 0x19D0, 0x1A80, 0x1A90, 0x1B50, 0x1BB0, 0x1C40, 0x1C50, 0xA620, 0xA8D0, 0xA900,
+    0xA9D0, 0xA9F0, 0xAA50, 0xABF0, 0xFF10, 0 };
+static int dval(uint32_t c)         /* decimal digit value or -1 */
+{
+    if (c < 0x80) return (c >= '0' && c <= '9') ? (int)(c - '0') : -1;
+    if (c < 0x660 || c > 0xFF19) return -1;
+    for (int i = 0; ND_ZERO[i]; i++) if (c >= ND_ZERO[i] && c < (uint32_t)ND_ZERO[i] + 10) return (int)(c - ND_ZERO[i]);
+    return -1;
+}
 static const char *const DIGW[10] = { "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine" };
 
-static int boundary_after(const char *s, size_t L, size_t k)   /* \b at k where s[k-1] is a digit (word char) */
+static int boundary_at(const uint32_t *a, int n, int k)   /* \b at k where a[k-1] is a digit (a word character) */
 {
-    if (k >= L) return 1;
-    uint32_t c; u8dec((const unsigned char *)s + k, &c);
-    return !isword(c);
+    return k >= n || !isword(a[k]);
 }
+typedef struct { uint32_t *p; int n, cap, err; } cb_t;
+static void cb_c(cb_t *b, uint32_t c) { if (b->n >= b->cap) { b->err = 1; return; } b->p[b->n++] = c; }
+static void cb_s(cb_t *b, const char *s) { while (*s) cb_c(b, (unsigned char)*s++); }
+static void cb_cp(cb_t *b, const uint32_t *a, int from, int to) { for (int i = from; i < to; i++) cb_c(b, a[i]); }
+
 /* re.sub(r"(?<=\d),(?=\d{3}\b)", "") */
-static void n_commas(const char *s, sb_t *o)
+static void n_commas(const uint32_t *a, int n, cb_t *o)
 {
-    size_t L = strlen(s);
-    for (size_t i = 0; i < L; i++) {
-        if (s[i] == ',' && i > 0 && isdig((unsigned char)s[i - 1]) && i + 3 < L &&
-            isdig((unsigned char)s[i + 1]) && isdig((unsigned char)s[i + 2]) && isdig((unsigned char)s[i + 3]) &&
-            boundary_after(s, L, i + 4))
+    for (int i = 0; i < n; i++) {
+        if (a[i] == ',' && i > 0 && dval(a[i - 1]) >= 0 && i + 3 < n && dval(a[i + 1]) >= 0 && dval(a[i + 2]) >= 0 && dval(a[i + 3]) >= 0 && boundary_at(a, n, i + 4))
             continue;
-        sb_c(o, s[i]);
+        cb_c(o, a[i]);
     }
 }
-/* re.sub(r"\$(\d+)\.(\d{2})\b", "N dollars and M cents") */
-static void n_dollar_cents(const char *s, sb_t *o)
+/* re.sub(r"\$(\d+)\.(\d{2})\b", lambda m: f"{m.group(1)} dollars and {int(m.group(2))} cents") */
+static void n_dollar_cents(const uint32_t *a, int n, cb_t *o)
 {
-    size_t L = strlen(s);
-    for (size_t i = 0; i < L; i++) {
-        if (s[i] == '$') {
-            size_t j = i + 1;
-            while (j < L && isdig((unsigned char)s[j])) j++;
-            if (j > i + 1 && j + 2 < L && s[j] == '.' && isdig((unsigned char)s[j + 1]) && isdig((unsigned char)s[j + 2]) && boundary_after(s, L, j + 3)) {
-                sb_put(o, s + i + 1, j - i - 1);
-                sb_s(o, " dollars and ");
-                char num[8]; snprintf(num, sizeof num, "%d", (s[j + 1] - '0') * 10 + (s[j + 2] - '0'));
-                sb_s(o, num);
-                sb_s(o, " cents");
+    for (int i = 0; i < n; i++) {
+        if (a[i] == '$') {
+            int j = i + 1;
+            while (j < n && dval(a[j]) >= 0) j++;
+            if (j > i + 1 && j + 2 < n && a[j] == '.' && dval(a[j + 1]) >= 0 && dval(a[j + 2]) >= 0 && boundary_at(a, n, j + 3)) {
+                cb_cp(o, a, i + 1, j);
+                cb_s(o, " dollars and ");
+                char num[8]; snprintf(num, sizeof num, "%d", dval(a[j + 1]) * 10 + dval(a[j + 2]));
+                cb_s(o, num);
+                cb_s(o, " cents");
                 i = j + 2;
                 continue;
             }
         }
-        sb_c(o, s[i]);
+        cb_c(o, a[i]);
     }
 }
 /* re.sub(r"\$(\d+)\b", r"\1 dollars") */
-static void n_dollars(const char *s, sb_t *o)
+static void n_dollars(const uint32_t *a, int n, cb_t *o)
 {
-    size_t L = strlen(s);
-    for (size_t i = 0; i < L; i++) {
-        if (s[i] == '$') {
-            size_t j = i + 1;
-            while (j < L && isdig((unsigned char)s[j])) j++;
-            if (j > i + 1 && boundary_after(s, L, j)) {
-                sb_put(o, s + i + 1, j - i - 1);
-                sb_s(o, " dollars");
+    for (int i = 0; i < n; i++) {
+        if (a[i] == '$') {
+            int j = i + 1;
+            while (j < n && dval(a[j]) >= 0) j++;
+            if (j > i + 1 && boundary_at(a, n, j)) {
+                cb_cp(o, a, i + 1, j);
+                cb_s(o, " dollars");
                 i = j - 1;
                 continue;
             }
         }
-        sb_c(o, s[i]);
+        cb_c(o, a[i]);
     }
 }
 /* re.sub(r"(\d+)\.(\d+)", lambda m: m1 + " point " + " ".join(digit words of m2)) */
-static void n_decimals(const char *s, sb_t *o)
+static void n_decimals(const uint32_t *a, int n, cb_t *o)
 {
-    size_t L = strlen(s);
-    size_t i = 0;
-    while (i < L) {
-        if (isdig((unsigned char)s[i])) {
-            size_t b = i;
-            while (b < L && isdig((unsigned char)s[b])) b++;
-            if (b + 1 < L && s[b] == '.' && isdig((unsigned char)s[b + 1])) {
-                size_t e = b + 1;
-                while (e < L && isdig((unsigned char)s[e])) e++;
-                sb_put(o, s + i, b - i);
-                sb_s(o, " point ");
-                for (size_t k = b + 1; k < e; k++) {
-                    if (k > b + 1) sb_c(o, ' ');
-                    sb_s(o, DIGW[s[k] - '0']);
+    int i = 0;
+    while (i < n) {
+        if (dval(a[i]) >= 0) {
+            int b = i;
+            while (b < n && dval(a[b]) >= 0) b++;
+            if (b + 1 < n && a[b] == '.' && dval(a[b + 1]) >= 0) {
+                int e = b + 1;
+                while (e < n && dval(a[e]) >= 0) e++;
+                cb_cp(o, a, i, b);
+                cb_s(o, " point ");
+                for (int k = b + 1; k < e; k++) {
+                    if (k > b + 1) cb_c(o, ' ');
+                    cb_s(o, DIGW[dval(a[k])]);
                 }
                 i = e;
             } else {
-                sb_put(o, s + i, b - i);
+                cb_cp(o, a, i, b);
                 i = b;
             }
         } else {
-            sb_c(o, s[i++]);
+            cb_c(o, a[i++]);
         }
     }
 }
@@ -189,38 +199,31 @@ static void n_decimals(const char *s, sb_t *o)
 int itofe_normalize(const char *text, char *out, size_t cap)
 {
     if (!inited) return ITOFE_E_BLOB;
-    size_t L = strlen(text);
-    if (L > ITOFE_MAX_TEXT) return ITOFE_E_TOO_LONG;
-    char *b1 = C.tmp, *b2 = C.tmp + TEXTB * 2;
-    sb_t o;
-    sb_init(&o, b1, TEXTB * 2); n_commas(text, &o);
-    if (o.err) return ITOFE_E_TOO_LONG;
-    sb_init(&o, b2, TEXTB * 2); n_dollar_cents(b1, &o);
-    if (o.err) return ITOFE_E_TOO_LONG;
-    sb_init(&o, b1, TEXTB * 2); n_dollars(b2, &o);
-    if (o.err) return ITOFE_E_TOO_LONG;
-    sb_init(&o, b2, TEXTB * 2); n_decimals(b1, &o);
-    if (o.err) return ITOFE_E_TOO_LONG;
-    /* .strip() */
-    const unsigned char *s = (const unsigned char *)b2;
-    const unsigned char *e = s + o.n;
-    for (;;) { uint32_t c; int l = u8dec(s, &c); if (s >= e || !pyspace(c)) break; s += l; }
-    while (e > s) {
-        const unsigned char *q = e - 1;
-        while (q > s && (*q & 0xC0) == 0x80) q--;
-        uint32_t c; u8dec(q, &c);
-        if (!pyspace(c)) break;
-        e = q;
+    if (strlen(text) > ITOFE_MAX_TEXT) return ITOFE_E_TOO_LONG;
+    int n = decode(text, C.cp, NULL, MAXCP / 2);
+    if (n < 0) return ITOFE_E_TOO_LONG;
+    uint32_t *a = C.cp, *b = C.cp2;
+    cb_t o;
+    o = (cb_t){ b, 0, MAXCP, 0 }; n_commas(a, n, &o);       if (o.err) return ITOFE_E_TOO_LONG;
+    { uint32_t *t = a; a = b; b = t; n = o.n; }
+    o = (cb_t){ b, 0, MAXCP, 0 }; n_dollar_cents(a, n, &o); if (o.err) return ITOFE_E_TOO_LONG;
+    { uint32_t *t = a; a = b; b = t; n = o.n; }
+    o = (cb_t){ b, 0, MAXCP, 0 }; n_dollars(a, n, &o);      if (o.err) return ITOFE_E_TOO_LONG;
+    { uint32_t *t = a; a = b; b = t; n = o.n; }
+    o = (cb_t){ b, 0, MAXCP, 0 }; n_decimals(a, n, &o);     if (o.err) return ITOFE_E_TOO_LONG;
+    { uint32_t *t = a; a = b; b = t; n = o.n; }
+    /* .strip() and .replace('"', "") */
+    int s0 = 0, e0 = n;
+    while (s0 < e0 && pyspace(a[s0])) s0++;
+    while (e0 > s0 && pyspace(a[e0 - 1])) e0--;
+    size_t k = 0;
+    for (int i = s0; i < e0; i++) {
+        if (a[i] == '"') continue;
+        if (k + 5 > cap) return ITOFE_E_TOO_LONG;
+        k += u8enc(a[i], out + k);
     }
-    /* .replace('"', "") */
-    size_t n = 0;
-    for (; s < e; s++) {
-        if (*s == '"') continue;
-        if (n + 1 >= cap) return ITOFE_E_TOO_LONG;
-        out[n++] = (char)*s;
-    }
-    out[n] = 0;
-    return (int)n;
+    out[k] = 0;
+    return (int)k;
 }
 
 /* ------------------------------------------------------------------ phonemizer (3.x) EspeakBackend, preserve_punctuation=True, with_stress=True */
@@ -547,7 +550,7 @@ int itofe_tokenize(const char *raw, char *out, size_t cap)
     { uint32_t *t = a; a = b; b = t; n = m; m = 0; }
     /* PUNCTUATION: ([:,])([^\d]) -> " \1 \2" (the second character is consumed) */
     for (int i = 0; i < n;) {
-        if ((a[i] == ':' || a[i] == ',') && i + 1 < n && !isdig(a[i + 1])) { b[m++] = ' '; b[m++] = a[i]; b[m++] = ' '; b[m++] = a[i + 1]; i += 2; }
+        if ((a[i] == ':' || a[i] == ',') && i + 1 < n && dval(a[i + 1]) < 0) { b[m++] = ' '; b[m++] = a[i]; b[m++] = ' '; b[m++] = a[i + 1]; i += 2; }
         else b[m++] = a[i++];
     }
     { uint32_t *t = a; a = b; b = t; n = m; m = 0; }
@@ -631,15 +634,15 @@ int itofe_init(const void *blob, size_t len)
     C.boff = ITOFE_ALLOC((MAXCP + 1) * sizeof(int)); C.mt = ITOFE_ALLOC(MAXCP * sizeof(int)); C.det = ITOFE_ALLOC(MAXCP);
     C.pool = ITOFE_ALLOC(POOL_BYTES); C.ph = ITOFE_ALLOC(PHBUF);
     C.line = ITOFE_ALLOC(TEXTB * 2 + 64); C.norm = ITOFE_ALLOC(TEXTB);
-    C.raw = ITOFE_ALLOC(TEXTB * 4); C.tok = ITOFE_ALLOC(TEXTB * 4); C.tmp = ITOFE_ALLOC(TEXTB * 4);
-    if (!C.cp || !C.cp2 || !C.boff || !C.mt || !C.det || !C.pool || !C.ph || !C.line || !C.norm || !C.raw || !C.tok || !C.tmp) return ITOFE_E_NOMEM;
+    C.raw = ITOFE_ALLOC(TEXTB * 4); C.tok = ITOFE_ALLOC(TEXTB * 4); C.tmp = ITOFE_ALLOC(TEXTB * 4); C.full = ITOFE_ALLOC(FULLN);
+    if (!C.cp || !C.cp2 || !C.boff || !C.mt || !C.det || !C.pool || !C.ph || !C.line || !C.norm || !C.raw || !C.tok || !C.tmp || !C.full) return ITOFE_E_NOMEM;
     if (itoes_init(blob, len) != 0) return ITOFE_E_BLOB;
     inited = 1;
     return ITOFE_OK;
 }
 size_t itofe_work_bytes(void)
 {
-    return MAXCP * 4 * 2 + (MAXCP + 1) * 4 + MAXCP * 5 + POOL_BYTES + PHBUF + TEXTB * 2 + 64 + TEXTB + TEXTB * 4 * 3;
+    return MAXCP * 4 * 2 + (MAXCP + 1) * 4 + MAXCP * 5 + POOL_BYTES + PHBUF + TEXTB * 2 + 64 + TEXTB + TEXTB * 4 * 3 + FULLN;
 }
 
 int itofe_text_to_ids(const char *text, uint8_t *ids, int cap)
@@ -651,6 +654,133 @@ int itofe_text_to_ids(const char *text, uint8_t *ids, int cap)
     r = itofe_tokenize(C.raw, C.tok, TEXTB * 4);
     if (r < 0) return r;
     return itofe_symbols(C.tok, ids, cap);
+}
+
+/* ------------------------------------------------------------------ stream: tools/say.py sentences() */
+void itofe_stream_begin(itofe_stream *s, const char *text, int fast_first)
+{
+    memset(s, 0, sizeof(*s));
+    s->text = text; s->fast_first = fast_first;
+    /* text.strip() */
+    const unsigned char *p = (const unsigned char *)text;
+    for (;;) { uint32_t c; int l = u8dec(p, &c); if (!l || !pyspace(c)) break; p += l; }
+    s->pos = (size_t)((const char *)p - text);
+}
+/* next sentence of re.split(r'(?<=[.!?;])\s+', text.strip()), stripped; copies it to out; returns its length or 0 at the end */
+static int next_sentence(itofe_stream *s, char *out, int cap)
+{
+    const char *t = s->text;
+    size_t i = s->pos, L = strlen(t);
+    while (i < L) {                                /* skip whitespace (also the separator after the previous sentence) */
+        uint32_t c; int l = u8dec((const unsigned char *)t + i, &c);
+        if (!pyspace(c)) break;
+        i += l;
+    }
+    if (i >= L) { s->pos = L; return 0; }
+    size_t start = i, end = i;
+    uint32_t prev = 0;
+    while (i < L) {
+        uint32_t c; int l = u8dec((const unsigned char *)t + i, &c);
+        if (pyspace(c) && (prev == '.' || prev == '!' || prev == '?' || prev == ';')) break;   /* split here */
+        prev = c; i += l;
+        if (!pyspace(c)) end = i;
+    }
+    /* the sentence is t[start, i) stripped; if the text ends (no split), strip trailing whitespace */
+    int n = (int)(end - start);
+    if (n >= cap) return ITOFE_E_TOO_LONG;
+    memcpy(out, t + start, n); out[n] = 0;
+    s->pos = i;
+    return n > 0 ? n : -1000;
+}
+/* one "piece": a sentence, or the first half of one that has more than 400 tokens (say.py splits at the middle word).
+   Writes the piece text to text_out (ITOFE_MAX_TEXT + 8 bytes) and its ids to ids. */
+static int next_piece(itofe_stream *s, char *text_out, uint8_t *ids, int cap)
+{
+    if (!s->cur[0]) {
+        int n = next_sentence(s, s->cur, sizeof s->cur);
+        if (n == 0) return 0;
+        if (n < 0 && n != -1000) return n;
+    }
+    uint8_t *full = C.full;
+    int k = itofe_text_to_ids(s->cur, full, FULLN);
+    if (k < 0) return k;
+    if (k <= cap) memcpy(ids, full, k);
+    if (k > ITOFE_MAX_TOKENS) {
+        /* words = p.split(); cut = max(1, len(words)//2); piece = " ".join(words[:cut]); rest = " ".join(words[cut:]) */
+        const char *p = s->cur;
+        int nw = 0;
+        { int in = 0; for (const unsigned char *q = (const unsigned char *)p; *q;) { uint32_t c; int l = u8dec(q, &c); if (pyspace(c)) in = 0; else if (!in) { in = 1; nw++; } q += l; } }
+        int cut = nw / 2; if (cut < 1) cut = 1;
+        char *piece = text_out; char rest[ITOFE_MAX_TEXT + 8];
+        size_t pn = 0, rn = 0; int w = 0, in = 0;
+        for (const unsigned char *q = (const unsigned char *)p; *q;) {
+            uint32_t c; int l = u8dec(q, &c);
+            if (pyspace(c)) in = 0;
+            else {
+                if (!in) { in = 1; w++; if (w <= cut ? pn : rn) { if (w <= cut) piece[pn++] = ' '; else rest[rn++] = ' '; } }
+                if (w <= cut) { memcpy(piece + pn, q, l); pn += l; } else { memcpy(rest + rn, q, l); rn += l; }
+            }
+            q += l;
+        }
+        piece[pn] = 0; rest[rn] = 0;
+        strcpy(s->cur, rest);
+        k = itofe_text_to_ids(piece, full, FULLN);      /* the first half is not checked again (say.py), it may still exceed 400: truncated to cap */
+        if (k < 0) return k;
+        if (k > cap) k = cap;
+        memcpy(ids, full, k);
+        return k;
+    }
+    strcpy(text_out, s->cur);
+    s->cur[0] = 0;
+    if (k > cap) k = cap;
+    return k;
+}
+
+int itofe_stream_next(itofe_stream *s, uint8_t *ids, int cap)
+{
+    int n;
+
+    if (s->have_next) { memcpy(ids, s->next_ids, s->next_n); n = s->next_n; strcpy(s->gtext, s->next_text); s->have_next = 0; }
+    else { n = next_piece(s, s->gtext, ids, cap); if (n <= 0) return n; }
+    int pieces = 1;
+    if (!(s->fast_first && s->n_out == 0)) {
+        static char ptext[ITOFE_MAX_TEXT + 8], mtext[2 * ITOFE_MAX_TEXT + 16];
+        uint8_t tmp[ITOFE_MAX_TOKENS + 16];
+        for (;;) {                                  /* merge following pieces while the merged utterance has <= 200 tokens (say.py) */
+            int k = next_piece(s, ptext, tmp, sizeof tmp);
+            if (k < 0) return k;
+            if (k == 0) break;
+            int accept = 0;
+            int sum = n + k;                         /* the merged text has at most this many ids (a sentence-final period of the first */
+            if (sum <= ITOFE_GROUP_TOKENS) accept = 1;   /* text can only lose its separating space); exact check in the borderline */
+            else if (sum <= ITOFE_GROUP_TOKENS + 8) {
+                if (strlen(s->gtext) + strlen(ptext) + 2 < sizeof mtext) {
+                    snprintf(mtext, sizeof mtext, "%s %s", s->gtext, ptext);
+                    uint8_t *chk = (uint8_t *)C.tmp + 0;   /* scratch is reused by the pipeline: use a local */
+                    uint8_t *ids2 = C.full;
+                    (void)chk;
+                    int m = itofe_text_to_ids(mtext, ids2, FULLN);
+                    accept = m >= 0 && m <= ITOFE_GROUP_TOKENS;
+                }
+            }
+            if (accept) {
+                size_t gl = strlen(s->gtext);
+                if (gl + strlen(ptext) + 2 >= sizeof s->gtext) accept = 0;
+                else { s->gtext[gl] = ' '; strcpy(s->gtext + gl + 1, ptext); n = sum; pieces++; }
+            }
+            if (!accept) {
+                memcpy(s->next_ids, tmp, k); s->next_n = k; strcpy(s->next_text, ptext); s->have_next = 1;
+                break;
+            }
+        }
+        if (pieces > 1) {                            /* the exact ids of the merged text (differ from the concatenation only where a final period loses its space) */
+            int m = itofe_text_to_ids(s->gtext, ids, cap);
+            if (m < 0) return m;
+            n = m;
+        }
+    }
+    s->n_out++;
+    return n;
 }
 
 /* all stages at once, for the tests */

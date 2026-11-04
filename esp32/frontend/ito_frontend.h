@@ -17,7 +17,7 @@ extern "C" {
 
 #define ITOFE_MAX_TOKENS 400        /* the engine's limit per utterance (leading 0 included in the count the host uses) */
 #define ITOFE_GROUP_TOKENS 200      /* consecutive short sentences are merged up to this many tokens (tools/say.py) */
-#define ITOFE_MAX_TEXT 1500         /* bytes of one utterance after normalisation; longer text is split by the stream API */
+#define ITOFE_MAX_TEXT 2400         /* bytes of one utterance after normalisation; longer text is split by the stream API */
 
 #define ITOFE_OK 0
 #define ITOFE_E_BLOB (-1)
@@ -27,7 +27,12 @@ extern "C" {
 
 /* Memory hook for the working buffers (a few tens of KB). On the chip they go to PSRAM; default malloc. */
 #ifndef ITOFE_ALLOC
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+#define ITOFE_ALLOC(n) heap_caps_malloc((n), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+#else
 #define ITOFE_ALLOC(n) malloc(n)
+#endif
 #endif
 
 /* Initialise espeak-ng from the data blob and allocate working memory. Returns ITOFE_OK. */
@@ -45,19 +50,23 @@ int itofe_symbols(const char *tok, uint8_t *ids, int cap);                    /*
 /* Streaming: split a long text into utterances exactly like tools/say.py (sentences at [.!?;] + whitespace, middle-word split above
  * 400 tokens, merge up to 200 tokens). One call = one utterance, its phonemization is done in that call. */
 typedef struct {
-    const char *text;       /* NUL-terminated, must stay valid */
-    size_t pos;             /* next byte to read */
+    const char *text;       /* NUL-terminated, must stay valid while streaming */
+    size_t pos;             /* next byte of the text to read */
     int fast_first;         /* 1: the first utterance is the first sentence alone (no look-ahead merge): lowest first-audio latency */
     int n_out;              /* utterances returned so far */
-    /* look-ahead (one sentence) */
-    int have_next;
-    uint8_t *next_ids; int next_n;
+    char cur[ITOFE_MAX_TEXT + 8];            /* remainder of a sentence that had to be split (more than 400 tokens) */
+    int have_next;          /* a look-ahead piece is stored */
+    int next_n;
+    uint8_t next_ids[ITOFE_MAX_TOKENS + 16];
+    char next_text[ITOFE_MAX_TEXT + 8];
+    char gtext[ITOFE_MAX_TEXT + 8];          /* text of the utterance being assembled */
 } itofe_stream;
 
 void itofe_stream_begin(itofe_stream *s, const char *text, int fast_first);
-/* Returns the number of ids of the next utterance (>0), 0 when the text is finished, negative on error. */
+/* Returns the number of ids of the next utterance (> 0), 0 when the text is finished, negative on error.
+ * fast_first = 0 gives exactly the utterances tools/say.py sends; fast_first = 1 only differs in that the first sentence is not merged
+ * with the following ones (the rest follows say.py's grouping). */
 int itofe_stream_next(itofe_stream *s, uint8_t *ids, int cap);
-void itofe_stream_end(itofe_stream *s);
 
 /* Used by the tests / memory report */
 size_t itofe_work_bytes(void);

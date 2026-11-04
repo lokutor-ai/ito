@@ -1,5 +1,37 @@
 menu "Ito"
 
+    config ITOFS_FRONTEND
+        bool "On-chip text front end: the `text <string>` command (normalization + espeak-ng G2P on the chip)"
+        default y
+        help
+            Adds esp32/frontend: text normalization and grapheme-to-phoneme conversion (espeak-ng 1.52.0, en-us) on the chip, producing the
+            same token ids as the host front end, so no computer is needed. About 273 KB of flash for the data, about 190 KB of PSRAM, and
+            very little internal SRAM (the translator's static data and heap go to PSRAM; the task stack is in PSRAM too). See esp32/FRONTEND.md.
+
+    config ITOFS_FE_FAST_FIRST
+        bool "Speak the first sentence alone (lowest latency)"
+        depends on ITOFS_FRONTEND
+        default y
+        help
+            tools/say.py merges consecutive short sentences into one utterance of up to 200 tokens; to merge, the second sentence has to be
+            phonemized before the first utterance can start. With this option the first sentence is sent on its own and only the following ones are merged.
+            Off: exactly the utterances of tools/say.py (a second sentence is phonemized before the first audio).
+
+    config ITOFS_BOOT_TEXT
+        bool "At boot, speak the phrase list in main/phrases.txt (text stored in flash, no host)"
+        depends on ITOFS_FRONTEND
+        default n
+        help
+            One phrase per line, '#' starts a comment. Each phrase goes through the on-chip front end and is spoken after the boot calibration,
+            like CONFIG_ITOFS_BOOT_DEMOS does for the three demo sentences. The `phrases` command speaks the list again.
+
+    config ITOFS_BOOT_TEXT_SILENT
+        bool "... but compute only: no playback (prints timing and the PCM hash)"
+        depends on ITOFS_BOOT_TEXT
+        default n
+        help
+            For tests: the boot phrases are synthesized into memory instead of being played (the I2S and the codec are not used).
+
     config ITOFS_BOOT_DEMOS
         bool "Speak the three demo sentences at every boot"
         default n

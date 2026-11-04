@@ -34,9 +34,23 @@ int main(int argc, char **argv)
         for (int i = 0; i < k; i++) printf("%d%c", ids[i], i + 1 < k ? ',' : '\n');
         return 0;
     }
+    int stream = argc > 3 && !strcmp(argv[3], "--stream");
+    int fast = argc > 4 && !strcmp(argv[4], "--fast");
     long cn; char *corpus = slurp(argv[2], &cn);
     for (char *line = strtok(corpus, "\n"); line; line = strtok(NULL, "\n")) {
         char *tab = strchr(line, '\t'); char *text = tab ? tab + 1 : line;
+        if (stream) {
+            static itofe_stream st; itofe_stream_begin(&st, text, fast);
+            printf("{\"utt\":[");
+            int first = 1, k;
+            while ((k = itofe_stream_next(&st, ids, 1024)) > 0) {
+                printf("%s[", first ? "" : ","); first = 0;
+                for (int i = 0; i < k; i++) printf("%d%s", ids[i], i + 1 < k ? "," : "");
+                printf("]");
+            }
+            printf("]}\n");
+            continue;
+        }
         int k = itofe_stages(text, norm, raw, tok, ids, 1024);
         printf("{\"rc\":%d,\"text\":", k); jstr(text);
         printf(",\"norm\":"); jstr(norm); printf(",\"raw\":"); jstr(raw); printf(",\"tok\":"); jstr(tok); printf(",\"ids\":[");

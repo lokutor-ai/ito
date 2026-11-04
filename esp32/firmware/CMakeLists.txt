@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
 set(PROJECT_VER "ito-3.0.0")
+set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/../frontend")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(itofs)

@@ -45,6 +45,10 @@
 #ifdef CONFIG_ITOFS_AUDIO_ES8388
 #include "es8388.h"
 #endif
+#ifdef CONFIG_ITOFS_FRONTEND
+#include "ito_frontend.h"
+#include "ito_fe_idf.h"
+#endif
 
 #ifdef CONFIG_ITOFS_AUDIO_ES8388       // the ESP_S3-AUDIN shield: ES8388 codec, I2C control, I2S with MCLK (esp32/README.md, "Audio output")
 #define PIN_MCLK CONFIG_ITOFS_ES8388_PIN_MCLK
@@ -157,7 +161,7 @@ static int s_active = -1, s_selected = -1, s_degraded;   // weight set in use / 
 #define PLAN_MAX_DELAY_US 4000000.0
 static double s_obs_us[ITOFS_SCHED_MAXCH];         // production times of the chunks of the current utterance so far
 
-typedef struct { int kind; int n; int16_t tok[MAX_TOKENS]; } req_t;   // 0 say, 1 demos, 2 self-test, 3 style, 4 act bits, 5 bench, 6 wmode, 7 icprof, 8 first, 9 tier, 10 recal, 11 status, 13 no-op, 14 rep, 15 split, 16 hang (test builds)
+typedef struct { int kind; int n; uint32_t seed; int64_t t0; int16_t tok[MAX_TOKENS]; } req_t;   // 0 say, 1 demos, 2 self-test, 3 style, 4 act bits, 5 bench, 6 wmode, 7 icprof, 8 first, 9 tier, 10 recal, 11 status, 13 no-op, 14 rep, 15 split, 16 hang (test builds), 20 silent text utterance (seed, t0 = text arrival)
 static req_t s_req_tmp;
 
 static double ms(int64_t us) { return us / 1000.0; }
@@ -1245,6 +1249,132 @@ static void repeat_demos(int n, int only)
            (unsigned)(i0 / 1024), (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024));
 }
 
+
+#ifdef CONFIG_ITOFS_FRONTEND
+// ------------------------------------------------------------------------------------------------------------------
+// on-chip front end (esp32/frontend, FRONTEND.md): text -> the same token ids as the host's tools/say.py, no computer attached.
+// It runs in its own task (stack in PSRAM, priority below the synthesis) and hands the utterances to the synthesis task through the
+// request queue; while utterance k is synthesized (the synthesis task waits for the player whenever it is ahead) it prepares k + 1.
+// ------------------------------------------------------------------------------------------------------------------
+extern const char phrases_start[] asm("_binary_phrases_txt_start");
+extern const char phrases_end[] asm("_binary_phrases_txt_end");
+#ifdef CONFIG_ITOFS_FE_FAST_FIRST
+static int s_fe_fast_first = 1;         // `fastfirst 0|1` changes it at run time
+#else
+static int s_fe_fast_first = 0;
+#endif
+#ifndef FE_STACK_BYTES
+#define FE_STACK_BYTES (64 * 1024)   // measured peak 45.7 KB over the corpus (espeak-ng's clause translation keeps its buffers on the stack)
+#endif
+#define FE_TEXT_MAX 4096
+enum { FE_SPEAK = 0, FE_SILENT = 1, FE_IDS = 2, FE_PHRASES = 3, FE_PHRASES_SILENT = 4 };
+typedef struct { int mode; int64_t t_arrive; } fejob_t;
+static QueueHandle_t s_fe_q;
+static volatile int s_fe_busy, s_fe_abort, s_fe_up;
+static char *s_fe_text;                 // PSRAM: the text of the current job
+static itofe_stream *s_fe_st;
+static req_t *s_fe_req;
+static StaticTask_t s_fe_tcb;
+static int16_t *s_text_pcm;             // PSRAM: PCM of the silent (compute-only) text utterances
+
+static uint32_t fnv_ids(const uint8_t *ids, int n) { uint32_t h = 2166136261u; for (int i = 0; i < n; i++) { h ^= ids[i]; h *= 16777619u; } return h; }
+
+// text -> utterances -> requests for the synthesis task
+static void fe_run_text(const char *text, int mode, int64_t t_arrive, int *seed_ctr)
+{
+    uint8_t *ids = (uint8_t *)s_fe_req->tok + 0;     // (not used: ids go through a local buffer, tok is int16)
+    (void)ids;
+    static uint8_t buf[MAX_TOKENS + 32];
+    itofe_stream_begin(s_fe_st, text, s_fe_fast_first);
+    for (int k = 0;; k++) {
+        const int64_t a = esp_timer_get_time();
+        const int n = itofe_stream_next(s_fe_st, buf, sizeof buf);
+        const int64_t b = esp_timer_get_time();
+        if (n < 0) { printf("ERROR front end: %d\n", n); return; }
+        if (n == 0 || s_fe_abort) return;
+        printf("FE utt %d: %d tokens in %.1f ms (%.1f ms after the text arrived), ids fnv32 %08lx\n", k, n, ms(b - a), ms(b - t_arrive), (unsigned long)fnv_ids(buf, n));
+        if (mode == FE_IDS) {
+            printf("IDS ");
+            for (int i = 0; i < n; i++) printf("%d%c", buf[i], i + 1 < n ? ',' : '\n');
+            continue;
+        }
+        const int nt = n > MAX_TOKENS ? MAX_TOKENS : n;
+        for (int i = 0; i < nt; i++) s_fe_req->tok[i] = buf[i];
+        s_fe_req->kind = (mode == FE_SILENT) ? 20 : 0;
+        s_fe_req->n = nt;
+        s_fe_req->seed = (mode == FE_SILENT) ? 1u + (uint32_t)(*seed_ctr)++ : 0;
+        s_fe_req->t0 = k == 0 ? t_arrive : 0;
+        xQueueSend(s_req_q, s_fe_req, portMAX_DELAY);       // blocks while the synthesis queue is full: the front end runs at most two utterances ahead
+    }
+}
+
+static void fe_task(void *arg)
+{
+    (void)arg;
+    const int64_t t0 = esp_timer_get_time();
+    const int r = itofe_idf_init();
+    if (r) { printf("ERROR front end init: %d\n", r); vTaskDelete(NULL); }
+    printf("FE ready: init %.1f ms, espeak-ng data %u KB in flash, work buffers %u KB PSRAM, stack %u KB (PSRAM)\n", ms(esp_timer_get_time() - t0),
+           (unsigned)(itofe_idf_blob_bytes() / 1024), (unsigned)(itofe_work_bytes() / 1024), FE_STACK_BYTES / 1024);
+    s_fe_up = 1;
+    for (;;) {
+        fejob_t j;
+        if (xQueueReceive(s_fe_q, &j, pdMS_TO_TICKS(2000)) != pdTRUE) continue;
+        s_fe_abort = 0;
+        int seed_ctr = 0;
+        if (j.mode == FE_PHRASES || j.mode == FE_PHRASES_SILENT) {      // the phrase list stored in flash: one phrase per line, '#' starts a comment
+            const char *p = phrases_start, *end = phrases_end;
+            int np = 0;
+            while (p < end && !s_fe_abort) {
+                const char *e = p;
+                while (e < end && *e != '\n' && *e) e++;
+                size_t l = (size_t)(e - p);
+                while (l && (p[l - 1] == '\r' || p[l - 1] == ' ')) l--;
+                if (l && p[0] != '#' && l < FE_TEXT_MAX) {
+                    memcpy(s_fe_text, p, l); s_fe_text[l] = 0;
+                    printf("PHRASE %d: \"%s\"\n", np++, s_fe_text);
+                    fe_run_text(s_fe_text, j.mode == FE_PHRASES ? FE_SPEAK : FE_SILENT, esp_timer_get_time(), &seed_ctr);
+                }
+                p = e < end ? e + 1 : end;
+            }
+        } else {
+            fe_run_text(s_fe_text, j.mode, j.t_arrive, &seed_ctr);
+        }
+        printf("FE done (stack high-water: %u bytes of %u)\n", (unsigned)(FE_STACK_BYTES - uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)), FE_STACK_BYTES);
+        s_fe_busy = 0;
+        if (j.mode == FE_IDS) printf("READY\n");
+    }
+}
+
+static void fe_start(void)
+{
+    s_fe_q = xQueueCreate(1, sizeof(fejob_t));
+    s_fe_text = heap_caps_malloc(FE_TEXT_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_fe_st = heap_caps_malloc(sizeof(itofe_stream), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_fe_req = heap_caps_malloc(sizeof(req_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        StackType_t *stk = heap_caps_malloc(FE_STACK_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!s_fe_q || !s_fe_text || !s_fe_st || !s_fe_req || !stk) { printf("ERROR front end: no memory\n"); return; }
+    xTaskCreateStaticPinnedToCore(fe_task, "itofs_fe", FE_STACK_BYTES / sizeof(StackType_t), NULL, 3, stk, &s_fe_tcb, 0);
+}
+
+// submit a text job (from the console or the boot demo); text == NULL: the stored phrase list
+static int fe_submit(const char *text, int mode)
+{
+    if (!s_fe_up) { printf("ERROR front end not ready\n"); return -1; }
+    if (s_fe_busy) { printf("ERROR front end busy (cancel first)\n"); return -1; }
+    if (text) {
+        size_t l = strlen(text);
+        if (l >= FE_TEXT_MAX) { printf("ERROR text longer than %d bytes\n", FE_TEXT_MAX - 1); return -1; }
+        memcpy(s_fe_text, text, l + 1);
+    }
+    fejob_t j = { mode, esp_timer_get_time() };
+    s_fe_busy = 1;
+    printf("OK text queued (%u bytes)\n", text ? (unsigned)strlen(text) : (unsigned)(phrases_end - phrases_start));
+    xQueueSend(s_fe_q, &j, 0);
+    return 0;
+}
+#endif
+
 static void halt(void);
 static void synth_task(void *arg)
 {
@@ -1262,6 +1392,15 @@ static void synth_task(void *arg)
 #ifdef CONFIG_ITOFS_BOOT_DEMOS
     play_demos(-1);
 #endif
+#if defined(CONFIG_ITOFS_FRONTEND) && defined(CONFIG_ITOFS_BOOT_TEXT)
+    // speak the phrase list stored in flash, from text, with no host attached (the front end runs on the chip)
+    for (int w = 0; w < 100 && !s_fe_up; w++) vTaskDelay(pdMS_TO_TICKS(100));
+    #ifdef CONFIG_ITOFS_BOOT_TEXT_SILENT
+    fe_submit(NULL, FE_PHRASES_SILENT);
+    #else
+    fe_submit(NULL, FE_PHRASES);
+    #endif
+#endif
     printf("READY (BOOT button = demos, serial: say <ids> | style <k> | demo [k] | test | stats | tier [k] | status | help)\n");
     for (;;) {
         while (xQueueReceive(s_req_q, &s_req_tmp, pdMS_TO_TICKS(1000)) != pdTRUE) guard_wdt_feed();      // idle: the watchdog is fed once a second
@@ -1269,7 +1408,22 @@ static void synth_task(void *arg)
         if (s_req_tmp.kind == 0) {
             for (int i = 0; i < s_req_tmp.n; i++) s_tok_buf[i] = s_req_tmp.tok[i];
             stats_t S;
-            if (speak(s_tok_buf, s_req_tmp.n, s_style, esp_random(), 1, NULL, 0, &S) > 0) print_timing("say", &S, s_req_tmp.n, s_style);
+            const int64_t ts = esp_timer_get_time();
+            if (speak(s_tok_buf, s_req_tmp.n, s_style, s_req_tmp.seed ? s_req_tmp.seed : esp_random(), 1, NULL, 0, &S) > 0) {
+                print_timing(s_req_tmp.t0 ? "text" : "say", &S, s_req_tmp.n, s_style);
+                if (s_req_tmp.t0) printf("TEXT_E2E: text arrived -> first audio chunk ready %.1f ms (front end + queue %.1f ms, engine %.1f ms)\n", ms(ts - s_req_tmp.t0) + S.ttfa_ms, ms(ts - s_req_tmp.t0), S.ttfa_ms);
+            }
+#ifdef CONFIG_ITOFS_FRONTEND
+        } else if (s_req_tmp.kind == 20) {           // a text utterance computed without playback (no I2S): timing and the PCM hash
+            for (int i = 0; i < s_req_tmp.n; i++) s_tok_buf[i] = s_req_tmp.tok[i];
+            if (!s_text_pcm) s_text_pcm = heap_caps_malloc(sizeof(int16_t) * REP_MAX_SAMPLES, MALLOC_CAP_SPIRAM);
+            stats_t S;
+            const int64_t ts = esp_timer_get_time();
+            if (s_text_pcm && speak(s_tok_buf, s_req_tmp.n, s_style, s_req_tmp.seed, 0, s_text_pcm, REP_MAX_SAMPLES, &S) > 0) {
+                print_timing("textq", &S, s_req_tmp.n, s_style);
+                if (s_req_tmp.t0) printf("TEXT_E2E: text arrived -> first audio chunk ready %.1f ms (front end + queue %.1f ms, engine %.1f ms), no playback\n", ms(ts - s_req_tmp.t0) + S.ttfa_ms, ms(ts - s_req_tmp.t0), S.ttfa_ms);
+            } else if (!s_text_pcm) printf("ERROR no PSRAM for the text PCM\n");
+#endif
         } else if (s_req_tmp.kind == 1) {
             play_demos(s_req_tmp.n);
         } else if (s_req_tmp.kind == 2) {
@@ -1365,6 +1519,25 @@ static void handle_line(char *line)
         s_in_req.kind = 0; s_in_req.n = n;
         printf("OK %d tokens queued\n", n);
         xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
+#ifdef CONFIG_ITOFS_FRONTEND
+    } else if (!strncmp(line, "text", 4) && (line[4] == ' ' || line[4] == 'q' || line[4] == 0)) {      // text <string> | textq <string>: front end on the chip, then speak / compute only
+        const int q = line[4] == 'q';
+        const char *t = line + 4 + q;
+        while (*t == ' ') t++;
+        if (!*t) { printf("ERROR text <English text> (textq: compute only, no playback)\n"); return; }
+        fe_submit(t, q ? FE_SILENT : FE_SPEAK);
+    } else if (!strncmp(line, "ids", 3) && (line[3] == ' ' || line[3] == 0)) {            // ids <string>: only the front end, print the token ids
+        const char *t = line + 3;
+        while (*t == ' ') t++;
+        if (!*t) { printf("ERROR ids <English text>\n"); return; }
+        fe_submit(t, FE_IDS);
+    } else if (!strncmp(line, "fastfirst", 9)) {       // fastfirst 0|1: speak the first sentence alone (1) or exactly the utterances of tools/say.py (0)
+        s_fe_fast_first = atoi(line + 9) != 0;
+        printf("OK first sentence %s\n", s_fe_fast_first ? "alone (lowest latency)" : "merged like tools/say.py");
+        s_in_req.kind = 13; xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
+    } else if (!strncmp(line, "phrases", 7)) {       // phrases [q]: speak the phrase list stored in flash (main/phrases.txt); q: compute only
+        fe_submit(NULL, strchr(line + 7, 'q') ? FE_PHRASES_SILENT : FE_PHRASES);
+#endif
     } else if (!strncmp(line, "style", 5)) {
         int k = atoi(line + 5);
         if (k < 0 || k >= s_model.n_styles) { printf("ERROR style must be 0-%d\n", s_model.n_styles - 1); return; }
@@ -1385,6 +1558,9 @@ static void handle_line(char *line)
     } else if (!strncmp(line, "stats", 5)) {
         mem_report("now");
     } else if (!strncmp(line, "cancel", 6)) {        // handled here, not by the synthesis task: it is busy with the utterance being cancelled
+#ifdef CONFIG_ITOFS_FRONTEND
+        s_fe_abort = 1;
+#endif
         if (s_speaking) { s_cancel_t = esp_timer_get_time(); s_cancel = 1; printf("OK cancel\n"); }
         else printf("OK nothing to cancel\n");
     } else if (!strncmp(line, "equiv", 5)) {         // equiv: show which sets are validated by ear; equiv light on|off: approve the light sets of every voice (stored in NVS), then measure again
@@ -1499,7 +1675,11 @@ static void handle_line(char *line)
         s_in_req.kind = 6; s_in_req.n = atoi(line + 5);
         xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
     } else if (line[0]) {
-        printf("commands: say <comma-separated token ids> | style <0-%d> | act <8|16> | demo [0-%d] | test | stats | bench | "
+        printf("commands: say <comma-separated token ids> | "
+#ifdef CONFIG_ITOFS_FRONTEND
+               "text <English text> | textq <text> (no playback) | ids <text> | phrases [q] | "
+#endif
+               "style <0-%d> | act <8|16> | demo [0-%d] | test | stats | bench | "
                "wmode <0 direct|1 copy|2 gdma|3 gdma+prefetch> | first <frames of the first chunk> | chunk <steady frames> | cores <1|2> | trace <0|1> | split [auto|row|full] | equiv [light on|off] | " VOLUME_HELP "cancel | rep <n> [demo] | reboot | delay <ms before playback starts | auto> | tier [k] | status | recal | simtime <rtf0 rtf1 rtf2 | off>\n", s_model.n_styles - 1, s_ndemo - 1);
     }
 }
@@ -1633,6 +1813,9 @@ void app_main(void)
     }
     uart_driver_install(UART_NUM_0, 4096, 0, 0, NULL, 0);
     mem_report("boot");
+#ifdef CONFIG_ITOFS_FRONTEND
+    fe_start();
+#endif
     xTaskCreatePinnedToCore(play_task, "itofs_play", 4096, NULL, 12, NULL, 1);
     xTaskCreatePinnedToCore(synth_task, "itofs_synth", 12288, NULL, 5, NULL, 0);
     xTaskCreatePinnedToCore(console_task, "itofs_con", 4096, NULL, 4, NULL, 0);

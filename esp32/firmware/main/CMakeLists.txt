@@ -2,9 +2,14 @@ set(ITOFS_SRCS "main.c" "guard.c" "es8388.c" "kernels_s3.c" "dot_rows_s3.S" "../
 if(ITOFS_KCHECK)
   list(APPEND ITOFS_SRCS "kernel_check_s3.c")
 endif()
+# the front end component and the phrase list are always built (CONFIG_ITOFS_FRONTEND only decides whether main.c uses them); the
+# linker drops the unused code
+set(ITOFS_FE_REQ frontend)
+set(ITOFS_FE_EMBED EMBED_TXTFILES "phrases.txt")
 idf_component_register(SRCS ${ITOFS_SRCS}
                        INCLUDE_DIRS "." "../../engine"
-                       PRIV_REQUIRES esp_timer esp_driver_i2s esp_driver_uart esp_driver_gpio esp_partition
+                       ${ITOFS_FE_EMBED}
+                       PRIV_REQUIRES ${ITOFS_FE_REQ} esp_timer esp_driver_i2s esp_driver_uart esp_driver_gpio esp_partition
                                      esp_psram heap esp_system spi_flash esp_mm esp_hw_support nvs_flash hal soc esp_driver_i2c)
 target_compile_options(${COMPONENT_LIB} PRIVATE -O2 -ffp-contract=off -Wno-unused-function -Wno-format-truncation)
 # the engine's element-wise loops are bound by address arithmetic (GCC's Xtensa output has no auto-increment addressing): unrolling
