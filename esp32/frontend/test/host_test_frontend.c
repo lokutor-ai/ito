@@ -60,7 +60,7 @@ int main(int argc, char **argv)
         int nd = 0, first = -1, last = -1;
         if (r == demo_len[k]) for (int i = 0; i < r; i++) if (ids[i] != demo_tok[k][i]) { nd++; if (first < 0) first = i; last = i; }
         if (k < 2) CHECK(r == demo_len[k] && nd == 0, "demo %d: ids differ from the firmware's stored ids", k);
-        else CHECK(r == demo_len[k] && nd == 2 && first == 10 && last == 132 && ids[10] == 55 + 0 * 1 + 0 && 1, "demo 2: expected exactly 2 known differences (positions 10 and 132), got %d (ids %d, first %d, last %d)", nd, r, first, last);
+        else CHECK(r == demo_len[k] && nd == 2 && first == 10 && last == 132 && ids[10] == 56 && demo_tok[k][10] == 112 && ids[132] == 177 && demo_tok[k][132] == 102, "demo 2: expected exactly 2 known differences (positions 10 and 132), got %d (ids %d, first %d, last %d)", nd, r, first, last);
     }
 
     /* golden single utterances */
