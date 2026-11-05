@@ -4,13 +4,13 @@
 Firmware commands: `text <string>` (speak), `textq <string>` (compute only, no I2S, prints timing and PCM hash), `ids <string>` (front end only,
 prints the ids), `textp <string>` (like `textq`, with an emulated playout clock: reports the gap to the previous utterance and underruns), `phrases [q]` (the phrase list stored in flash, `firmware/main/phrases.txt`), `fastfirst 0|1`. Build options (menuconfig `Ito`):
 `ITOFS_FRONTEND` (default y), `ITOFS_FE_FAST_FIRST` (y), `ITOFS_BOOT_TEXT` (speak `phrases.txt` at boot, like `ITOFS_BOOT_DEMOS`), `ITOFS_BOOT_TEXT_SILENT`
-(boot phrases are computed and hashed, not played). Prebuilt image: `prebuilt/ito_app_frontend_merged.bin` (flash at 0x0, boots silent as before;
+(boot phrases are computed and hashed, not played). Prebuilt image: `prebuilt/ito_app_frontend_merged.bin` (the default prebuilt since v1.1.0; `tools/flash.sh` writes it; flash at 0x0, boots silent as before;
 needs the usual weight partitions; sha256 `9ef9553900aaaeadb522dfe41fc2816aecf2ac41cf9c2a35eb76a40c41f19eff`, ESP-IDF v5.5.1, built twice to the same bytes). `ITOFS_AUTOTEST` builds a stand-alone test image (see "Stand-alone run").
 
 > **Status of the measurements.** Correctness (ids) was verified on the host and in Espressif QEMU, **and since 5 November 2026 on silicon**: every number in the
-> "On silicon" sections below was measured on one board (ESP32-S3 QFN56 rev v0.2, MAC f8:5b:1b:91:64:ac, 8 MB octal PSRAM, 16 MB flash; firmware = this branch,
-> ESP-IDF v5.5.1, female voice; raw logs and the exact commands are in `RESULTS_FRONTEND.md` of the engine work directory and `runs/` of the board-day directory).
-> One board, one chip revision, USB powered; not a second board, not a cold power-up from an unplugged state (a physical unplug was impossible: see
+> "On silicon" sections below was measured on one board (ESP32-S3 QFN56 rev v0.2, MAC f8:5b:1b:91:64:ac, 8 MB octal PSRAM, 16 MB flash; firmware = the commits named below, now on `main`,
+> ESP-IDF v5.5.1, female voice; the commands are in `frontend/tools/` and the "Reproduce" section below; the raw logs are kept by the authors, not in this repository).
+> One board (not the board of the earlier measurements in `README.md`), one chip revision, USB powered; not a second board for the front end, not a cold power-up from an unplugged state (a physical unplug was impossible: see
 > "Stand-alone run" below for what was done instead and what it proves).
 
 ## Approach and why
@@ -75,8 +75,8 @@ The build matters: with an old `build_hw/sdkconfig` that lacks `CONFIG_SPIRAM_AL
 
 ## Measured on silicon (5 November 2026)
 
-Board: ESP32-S3 QFN56 rev v0.2, MAC f8:5b:1b:91:64:ac, 8 MB octal PSRAM, 16 MB flash (Boya), USB powered; firmware: this branch (commits 61027d5, b343656, 08e8bae and the documentation commit), ESP-IDF v5.5.1, female voice,
-full split (3 s supply test: 272-273 passes in 3.02 s, pass; bit-exact self-test passes in every boot), boot-chosen int4 set unless stated. Raw tables, logs and commands: `RESULTS_FRONTEND.md` (engine work directory) and the board-day `runs/20261104_*`, `20261105_*`.
+Board: ESP32-S3 QFN56 rev v0.2, MAC f8:5b:1b:91:64:ac, 8 MB octal PSRAM, 16 MB flash (Boya), USB powered; firmware: commits 61027d5, b343656, 08e8bae and the documentation commit e55e205 (now on `main`), ESP-IDF v5.5.1, female voice,
+full split (3 s supply test: 272-273 passes in 3.02 s, pass; bit-exact self-test passes in every boot), boot-chosen int4 set unless stated. Commands: "Reproduce" below; raw logs are kept by the authors.
 No sound was produced: `textq`, `textp` and the stand-alone mode never start I2S.
 
 **Correctness**: the chip's utterance ids equal the Python front end's (phonemizer 3.6.0, nltk 3.10.4, espeak-ng 1.52.0) for **2004 of 2004 texts** (1403 corpus + 601 fresh texts written for this run: URLs, e-mail, numbers, dates, typos, names, mixed punctuation), 527 of 527

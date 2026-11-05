@@ -10,6 +10,10 @@ Ito has two parts, under two licenses:
   audio in a product, a paid service, internal business use or commercial content needs a written license from
   Lokutor. So do weights derived from it, and commercial models trained on its output.
 
+One exception to "without GPL obligations": the on-chip text front end (`esp32/frontend/`) is a port of espeak-ng, which is GPLv3-or-later software
+of its own authors. We cannot license it commercially. A commercial firmware either leaves the front end out (`CONFIG_ITOFS_FRONTEND=n`, phoneme ids
+from another source) or complies with the GPL for that part; the engine and the voice model are unaffected.
+
 If you want to build something real with Ito, [Lokutor](https://lokutor.com) (Hashing Works, S.L.L., Madrid) offers:
 
 - **Commercial licenses** for the voice model, engine and firmware, without GPL obligations, priced per device or as

@@ -1,6 +1,7 @@
 #!/bin/bash
 # Flash the prebuilt app and the Ito voice model (fetched by fetch_weights.sh; CC BY-NC-SA 4.0 + models/TERMS.md) to an ESP32-S3-DevKitC-1 N16R8 (16 MB flash, 8 MB octal PSRAM).
-#   esp32/tools/flash.sh PORT [weights.bin] [app_merged.bin]      female voice (default)
+#   esp32/tools/flash.sh PORT [weights.bin] [app_merged.bin]      female voice (default); the app defaults to prebuilt/ito_app_frontend_merged.bin
+#                                                                  (text in, speech out on the chip; prebuilt/ito_app_merged.bin is the older image that takes phoneme ids only)
 #   VOICE=male esp32/tools/flash.sh PORT                           male voice (VOICE=g also works): ito_male_esp32s3.bin
 # A voice has up to three weight sets, flashed to three partitions: the main set (0x200000, int8), the main set with int4 blocks (0x680000) and the
 # light set (0xB00000, 4 blocks, int4). At boot the firmware measures them and keeps the best one that runs at a real-time factor <= 0.85
@@ -13,7 +14,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PORT=${1:?usage: flash.sh PORT [weights.bin] [app_merged.bin]}
 if [ -z "$2" ]; then "$ROOT/esp32/tools/fetch_weights.sh"; fi      # gated Hugging Face download on first use
 case "${VOICE:-female}" in g|G|m|M|male) WDEF=ito_male_esp32s3.bin ;; *) WDEF=ito_female_esp32s3.bin ;; esac
-W=${2:-$ROOT/models/$WDEF}; APP=${3:-$ROOT/esp32/prebuilt/ito_app_merged.bin}
+W=${2:-$ROOT/models/$WDEF}; APP=${3:-$ROOT/esp32/prebuilt/ito_app_frontend_merged.bin}
 EXTRA=""
 if [ -z "$2" ]; then      # the default call also flashes the fallback sets of the voice when they are in models/
     B=${WDEF%.bin}
@@ -27,4 +28,4 @@ if python -m esptool version 2>/dev/null | grep -q "v5"; then ER=erase-region; e
 python -m esptool --chip esp32s3 -p "$PORT" -b "$BAUD" $ER 0x680000 0x900000
 python -m esptool --chip esp32s3 -p "$PORT" -b "$BAUD" $WF 0x0 "$APP" 0x200000 "$W" $EXTRA
 echo "weight sets flashed: main$( [ -n "$EXTRA" ] && echo " + fallbacks")"
-echo "flashed. Console: python -m serial.tools.miniterm $PORT 115200   then: python esp32/tools/say.py \"Hello!\" --port $PORT"
+echo "flashed. Console: python -m serial.tools.miniterm $PORT 115200   then type: text Hello!   (or from a computer: python esp32/tools/say.py \"Hello!\" --port $PORT)"

@@ -10,7 +10,7 @@ Two licenses
   Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (models/LICENSE-WEIGHTS,
   https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode), together with Lokutor's terms of use
   (models/TERMS.md). Commercial use of the weights or their output needs a written license from Lokutor.
-  The prebuilt firmware image esp32/prebuilt/ito_app_merged.bin contains code only, no model weights.
+  The prebuilt firmware images esp32/prebuilt/ito_app_frontend_merged.bin and ito_app_merged.bin contain code only, no model weights.
 
 Model weights: origin and attributions
 --------------------------------------
@@ -51,10 +51,19 @@ Third-party code and designs
 - The vocoder design follows Vocos (Hubert Siuzdak, https://github.com/gemelo-ai/vocos, MIT License, Copyright (c)
   2023 Charactr Inc.): ConvNeXt blocks that predict STFT magnitude and phase, then an inverse STFT.
 
+Included third-party code: espeak-ng
+------------------------------------
+- esp32/frontend/espeak/ is a port of the text-to-phonemes part of espeak-ng 1.52.0 (https://github.com/espeak-ng/espeak-ng),
+  GPLv3 or later, Copyright (C) 2005-2015 Jonathan Duddington, 2013-2026 Reece H. Dunn and the espeak-ng contributors, with
+  ucd-tools (same licence). Licence text: esp32/frontend/espeak/COPYING; edits: esp32/frontend/espeak/PORT.md;
+  esp32/frontend/data/espeak_en_us.bin packs espeak-ng data files (see esp32/frontend/data/NOTICE). These files stay under
+  their own licence; Lokutor cannot relicense them. The prebuilt esp32/prebuilt/ito_app_frontend_merged.bin contains them;
+  a firmware built with CONFIG_ITOFS_FRONTEND=n does not.
+
 Dependencies (not included)
 ---------------------------
-- Text to phonemes on the host: espeak-ng (GPLv3) through phonemizer (GPLv3), loaded with espeakng-loader; nltk
-  (Apache 2.0). The firmware does not contain them.
+- Text to phonemes on the host (tools/say.py, ito/text.py): espeak-ng (GPLv3) through phonemizer (GPLv3), loaded with
+  espeakng-loader; nltk (Apache 2.0). Not included.
 - Firmware: ESP-IDF (Apache 2.0) and Espressif's esp-nn (Apache 2.0), fetched at build time and linked into the
   prebuilt app image. Both are compatible with GPLv3.
 - PyTorch (BSD-style), NumPy (BSD), soundfile (BSD).
