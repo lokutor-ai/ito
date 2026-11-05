@@ -1,0 +1,5 @@
+espeak_en_us.bin packs these files of espeak-ng 1.52.0 (https://github.com/espeak-ng/espeak-ng, GPLv3 or later,
+Copyright (C) 2005-2015 Jonathan Duddington, 2013-2026 Reece H. Dunn and the espeak-ng contributors):
+phontab, phonindex, phondata (only its 8-byte header), intonations, en_dict, lang/gmw/en-US.
+Built with: python3 tools/pack_data.py <espeak-ng-data of espeak-ng 1.52.0 / espeakng-loader 0.2.4> data/espeak_en_us.bin
+This file is licensed GPLv3 or later like the rest of esp32/frontend. See espeak/COPYING.
