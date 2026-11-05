@@ -20,6 +20,7 @@ esp32/host/build/
 esp32/export/
 esp32/logs/
 esp32/host/ito_cli
+esp32/host/ito_batch
 esp32/host/host_test_v3
 esp32/host/host_test_v3_asan
 esp32/host/gen_selftest

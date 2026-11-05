@@ -18,10 +18,12 @@ BLOB = ../../models/ito_male_esp32s3.bin
 GOLDEN = golden/g
 endif
 
-all: ito_cli host_test_v3 gen_selftest opcount_v3 w4_dump host_test_sched host_test_split host_test_frontend
+all: ito_cli ito_batch host_test_v3 gen_selftest opcount_v3 w4_dump host_test_sched host_test_split host_test_frontend
 
 ito_cli: ito_cli.c $(ENGINE)
 	$(CC) $(CFLAGS) -o $@ ito_cli.c ../engine/itofs.c -lm
+ito_batch: ito_batch.c $(ENGINE)
+	$(CC) $(CFLAGS) -o $@ ito_batch.c ../engine/itofs.c -lm
 host_test_v3: host_test_v3.c $(ENGINE)
 	$(CC) $(CFLAGS) -o $@ host_test_v3.c ../engine/itofs.c -lm
 host_test_v3_asan: host_test_v3.c $(ENGINE)
@@ -65,6 +67,6 @@ test: test_frontend host_test_v3 host_test_v3_asan $(BLOB)
 	  else tail -1 asan.log; echo "ASan/UBSan: clean"; fi
 
 clean:
-	rm -f host_test_frontend host_test_split host_test_sched w4_dump ito_cli host_test_v3 host_test_v3_asan gen_selftest opcount_v3 asan.log golden/*.wav
+	rm -f ito_batch host_test_frontend host_test_split host_test_sched w4_dump ito_cli host_test_v3 host_test_v3_asan gen_selftest opcount_v3 asan.log golden/*.wav
 
 .PHONY: all test test_sched test_split test_frontend clean
