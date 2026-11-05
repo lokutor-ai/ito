@@ -41,7 +41,7 @@ and try again.
 | `ito_male_esp32s3{,_int4,_light}.bin` (same sizes, place and license) | the male voice's three sets, flashed to the same three offsets **instead of** the female voice's (`VOICE=male esp32/tools/flash.sh PORT`). The app is the same for both voices. |
 
 `flash.sh` erases the two optional partitions first and writes the sets it finds in `models/`; with only the main set the board behaves as before (no fallback). Flash layout: app 0x10000 (2 MB slot), then three 4.5 MB weight partitions
-(`weights` 0x200000, `weights_b` 0x680000, `weights_c` 0xB00000; [`BLOB_FORMAT.md`](BLOB_FORMAT.md)).
+(`weights` 0x200000, `weights_b` 0x680000, `weights_c` 0xB00000; [`BLOB_FORMAT.md`](BLOB_FORMAT.md)). Two small data partitions follow them, `texts` (0xF80000, 128 KB) and `results` (0xFA0000, 256 KB), used only by the stand-alone test mode of the front end ([`FRONTEND.md`](FRONTEND.md)); the shipped image does not touch them.
 
 At boot the board does these things, in order:
 1. It reads the stored split verdict and the reset reason, copies the main set to PSRAM, runs the **supply test** if one is due (see "GEMM split"), and runs the **self-test**: it synthesizes a golden sentence and compares the hash of
