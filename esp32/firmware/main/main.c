@@ -25,6 +25,7 @@
 #include "esp_heap_caps.h"
 #include "esp_partition.h"
 #include "esp_system.h"
+#include <sys/reent.h>
 #include "esp_random.h"
 #include "esp_cache.h"
 #include "driver/uart.h"
@@ -161,7 +162,7 @@ static int s_active = -1, s_selected = -1, s_degraded;   // weight set in use / 
 #define PLAN_MAX_DELAY_US 4000000.0
 static double s_obs_us[ITOFS_SCHED_MAXCH];         // production times of the chunks of the current utterance so far
 
-typedef struct { int kind; int n; uint32_t seed; int64_t t0; int16_t tok[MAX_TOKENS]; } req_t;   // 0 say, 1 demos, 2 self-test, 3 style, 4 act bits, 5 bench, 6 wmode, 7 icprof, 8 first, 9 tier, 10 recal, 11 status, 13 no-op, 14 rep, 15 split, 16 hang (test builds), 20 silent text utterance (seed, t0 = text arrival)
+typedef struct { int kind; int n; uint32_t seed; int64_t t0; uint32_t aux[4]; int flags; int16_t tok[MAX_TOKENS]; } req_t;   // 0 say, 1 demos, 2 self-test, 3 style, 4 act bits, 5 bench, 6 wmode, 7 icprof, 8 first, 9 tier, 10 recal, 11 status, 13 no-op, 14 rep, 15 split, 16 hang (test builds), 20 silent text utterance (seed, t0 = text arrival; flags & 1: emulate the playout clock), 21 stand-alone test utterance (aux = text, utt, front-end us, ids hash), 22 end of the stand-alone test, 23 end of one test text
 static req_t s_req_tmp;
 
 static double ms(int64_t us) { return us / 1000.0; }
@@ -318,13 +319,20 @@ static void play_task(void *arg)
 // ------------------------------------------------------------------------------------------------------------------
 // synthesis
 // ------------------------------------------------------------------------------------------------------------------
-typedef struct { double ttfa_ms, begin_ms, compute_ms, audio_s; int frames, tok_first; double plan_delay_ms; int plan_underruns, plan_feasible; uint32_t hash; int cancelled, chunks; } stats_t;
+typedef struct { double ttfa_ms, begin_ms, compute_ms, audio_s; int frames, tok_first; double plan_delay_ms; int plan_underruns, plan_feasible; uint32_t hash; int cancelled, chunks; double gap_ms, p_late_ms; int gap_valid, p_underruns; } stats_t;
 
 // Synthesise tokens; stream chunks to the player (play=1) or into out[] (play=0).
 static int tier_plan(int n_tok, int nobs, itofs_plan_t *pl);       // below: start-delay plan from the active weight set's calibration
+static int s_out_wrap;               // play=0 only: out[] is a scratch ring of out_max samples (the hash and the length cover the whole utterance, not just the first out_max samples)
+static int s_pace;                   // play=0 only: emulate the playout clock (no I2S): the synthesis waits as the player's NBUF buffers would make it wait, lateness counts as an underrun
+static int64_t s_pace_end_us;        // emulated playout: the time at which the audio handed over so far has played out (0: nothing playing)
 static int speak(const int *tok, int n, int style, uint32_t seed, int play, int16_t *out, long out_max, stats_t *S)
 {
     S->tok_first = 0; S->plan_delay_ms = -1; S->plan_underruns = 0; S->plan_feasible = 1; S->hash = 2166136261u; S->cancelled = 0; S->chunks = 0;
+    S->gap_ms = 0; S->gap_valid = 0; S->p_late_ms = 0; S->p_underruns = 0;
+    const int pace = !play && s_pace;
+    int64_t pstart = 0, cend[NBUF]; int have_p = 0;
+    long wpos = 0;
     s_cur_delay_us = 0;
     s_cancel = 0; s_speaking = play;
     int64_t t0 = esp_timer_get_time();
@@ -342,10 +350,16 @@ static int speak(const int *tok, int n, int style, uint32_t seed, int play, int1
         guard_wdt_feed();
         if (play) xQueueReceive(s_free_q, &b, portMAX_DELAY);
         if (s_cancel) { if (play) xQueueSend(s_free_q, &b, portMAX_DELAY); break; }
-        int16_t *dst = play ? b.pcm : out + pos;
         s_ctx.text_step = text_step_for(kch);
-        const int want = chunk_frames_for(kch++) * s_hop;                                  // low-latency first chunk, ramp, steady state
-        int room = play ? want : (int)((out_max - pos) < want ? (out_max - pos) : want);
+        const int want = chunk_frames_for(kch) * s_hop;                                  // low-latency first chunk, ramp, steady state
+        if (pace && have_p && kch >= NBUF) {         // the player returns a buffer when its chunk has played: wait for chunk kch - NBUF
+            const int64_t until = pstart + cend[kch % NBUF];
+            while (esp_timer_get_time() < until) { guard_wdt_feed(); vTaskDelay(1); }
+        }
+        kch++;
+        if (!play && s_out_wrap && wpos + want > out_max) wpos = 0;
+        int16_t *dst = play ? b.pcm : out + (s_out_wrap ? wpos : pos);
+        int room = play ? want : s_out_wrap ? want : (int)((out_max - pos) < want ? (out_max - pos) : want);
         int64_t a = esp_timer_get_time();
         int got = room >= s_hop ? itofs_next_chunk(&s_ctx, dst, room) : 0;
         int64_t e = esp_timer_get_time();
@@ -354,7 +368,22 @@ static int speak(const int *tok, int n, int style, uint32_t seed, int play, int1
         S->chunks++;
         if (kch - 1 < ITOFS_SCHED_MAXCH) s_obs_us[kch - 1] = (double)(e - a);
         if (ttfa < 0) { ttfa = e - t0; S->tok_first = s_ctx.n_done; }
-        pos += got;
+        if (pace) {
+            const int64_t off_us = (int64_t)pos * 1000000 / s_sr;
+            if (!have_p) {
+                have_p = 1;
+                if (s_pace_end_us > e) { pstart = s_pace_end_us; S->gap_valid = 1; S->gap_ms = -(double)(pstart - e) / 1e3; }      // the previous utterance is still playing: no gap, this much slack
+                else {
+                    itofs_plan_t pl;
+                    pstart = e;
+                    if (tier_plan(n, 1, &pl)) { S->plan_delay_ms = pl.start_delay_us / 1e3; if (t0 + (int64_t)pl.start_delay_us > pstart) pstart = t0 + (int64_t)pl.start_delay_us; }
+                    if (s_pace_end_us) { S->gap_valid = 1; S->gap_ms = (double)(e - s_pace_end_us) / 1e3; }                         // audible gap before this utterance
+                }
+            }
+            if (e > pstart + off_us) { const int64_t late = e - (pstart + off_us); S->p_underruns++; if (late / 1e3 > S->p_late_ms) S->p_late_ms = late / 1e3; pstart += late; }
+            cend[(kch - 1) % NBUF] = off_us + (int64_t)got * 1000000 / s_sr;
+        }
+        pos += got; if (!play && s_out_wrap) wpos += got;
         for (int i = 0; i < got; i++) { S->hash ^= (uint16_t)dst[i]; S->hash *= 16777619u; }
         if (play) {
             if (!s_playing) {          // adaptive pre-buffer: plan (kch == 1) or re-plan the start delay with the chunk times actually seen in this utterance
@@ -373,6 +402,7 @@ static int speak(const int *tok, int n, int style, uint32_t seed, int play, int1
         xQueueReceive(s_done_q, &end, portMAX_DELAY);
     }
     S->cancelled = s_cancel; s_cancel = 0; s_speaking = 0;
+    if (pace && have_p) s_pace_end_us = pstart + (int64_t)pos * 1000000 / s_sr;
     if (s_trace) {                                   // `trace 1`: the time of every chunk of this utterance
         printf("CHUNKS %d (ms):", S->chunks);
         for (int i = 0; i < S->chunks && i < ITOFS_SCHED_MAXCH; i++) printf(" %.1f", s_obs_us[i] / 1e3);
@@ -1267,7 +1297,7 @@ static int s_fe_fast_first = 0;
 #define FE_STACK_BYTES (64 * 1024)   // measured peak 45.7 KB over the corpus (espeak-ng's clause translation keeps its buffers on the stack)
 #endif
 #define FE_TEXT_MAX 4096
-enum { FE_SPEAK = 0, FE_SILENT = 1, FE_IDS = 2, FE_PHRASES = 3, FE_PHRASES_SILENT = 4 };
+enum { FE_SPEAK = 0, FE_SILENT = 1, FE_IDS = 2, FE_PHRASES = 3, FE_PHRASES_SILENT = 4, FE_PACED = 5, FE_AUTO = 6 };
 typedef struct { int mode; int64_t t_arrive; } fejob_t;
 static QueueHandle_t s_fe_q;
 static volatile int s_fe_busy, s_fe_abort, s_fe_up;
@@ -1275,8 +1305,12 @@ static char *s_fe_text;                 // PSRAM: the text of the current job
 static itofe_stream *s_fe_st;
 static req_t *s_fe_req;
 static StaticTask_t s_fe_tcb;
+static TaskHandle_t s_fe_h;
 static int16_t *s_text_pcm;             // PSRAM: PCM of the silent (compute-only) text utterances
 
+#ifndef CONFIG_ITOFS_AUTOTEST
+static void fe_auto_run(void) {}
+#endif
 static uint32_t fnv_ids(const uint8_t *ids, int n) { uint32_t h = 2166136261u; for (int i = 0; i < n; i++) { h ^= ids[i]; h *= 16777619u; } return h; }
 
 // text -> utterances -> requests for the synthesis task
@@ -1300,13 +1334,86 @@ static void fe_run_text(const char *text, int mode, int64_t t_arrive, int *seed_
         }
         const int nt = n > MAX_TOKENS ? MAX_TOKENS : n;
         for (int i = 0; i < nt; i++) s_fe_req->tok[i] = buf[i];
-        s_fe_req->kind = (mode == FE_SILENT) ? 20 : 0;
+        s_fe_req->kind = (mode == FE_SILENT || mode == FE_PACED) ? 20 : 0;
+        s_fe_req->flags = mode == FE_PACED;
         s_fe_req->n = nt;
-        s_fe_req->seed = (mode == FE_SILENT) ? 1u + (uint32_t)(*seed_ctr)++ : 0;
+        s_fe_req->seed = (mode == FE_SILENT || mode == FE_PACED) ? 1u + (uint32_t)(*seed_ctr)++ : 0;
         s_fe_req->t0 = k == 0 ? t_arrive : 0;
         xQueueSend(s_req_q, s_fe_req, portMAX_DELAY);       // blocks while the synthesis queue is full: the front end runs at most two utterances ahead
     }
 }
+
+
+#ifdef CONFIG_ITOFS_AUTOTEST
+// ------------------------------------------------------------------------------------------------------------------
+// Stand-alone test (CONFIG_ITOFS_AUTOTEST): after boot the chip takes the texts from the `texts` data partition (written by
+// frontend/tools/make_texts_bin.py), runs normalization + espeak-ng + Ito on the chip with no console use, and logs one 64-byte record
+// per utterance into the `results` partition (read back with esptool read-flash; frontend/tools/read_results.py). No I2S: the playout
+// clock is emulated (speak(): s_pace), so the synthesis runs against the same buffer back-pressure as with a player.
+// ------------------------------------------------------------------------------------------------------------------
+#include "esp_flash.h"
+#define AT_MAGIC_HDR 0x31485249u   // "IRH1"
+#define AT_MAGIC_BOOT 0x31544249u  // "IBT1"
+#define AT_MAGIC_UTT 0x31545549u   // "IUT1"
+#define AT_MAGIC_DONE 0x314e4449u  // "IDN1"
+#define AT_MAGIC_TXT 0x54585449u   // "ITXT"
+typedef struct __attribute__((packed)) {
+    uint32_t magic; uint16_t text, utt, boot, ntok;
+    uint32_t ids_fnv, pcm_fnv, samples;
+    uint32_t fe_us, e2e_us, ttfa_us, compute_us;      // e2e_us: text arrived -> first chunk ready (utterance 0 of a text only; 0 otherwise)
+    int32_t gap_us; uint16_t underruns; uint8_t set, flags;   // gap_us: first chunk ready minus the end of the previous utterance's playout (negative = ready early); flags: 1 gap valid, 2 truncated, 4 split full
+    uint32_t free_psram, free_int, minfree_psram, minfree_int;
+} atutt_t;
+typedef struct __attribute__((packed)) {
+    uint32_t magic, boot, reset_reason, flags, set, first_text, n_texts_this_boot, calib_rtf_milli, free_psram, free_int, minfree_psram, minfree_int, uptime_ms, fe_stack_hw, texts_fnv, pad;
+} atboot_t;
+_Static_assert(sizeof(atutt_t) == 64 && sizeof(atboot_t) == 64, "record size");
+static const esp_partition_t *s_at_res;
+static char *s_at_blob; static const char **s_at_txt; static uint16_t *s_at_len; static uint32_t s_at_n, s_at_fnv;
+static uint32_t s_at_wpos, s_at_boot, s_at_start, s_at_end, s_at_nrec, s_at_loop;
+static volatile int s_at_sent, s_at_done, s_at_on;
+static int s_at_full;
+#ifdef CONFIG_ITOFS_AUTOTEST_QUIET
+static FILE *s_real_stdout; static volatile int s_quiet;
+static ssize_t at_null_write(void *c, const char *b, size_t n) { (void)c; if (!s_quiet) fwrite(b, 1, n, s_real_stdout); return (ssize_t)n; }
+#endif
+static void at_append(const void *rec)
+{
+    if (!s_at_res || s_at_wpos + 64 > s_at_res->size) { s_at_full = 1; return; }
+    if (esp_partition_write(s_at_res, s_at_wpos, rec, 64) == ESP_OK) { s_at_wpos += 64; s_at_nrec++; } else s_at_full = 1;
+}
+static uint32_t at_fnv(const void *p, size_t n) { const uint8_t *b = p; uint32_t h = 2166136261u; for (size_t i = 0; i < n; i++) { h ^= b[i]; h *= 16777619u; } return h; }
+static int at_pending(void) { return s_at_on; }
+
+// text loop of the front-end task: one text at a time, the next one starts when the synthesis has finished the previous
+static void fe_auto_run(void)
+{
+    static uint8_t buf[MAX_TOKENS + 32];
+    for (uint32_t i = s_at_start; i < s_at_end && !s_fe_abort; i++) {
+        const uint32_t ti = i % s_at_n;
+        while (s_at_done < s_at_sent) vTaskDelay(1);
+        const size_t l = s_at_len[ti] < FE_TEXT_MAX - 1 ? s_at_len[ti] : FE_TEXT_MAX - 1;
+        memcpy(s_fe_text, s_at_txt[ti], l); s_fe_text[l] = 0;
+        const int64_t t_arrive = esp_timer_get_time();
+        itofe_stream_begin(s_fe_st, s_fe_text, s_fe_fast_first);
+        for (int k = 0;; k++) {
+            const int64_t a = esp_timer_get_time();
+            const int n = itofe_stream_next(s_fe_st, buf, sizeof buf);
+            const int64_t b = esp_timer_get_time();
+            if (n <= 0) break;
+            const int nt = n > MAX_TOKENS ? MAX_TOKENS : n;
+            for (int q = 0; q < nt; q++) s_fe_req->tok[q] = buf[q];
+            s_fe_req->kind = 21; s_fe_req->n = nt; s_fe_req->seed = 1u + (uint32_t)k;
+            s_fe_req->t0 = k == 0 ? t_arrive : 0; s_fe_req->flags = n > MAX_TOKENS ? 2 : 0;
+            s_fe_req->aux[0] = ti; s_fe_req->aux[1] = (uint32_t)k; s_fe_req->aux[2] = (uint32_t)(b - a); s_fe_req->aux[3] = fnv_ids(buf, n);
+            xQueueSend(s_req_q, s_fe_req, portMAX_DELAY);
+        }
+        s_at_sent++;
+        s_fe_req->kind = 23; xQueueSend(s_req_q, s_fe_req, portMAX_DELAY);
+    }
+    s_fe_req->kind = 22; xQueueSend(s_req_q, s_fe_req, portMAX_DELAY);
+}
+#endif
 
 static void fe_task(void *arg)
 {
@@ -1322,7 +1429,9 @@ static void fe_task(void *arg)
         if (xQueueReceive(s_fe_q, &j, pdMS_TO_TICKS(2000)) != pdTRUE) continue;
         s_fe_abort = 0;
         int seed_ctr = 0;
-        if (j.mode == FE_PHRASES || j.mode == FE_PHRASES_SILENT) {      // the phrase list stored in flash: one phrase per line, '#' starts a comment
+        if (j.mode == FE_AUTO) {
+            fe_auto_run();
+        } else if (j.mode == FE_PHRASES || j.mode == FE_PHRASES_SILENT) {      // the phrase list stored in flash: one phrase per line, '#' starts a comment
             const char *p = phrases_start, *end = phrases_end;
             int np = 0;
             while (p < end && !s_fe_abort) {
@@ -1340,11 +1449,125 @@ static void fe_task(void *arg)
         } else {
             fe_run_text(s_fe_text, j.mode, j.t_arrive, &seed_ctr);
         }
-        printf("FE done (stack high-water: %u bytes of %u)\n", (unsigned)(FE_STACK_BYTES - uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)), FE_STACK_BYTES);
+        printf("FE done (stack high-water: %u bytes of %u; free PSRAM %u KB (min %u), free internal SRAM %u KB (min %u))\n", (unsigned)(FE_STACK_BYTES - uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)), FE_STACK_BYTES,
+               (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024), (unsigned)(heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM) / 1024),
+               (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024), (unsigned)(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024));
         s_fe_busy = 0;
         if (j.mode == FE_IDS) printf("READY\n");
     }
 }
+
+
+#ifdef CONFIG_ITOFS_AUTOTEST
+static void at_unquiet(void)
+{
+#ifdef CONFIG_ITOFS_AUTOTEST_QUIET
+    s_quiet = 0;
+#endif
+}
+// called by the synthesis task once the weight set is chosen: decide what to run, log the boot, hand the texts to the front-end task
+static void autotest_begin(void)
+{
+    const esp_partition_t *pt = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, (esp_partition_subtype_t)0x43, "texts");
+    s_at_res = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, (esp_partition_subtype_t)0x44, "results");
+    uint32_t th[4] = {0};
+    if (!pt || !s_at_res || esp_partition_read(pt, 0, th, 16) != ESP_OK || th[0] != AT_MAGIC_TXT || th[1] == 0 || th[1] > 4000 || th[2] > pt->size - 16) {
+        printf("AUTOTEST: no texts to run (partitions 'texts' / 'results' missing or texts empty)\n"); at_unquiet(); return;
+    }
+    for (int w = 0; w < 100 && !s_fe_up; w++) vTaskDelay(pdMS_TO_TICKS(100));
+    s_at_n = th[1];
+    s_at_blob = heap_caps_malloc(th[2] + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_at_txt = heap_caps_malloc(sizeof(char *) * s_at_n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_at_len = heap_caps_malloc(sizeof(uint16_t) * s_at_n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!s_at_blob || !s_at_txt || !s_at_len || esp_partition_read(pt, 16, s_at_blob, th[2]) != ESP_OK) { printf("AUTOTEST: no memory / read error\n"); at_unquiet(); return; }
+    {
+        uint32_t o = 0;
+        for (uint32_t i = 0; i < s_at_n; i++) {
+            if (o + 2 > th[2]) { printf("AUTOTEST: texts blob truncated\n"); at_unquiet(); return; }
+            uint16_t l; memcpy(&l, s_at_blob + o, 2); o += 2;
+            if (o + l > th[2]) { printf("AUTOTEST: texts blob truncated\n"); at_unquiet(); return; }
+            s_at_len[i] = l; s_at_txt[i] = s_at_blob + o; o += l;
+        }
+    }
+    s_at_fnv = at_fnv(s_at_blob, th[2]);
+    atboot_t h; esp_partition_read(s_at_res, 0, &h, sizeof h);
+    if (h.magic != AT_MAGIC_HDR || h.texts_fnv != s_at_fnv) {              // a new run: erase the log and write its header
+        printf("AUTOTEST: new run, erasing the results partition (%u KB)\n", (unsigned)(s_at_res->size / 1024));
+        esp_partition_erase_range(s_at_res, 0, s_at_res->size);
+        memset(&h, 0, sizeof h);
+        h.magic = AT_MAGIC_HDR; h.boot = 1; h.reset_reason = s_at_n; h.flags = CONFIG_ITOFS_AUTOTEST_LOOP_BOOTS; h.set = CONFIG_ITOFS_AUTOTEST_LOOP_TEXTS;
+        h.first_text = s_fe_fast_first; h.n_texts_this_boot = s_at_n; h.texts_fnv = s_at_fnv; h.free_psram = th[2];
+        esp_partition_write(s_at_res, 0, &h, sizeof h);
+    }
+    uint32_t off = 4096, boots = 0, last_text = 0, done = 0, nrec = 0;
+    for (; off + 64 <= s_at_res->size; off += 64) {
+        atutt_t r; esp_partition_read(s_at_res, off, &r, sizeof r);
+        if (r.magic == 0xffffffffu) break;
+        if (r.magic == AT_MAGIC_BOOT) boots++;
+        else if (r.magic == AT_MAGIC_DONE) done = 1;
+        else if (r.magic == AT_MAGIC_UTT) { nrec++; last_text = r.text; }
+    }
+    s_at_wpos = off; s_at_nrec = nrec; s_at_boot = boots; s_at_loop = CONFIG_ITOFS_AUTOTEST_LOOP_BOOTS;
+    if (done) { printf("AUTOTEST: the results partition holds a finished run (%u records); erase it to run again\n", (unsigned)nrec); at_unquiet(); return; }
+    if (!s_at_loop) { s_at_start = last_text; s_at_end = s_at_n; }
+    else { s_at_start = (boots * CONFIG_ITOFS_AUTOTEST_LOOP_TEXTS) % s_at_n; s_at_end = s_at_start + CONFIG_ITOFS_AUTOTEST_LOOP_TEXTS; }
+    atboot_t b; memset(&b, 0, sizeof b);
+    b.magic = AT_MAGIC_BOOT; b.boot = boots; b.reset_reason = (uint32_t)esp_reset_reason();
+    b.flags = (s_selftest_ok ? 1u : 0) | (s3_gemm_dual ? 2u : 0) | (!s_at_loop && s_at_start > 0 ? 4u : 0);
+    b.set = (uint32_t)s_active; b.first_text = s_at_start; b.n_texts_this_boot = s_at_end - s_at_start;
+    b.calib_rtf_milli = s_active >= 0 && s_tier[s_active].calibrated ? (uint32_t)(s_tier[s_active].rtf * 1000) : 0;
+    b.free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM); b.free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    b.minfree_psram = heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM); b.minfree_int = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+    b.uptime_ms = (uint32_t)(esp_timer_get_time() / 1000); b.texts_fnv = s_at_fnv;
+    at_append(&b);
+    printf("AUTOTEST: boot %u, texts %u..%u of %u, set %d, %s split, reset %u\n", (unsigned)boots, (unsigned)s_at_start, (unsigned)s_at_end, (unsigned)s_at_n, s_active, s3_gemm_dual ? "full" : "row", (unsigned)b.reset_reason);
+    s_at_on = 1; s_fe_busy = 1; s_at_sent = s_at_done = 0;
+    fejob_t j = { FE_AUTO, esp_timer_get_time() };
+    xQueueSend(s_fe_q, &j, 0);
+}
+
+static void at_utt_record(const stats_t *S, long samples, int64_t ts)
+{
+    atutt_t r; memset(&r, 0, sizeof r);
+    r.magic = AT_MAGIC_UTT; r.text = (uint16_t)s_req_tmp.aux[0]; r.utt = (uint16_t)s_req_tmp.aux[1]; r.boot = (uint16_t)s_at_boot; r.ntok = (uint16_t)s_req_tmp.n;
+    r.ids_fnv = s_req_tmp.aux[3]; r.pcm_fnv = S->hash; r.samples = (uint32_t)samples;
+    r.fe_us = s_req_tmp.aux[2]; r.ttfa_us = (uint32_t)(S->ttfa_ms * 1000); r.compute_us = (uint32_t)(S->compute_ms * 1000);
+    r.e2e_us = s_req_tmp.t0 ? (uint32_t)(ts - s_req_tmp.t0) + r.ttfa_us : 0;
+    r.gap_us = (int32_t)(S->gap_ms * 1000); r.underruns = (uint16_t)S->p_underruns; r.set = (uint8_t)s_active;
+    r.flags = (S->gap_valid ? 1 : 0) | ((s_req_tmp.flags & 2) ? 2 : 0) | (s3_gemm_dual ? 4 : 0);
+    r.free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM); r.free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    r.minfree_psram = heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM); r.minfree_int = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+    at_append(&r);
+    printf("AT text %u utt %u: %u tokens, fe %.1f ms, first chunk %.1f ms (from text %.1f), RTF %.3f, underruns %u, gap %.1f ms, pcm %08lx\n", r.text, r.utt, r.ntok, r.fe_us / 1e3, r.ttfa_us / 1e3, r.e2e_us / 1e3,
+           S->compute_ms / 1000.0 / S->audio_s, r.underruns, S->gap_ms, (unsigned long)r.pcm_fnv);
+}
+
+static void at_finish(void)
+{
+    const int last = !s_at_loop || s_at_boot + 1 >= s_at_loop;
+    if (last) {
+        atboot_t d; memset(&d, 0, sizeof d);
+        d.magic = AT_MAGIC_DONE; d.boot = s_at_boot; d.first_text = s_at_nrec; d.n_texts_this_boot = s_at_full;
+        d.free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM); d.free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+        d.minfree_psram = heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM); d.minfree_int = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+        d.uptime_ms = (uint32_t)(esp_timer_get_time() / 1000); d.fe_stack_hw = FE_STACK_BYTES - uxTaskGetStackHighWaterMark(s_fe_h) * sizeof(StackType_t);
+        d.texts_fnv = s_at_fnv;
+        at_append(&d);
+    }
+    s_at_on = 0; s_fe_busy = 0;
+#ifdef CONFIG_ITOFS_AUTOTEST_SELFRESET
+    if (!last) {                                                       // the next boot of the reboot loop
+        vTaskDelay(pdMS_TO_TICKS(200));
+#ifdef CONFIG_ITOFS_AUTOTEST_WDT_RESETS
+        if (s_at_boot & 1) { guard_wdt_arm(1000); for (;;) vTaskDelay(pdMS_TO_TICKS(100)); }      // odd boots: stop feeding the hardware watchdog and let it reset the chip
+#endif
+        esp_restart();
+    }
+#endif
+    at_unquiet();
+    printf("AUTOTEST finished: %u records, results partition %s\n", (unsigned)s_at_nrec, s_at_full ? "FULL (some records lost)" : "ok");
+}
+#endif
 
 static void fe_start(void)
 {
@@ -1354,7 +1577,7 @@ static void fe_start(void)
     s_fe_req = heap_caps_malloc(sizeof(req_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         StackType_t *stk = heap_caps_malloc(FE_STACK_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!s_fe_q || !s_fe_text || !s_fe_st || !s_fe_req || !stk) { printf("ERROR front end: no memory\n"); return; }
-    xTaskCreateStaticPinnedToCore(fe_task, "itofs_fe", FE_STACK_BYTES / sizeof(StackType_t), NULL, 3, stk, &s_fe_tcb, 0);
+    s_fe_h = xTaskCreateStaticPinnedToCore(fe_task, "itofs_fe", FE_STACK_BYTES / sizeof(StackType_t), NULL, 3, stk, &s_fe_tcb, 0);
 }
 
 // submit a text job (from the console or the boot demo); text == NULL: the stored phrase list
@@ -1389,6 +1612,9 @@ static void synth_task(void *arg)
     board_bench();                   // hardware: measure, keep the fastest weight-staging mode (QEMU: `bench` command)
 #endif
     tiers_select();
+#ifdef CONFIG_ITOFS_AUTOTEST
+    autotest_begin();
+#endif
 #ifdef CONFIG_ITOFS_BOOT_DEMOS
     play_demos(-1);
 #endif
@@ -1419,10 +1645,32 @@ static void synth_task(void *arg)
             if (!s_text_pcm) s_text_pcm = heap_caps_malloc(sizeof(int16_t) * REP_MAX_SAMPLES, MALLOC_CAP_SPIRAM);
             stats_t S;
             const int64_t ts = esp_timer_get_time();
-            if (s_text_pcm && speak(s_tok_buf, s_req_tmp.n, s_style, s_req_tmp.seed, 0, s_text_pcm, REP_MAX_SAMPLES, &S) > 0) {
-                print_timing("textq", &S, s_req_tmp.n, s_style);
+            s_out_wrap = 1; s_pace = s_req_tmp.flags & 1;          // textq: the hash covers the whole utterance (the PCM buffer is a ring); textp: the playout clock is emulated
+            if (s_pace && s_req_tmp.t0) s_pace_end_us = 0;         // a new text: nothing is playing
+            const int got20 = s_text_pcm ? speak(s_tok_buf, s_req_tmp.n, s_style, s_req_tmp.seed, 0, s_text_pcm, REP_MAX_SAMPLES, &S) : 0;
+            s_out_wrap = 0;
+            if (got20 > 0) {
+                print_timing(s_pace ? "textp" : "textq", &S, s_req_tmp.n, s_style);
+                if (s_pace) printf("PACED: utterance %s%.1f ms %s the end of the previous one's playout | underruns %d, worst lateness %.1f ms\n", S.gap_valid ? "ready " : "(first) ", S.gap_valid ? (S.gap_ms < 0 ? -S.gap_ms : S.gap_ms) : 0.0, S.gap_valid ? (S.gap_ms < 0 ? "before" : "AFTER") : "-", S.p_underruns, S.p_late_ms);
+                s_pace = 0;
                 if (s_req_tmp.t0) printf("TEXT_E2E: text arrived -> first audio chunk ready %.1f ms (front end + queue %.1f ms, engine %.1f ms), no playback\n", ms(ts - s_req_tmp.t0) + S.ttfa_ms, ms(ts - s_req_tmp.t0), S.ttfa_ms);
             } else if (!s_text_pcm) printf("ERROR no PSRAM for the text PCM\n");
+            s_pace = 0;
+#ifdef CONFIG_ITOFS_AUTOTEST
+        } else if (s_req_tmp.kind == 21) {           // stand-alone test utterance: synthesize against the emulated playout clock, log the record
+            for (int i = 0; i < s_req_tmp.n; i++) s_tok_buf[i] = s_req_tmp.tok[i];
+            if (!s_text_pcm) s_text_pcm = heap_caps_malloc(sizeof(int16_t) * REP_MAX_SAMPLES, MALLOC_CAP_SPIRAM);
+            stats_t S;
+            const int64_t ts = esp_timer_get_time();
+            s_out_wrap = 1; s_pace = 1;
+            const int got21 = s_text_pcm ? speak(s_tok_buf, s_req_tmp.n, s_style, s_req_tmp.seed, 0, s_text_pcm, REP_MAX_SAMPLES, &S) : 0;
+            s_out_wrap = 0; s_pace = 0;
+            if (got21 > 0) at_utt_record(&S, got21, ts);
+        } else if (s_req_tmp.kind == 23) {
+            s_pace_end_us = 0; s_at_done++;
+        } else if (s_req_tmp.kind == 22) {
+            at_finish();
+#endif
 #endif
         } else if (s_req_tmp.kind == 1) {
             play_demos(s_req_tmp.n);
@@ -1492,7 +1740,7 @@ static void synth_task(void *arg)
             s_ctx.act_bits = s_req_tmp.n;
             printf("OK %d-bit activations for the int8-weight layers\n", s_ctx.act_bits);
         }
-        printf("READY\n");
+        if (s_req_tmp.kind != 21 && s_req_tmp.kind != 23) printf("READY\n");
     }
 }
 
@@ -1520,12 +1768,12 @@ static void handle_line(char *line)
         printf("OK %d tokens queued\n", n);
         xQueueSend(s_req_q, &s_in_req, portMAX_DELAY);
 #ifdef CONFIG_ITOFS_FRONTEND
-    } else if (!strncmp(line, "text", 4) && (line[4] == ' ' || line[4] == 'q' || line[4] == 0)) {      // text <string> | textq <string>: front end on the chip, then speak / compute only
-        const int q = line[4] == 'q';
+    } else if (!strncmp(line, "text", 4) && (line[4] == ' ' || line[4] == 'q' || line[4] == 'p' || line[4] == 0)) {      // text <string> | textq <string> | textp <string>: front end on the chip, then speak / compute only / compute against an emulated playout clock
+        const int q = line[4] == 'q' || line[4] == 'p';
         const char *t = line + 4 + q;
         while (*t == ' ') t++;
-        if (!*t) { printf("ERROR text <English text> (textq: compute only, no playback)\n"); return; }
-        fe_submit(t, q ? FE_SILENT : FE_SPEAK);
+        if (!*t) { printf("ERROR text <English text> (textq: compute only, no playback; textp: no playback, playout clock emulated)\n"); return; }
+        fe_submit(t, line[4] == 'p' ? FE_PACED : q ? FE_SILENT : FE_SPEAK);
     } else if (!strncmp(line, "ids", 3) && (line[3] == ' ' || line[3] == 0)) {            // ids <string>: only the front end, print the token ids
         const char *t = line + 3;
         while (*t == ' ') t++;
@@ -1733,6 +1981,14 @@ static void halt(void) { for (;;) vTaskDelay(1000); }
 
 void app_main(void)
 {
+#if defined(CONFIG_ITOFS_AUTOTEST) && defined(CONFIG_ITOFS_AUTOTEST_QUIET)
+    {   // stand-alone test: nothing is written to the console (stdout of all tasks created from here on goes nowhere) until the run is over
+        s_real_stdout = stdout;
+        cookie_io_functions_t io = { .read = NULL, .write = at_null_write, .seek = NULL, .close = NULL };
+        FILE *nul = fopencookie(NULL, "w", io);
+        if (nul) { setvbuf(nul, NULL, _IONBF, 0); s_quiet = 1; _GLOBAL_REENT->_stdout = nul; stdout = nul; }
+    }
+#endif
     printf("\n==== ItoFS TTS on ESP32-S3 ====\n");
     guard_wdt_arm(WDT_RUN_MS);
     {   // GEMM split: the stored verdict and the evidence of the reset that led here (see itofs_split.h); the row split runs until the supply test has passed

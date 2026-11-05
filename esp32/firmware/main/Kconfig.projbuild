@@ -32,6 +32,46 @@ menu "Ito"
         help
             For tests: the boot phrases are synthesized into memory instead of being played (the I2S and the codec are not used).
 
+    config ITOFS_AUTOTEST
+        bool "Stand-alone test: run the texts of the `texts` partition on the chip and log per-utterance results in `results`"
+        depends on ITOFS_FRONTEND
+        default n
+        help
+            After boot the chip reads English texts from the data partition `texts` (frontend/tools/make_texts_bin.py), runs normalization, espeak-ng
+            phonemization and the Ito synthesis on the chip (no I2S: the playout clock is emulated) and appends one 64-byte record per utterance
+            (ids hash, front-end time, first chunk, RTF, PCM hash, underruns, heap) to the data partition `results` (frontend/tools/read_results.py).
+            No computer is needed while it runs. The run is finished when a done record exists; erase `results` to run again.
+
+    config ITOFS_AUTOTEST_QUIET
+        bool "... and write nothing to the console while it runs (stdout is discarded until the run is over)"
+        depends on ITOFS_AUTOTEST
+        default n
+
+    config ITOFS_AUTOTEST_LOOP_BOOTS
+        int "Reboot-loop mode: number of boots (0 = one run through all the texts)"
+        depends on ITOFS_AUTOTEST
+        default 0
+        help
+            With N > 0 every boot runs ITOFS_AUTOTEST_LOOP_TEXTS texts (starting where the previous boot stopped), appends its records and, if
+            ITOFS_AUTOTEST_SELFRESET is set, restarts the chip; after N boots a done record ends the loop.
+
+    config ITOFS_AUTOTEST_LOOP_TEXTS
+        int "Reboot-loop mode: texts per boot"
+        depends on ITOFS_AUTOTEST
+        default 4
+
+    config ITOFS_AUTOTEST_SELFRESET
+        bool "Reboot-loop mode: the firmware restarts itself (esp_restart) after each boot's texts"
+        depends on ITOFS_AUTOTEST
+        default y
+
+    config ITOFS_AUTOTEST_WDT_RESETS
+        bool "Reboot-loop mode: every second reset is a hardware-watchdog reset (the firmware stops feeding it) instead of esp_restart"
+        depends on ITOFS_AUTOTEST_SELFRESET
+        default n
+        help
+            A watchdog reset counts against the full split (it latches the row split until `split auto`); results stay identical, only slower.
+
     config ITOFS_BOOT_DEMOS
         bool "Speak the three demo sentences at every boot"
         default n

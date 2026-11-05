@@ -7,6 +7,9 @@ set -e
 cd "$(dirname "$0")/../firmware"
 IDF=${IDF_PATH:-$HOME/esp/esp-idf}
 . "$IDF/export.sh" > /dev/null
+# a stale <dir>/sdkconfig from an earlier build keeps its old values and silently ignores new sdkconfig.defaults entries (the front end needs
+# CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY: without it the hot arena no longer fits internal SRAM and the engine runs ~25 % slower): always start clean
+rm -rf build_hw build_qemu
 idf.py -B build_hw -D SDKCONFIG=build_hw/sdkconfig set-target esp32s3 > /dev/null
 idf.py -B build_hw -D SDKCONFIG=build_hw/sdkconfig build 2>&1 | tail -3
 echo HW_BUILD_DONE
