@@ -8,6 +8,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("ref"); ap.add_argument("--port"); ap.add_argument("--tcp"); ap.add_argument("--baud", type=int, default=115200)
 ap.add_argument("--limit", type=int, default=0); ap.add_argument("--stream", action="store_true"); ap.add_argument("--log"); ap.add_argument("--out")
 ap.add_argument("--wait-ready", type=float, default=600.0); ap.add_argument("--timeout", type=float, default=30.0)
+ap.add_argument("--no-wait", action="store_true", help="the board is already booted: do not wait for READY")
 ap.add_argument("--fastfirst0", action="store_true", help="send `fastfirst 0` first (exact say.py utterances)")
 a = ap.parse_args()
 if a.tcp:
@@ -38,7 +39,7 @@ def lines_until(pred, timeout):
             out.append(l)
             if pred(l): return out
     return None
-if not lines_until(lambda l: l.startswith("READY"), a.wait_ready):
+if not a.no_wait and not lines_until(lambda l: l.startswith("READY"), a.wait_ready):
     sys.exit("no READY from the board")
 time.sleep(0.5)
 ref = [json.loads(l) for l in open(a.ref)]
