@@ -170,8 +170,6 @@ Automatic metrics (mean over the prompts; Whisper large-v3 word error rate; high
 
 What this says, and no more: among the neural systems built for or run on a microcontroller, Ito (female) has the highest UTMOSv2 (+0.13 over Inflect Nano v2, 95% interval 0.03 to 0.23), ties it on UTMOS22, is behind it on DNSMOS (3.34 vs 3.40) and has the lower word error rate (0.6 vs 1.1 %). Nine larger models, including the teacher, score higher on UTMOSv2, and none has a published MCU run that we know of. This ranking covers the systems in the table only: we could not benchmark the 567 K-parameter sanoTTS voice that runs on the chip (only its authors' own UTMOS, 2.80, from a different scoring run, is available), Moonshine Micro (voice pack not public) or Grovety tinyTTS (closed, needs an NPU). The quality claims rest on automatic predictors and on one listener who is an author; they are not a panel MOS study. Inflect Nano v2 has 3,966,721 parameters (3.97 M; its model card says 3.96 M). UTMOSv2 is stochastic (about 0.03 on these 54-clip means), the male and female rows are different speakers, and the Ito rows were scored on a different machine from the other systems' stored values (deterministic metrics reproduce; see [`bench/README.md`](bench/README.md)). Inflect's and TinyTTS's speeds are third-party figures that we did not re-measure (Inflect's comes from a third-party port to the larger ESP32-P4, not from its author); Ito's is measured on one board, with the limits stated in this page. To our knowledge, and among the systems we could find as of October 2026, Ito is the first neural TTS that streams on the ESP32-S3; it is not the first neural TTS on a microcontroller (sanoTTS and others synthesize on this chip or others) and far from the smallest.
 
-**Prior art:** see [`docs/prior_art.md`](docs/prior_art.md).
-
 ## Size and compute
 
 | | |
@@ -324,7 +322,7 @@ models/          README.md (how to get the weights from Hugging Face), LICENSE-W
 samples/         chip-exact output for eight unseen sentences
 results/         blind10/, blind9/ and blind8/ (listening tests), chip/ (host tests, QEMU log, op profile, estimates)
 bench/           benchmark against other small TTS systems (results, scoring script)
-docs/            prior_art.md
+docs/            demo.gif (animation)
 ```
 
 ## Limitations and disclosures
@@ -343,7 +341,7 @@ docs/            prior_art.md
 - The real-time factors of 0.65 / 0.66 were measured with the full split (both cores in the GEMM, used when the supply test passes) and both cores and about two thirds of the PSRAM in use, nothing else running and I2S idle. Co-residency with other tasks and the load of I2S DMA on the PSRAM bus are not measured. The soak's per-iteration self-test also times the single-core and 16-bit test modes, which are slower (RTF up to 0.90); the mode measured at 0.66 was dual-core, 8-bit, full split.
 - On the board (3 November 2026) the boot calibration chose int4 for the female voice and light for the male voice, and all sets were timed by the protocol. The female main and int4 sets were validated by ear by the owner (blind test #10 covered the female voice); the male main, int4 and light sets were checked informally by ear and have not been blind-tested; the female light set was only checked objectively (UTMOS22, UTMOSv2, DNSMOS, WER, F0 against main) and is not chosen by default.
 - Quality evidence: automatic predictors (UTMOSv2, UTMOS22, DNSMOS; none validated against listeners for these systems), 54 prompts, one voice and one seed per system, about 22 uncorrected comparisons per metric, and one listener who is an author. The shipped model was scored on a different machine (Apple M4 Max) from the other systems' stored values (A10G).
-- **Disclosures.** Ito is developed by Lokutor (Hashing Works, S.L.L.), which offers commercial licenses for it. The authors built the system, ran the benchmark and the listening tests, and made the board measurements; no independent party has reproduced them. The listener in the blind tests is the first author. A public listening test has been prepared and has no responses yet. Parts of the engine code, the experiment scripts and the accompanying manuscript were drafted with the help of an AI assistant (Claude, Anthropic); the authors directed the work, checked the results and the text, and take full responsibility for the content.
+- **Disclosures.** Ito is developed by Lokutor (Hashing Works, S.L.L.), which offers commercial licenses for it. The authors built the system, ran the benchmark and the listening tests, and made the board measurements; no independent party has reproduced them. The listener in the blind tests is the first author. A public listening test has been prepared and has no responses yet.
 
 ## License
 
