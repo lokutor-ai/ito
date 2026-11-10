@@ -65,7 +65,7 @@ gives in two phonemes ("ɪŋ" vs "ɪn" in "in consequence", "ɪ" vs "ᵻ" in "cu
 | working buffers (`itofe_work_bytes`) + stream state + text/req buffers | - | 216 + ~13 KB | 0 |
 | task stack (64 KB allocated, **peak 45.8 KB** on silicon; espeak keeps clause buffers on the stack) | - | 64 KB | 0 (TCB ~0.4 KB) |
 | espeak heap (translator, voice, decoder) | - | all allocations are redirected to PSRAM (`ito_mem.h`) | 0 |
-| **total** | **~570 KB** (app image 948 KB of the 2 MB slot) | **~0.36 MB** | **~0** |
+| **total** | **~570 KB** (app image 948,208 bytes, merged prebuilt 1,013,744 bytes, in the 1.94 MiB factory slot) | **~0.36 MB** | **~0** |
 
 **On silicon** (board and commit under "Measured on silicon" below): after boot with the front end up and the female int4 set loaded, free PSRAM 2143 KB of 8125 KB and free internal SRAM 52 KB, **identical before and after 579 `textq`
 utterances (500 texts), 2380 `ids` utterances and 1200 fuzz inputs** (no leak); high-water marks: PSRAM 5982 KB (engine + front end + the 12 s text PCM ring; 6251 KB while the 3.8 MB int8 set is loaded), internal SRAM 346 of 371 KB (unchanged by

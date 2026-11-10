@@ -59,12 +59,12 @@ Numbers are real-time factor (compute time over audio duration; below 1 is faste
 
 | Mode | RTF | Chunk plan | Board and harness |
 |---|---|---|---|
-| Full split | about 0.66 (0.660 to 0.674 on the demo sentences) | the firmware's ramp: a 125 ms first chunk, then 11, 12, 14, 18 and 24 frames | a board with a good supply, the shipped firmware's own boot calibration |
+| Full split | about 0.66 (0.660 to 0.674 on the demo sentences) | the firmware's ramp: the 10-frame (125 ms) first chunk, then 11, 12, 14, 18 and 24 frames | a board with a good supply, the shipped firmware's own boot calibration |
 | Row split | about 0.90 (0.903) | 16 frames per chunk, fixed | a second board of the same module class, a separate harness driving Ito's kernels |
 | Row split | about 0.84 (0.836) | 24 frames per chunk, fixed | the same second board and harness |
 | One core, no split | about 1.32 (1.323) | 8 frames per chunk, fixed (the row split is 1.056 at the same 8 frames) | the same second board and harness |
 
-The full-split and row-split numbers are not a like-for-like pair: the ramp reaches 24-frame chunks only at the end, and the firmware's own row-split RTF on the first board was not measured. The row split was later measured on the first board with the firmware's ramp: RTF 0.843 (main), 0.825 (int4), 0.774 (light), first chunk 236 / 231 / 216 ms (3 November 2026, `BENCHMARKING.md`). Expect 0.84 to 0.9 on a board like the second one with 24 to 16-frame chunks; a board-specific figure comes from running the boot benchmark yourself. More chunk plans, and why the plan matters, are in [`BENCHMARKING.md`](BENCHMARKING.md). The firmware's boot calibration (`CALIB`, `TIER_SELECT`) measures whichever mode is active, so it picks a lighter weight set automatically if the row split is too slow for real time on your board.
+The full-split and row-split numbers are not a like-for-like pair: the ramp reaches 24-frame chunks only at the end, and the firmware's own row-split RTF on the first board was not measured. The row split was later measured on the first board with the firmware's ramp: RTF 0.843 (main), 0.825 (int4), 0.774–0.776 (light), first chunk 236 / 231 / 216 ms (3 November 2026, `BENCHMARKING.md`). Expect 0.84 to 0.9 on a board like the second one with 24 to 16-frame chunks; a board-specific figure comes from running the boot benchmark yourself. More chunk plans, and why the plan matters, are in [`BENCHMARKING.md`](BENCHMARKING.md). The firmware's boot calibration (`CALIB`, `TIER_SELECT`) measures whichever mode is active, so it picks a lighter weight set automatically if the row split is too slow for real time on your board.
 
 ## Symptoms
 
@@ -139,7 +139,7 @@ Two further notes. One core of dense PIE on internal SRAM already browns out on 
    - a short, thick USB cable, a different host port or a powered hub, or a 5 V feed on the 5 V pin from a supply that can deliver an ampere;
    - or a different board.
    Changing the cable alone did not fix the board that failed. After a hardware fix, `split auto` runs the test again.
-4. **160 MHz is a software remedy**, safe on the failing board but slower than the row split at 240 MHz (at 8-frame chunks on the second board: RTF 1.547 for the row split at 160 MHz against 1.056 for the row split at 240 MHz; both are the row split). The full split at 160 MHz on that board measured RTF 1.121 at chunk 8. It passed in those runs, but in other reruns it hung twice, so 160 MHz lowers the load without removing the failure. It is not recommended unless you need the power savings anyway.
+4. **160 MHz is a software remedy**, safe on the failing board but slower than the row split at 240 MHz (at 8-frame chunks on the second board: RTF 1.547 for the row split at 160 MHz against 1.056 for the row split at 240 MHz; both are the row split). The full split at 160 MHz measured RTF 1.080 (full split, 8-frame chunks, on board A; esp32/BENCHMARKING.md, table C). On the second board it passed in some runs, but in other reruns it hung twice, so 160 MHz lowers the load without removing the failure. It is not recommended unless you need the power savings anyway.
 
 ## Check your board
 
