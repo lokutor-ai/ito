@@ -5,8 +5,6 @@ The weights are not stored in this repository. They are distributed only through
 [terms of use](TERMS.md) once. They are free for research, education, personal and hobby projects, under
 [CC BY-NC-SA 4.0](LICENSE-WEIGHTS). Commercial use needs a license from Lokutor (contact@lokutor.com).
 
-| file | size | used by |
-|---|---|---|
 Two voices, both distilled from StyleTTS 2 conditioned on a LibriTTS-R speaker (CC BY 4.0, see [`NOTICE`](../NOTICE)):
 
 | voice | speaker | PyTorch file (Python package) | chip file (firmware, `esp32/host`, `chip_wav.py`) |
