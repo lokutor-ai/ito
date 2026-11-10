@@ -1,4 +1,4 @@
-**SUPERSEDED (2 October 2026).** This table is the first, op-count-only estimate: it counted int8 MACs at an assumed GOPS and ignored PSRAM traffic and non-MAC instructions, so it was too optimistic (it is for the first release engine, 100 ms first chunk). The current estimates, from exact QEMU instruction counts plus a PSRAM-traffic model, are in esp32/README.md section 4: time to first audio 124-127 / 176-179 / 266-269 ms and real-time factor 0.72-0.78 / 1.15-1.23 / 1.9-2.0 (optimistic / central / pessimistic). Not measured on silicon; real time is not established.
+**SUPERSEDED (2 October 2026) by esp32/README.md:** §4 has the pre-board estimates of the current engine (124–132 / 171–180 / 251–260 ms; RTF 0.43–0.47 / 0.63–0.66 / 0.97–0.99), and §4a the measured numbers on silicon (184 ms; RTF 0.66; 0.65 for int4). The tables below are the first, op-count-only engine, kept for history.
 
 forward-GRU front, fixed style (incremental text side), fitted on 3 golden sentences:
   int8 MACs before the first chunk = 83.6 M + -0.000 M/token; non-GEMM ~10.7 M + -0.000 M cycles/token; weights read 10.2-10.2 MB

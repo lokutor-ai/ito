@@ -38,7 +38,7 @@ same chip).
 > - **On a board whose supply passes the test, it runs the full two-core split. On this board (female voice, the int4 set the boot chose): the first audio chunk is ready 180 ms after the phoneme ids reach the engine, the real-time factor is 0.65 (0.651 on the calibration sentence, 0.649 to 0.658 on the demo sentences), the planned gap-free start is 222 to 224 ms, and there were 0 underruns** (n = 10 silent runs per sentence, every PCM hash equal to the host C engine's). The same board with the main int8 set: 184 ms, RTF 0.665, planned start 250 ms.
 > - **On a board that does not pass the test, or after any brownout, hang or hash failure, it falls back to the row split** (measured on this same board by forcing it): first chunk 231 ms, RTF 0.83 (0.825; demos 0.822 to 0.836), planned start 513 to 615 ms, 0 underruns (main set: 236 ms, RTF 0.84, planned start 509 to 696 ms). A hang is recovered by a hardware watchdog; the full split stays off until `split auto|row|full` says otherwise.
 > - **What "first chunk" means:** 125 ms of audio computed and sitting in memory, counted from the phoneme ids (these figures were measured with ids sent from a computer; the on-chip text front end adds 2 to 20 ms, see the table below); the audio output stage and DAC latency are not included. The planned start is when the firmware begins playing so that the speech has no gap.
-> - **Weight sets per voice.** The boot measures all three sets and picks the one with the lowest planned start delay among the sets judged equivalent by ear *for that voice*: male main, int4 and light (checked informally by ear by the owner; the male voice has not been blind-tested); female main int8 and int4. The female light set is not on the list: its objective check is clean (UTMOS22 -0.013, UTMOSv2 -0.059, DNSMOS +0.028 against main, identical WER and CER on 54 prompts) but nobody has listened to it, so it is used only if no listed set meets the speed target, until it is approved (`equiv light on` or `CONFIG_ITOFS_APPROVE_LIGHT=y`). Male voice on this board: the light set, first chunk 168 ms, RTF 0.61, planned start 168 ms.
+> - **Weight sets per voice.** The boot measures all three sets and picks the one with the lowest planned start delay among the sets judged equivalent by ear *for that voice*: male main, int4 and light (checked informally by ear by the owner; the male voice has not been blind-tested); female main int8 and int4. The female light set is not on the list: its objective check is clean (UTMOS22 -0.013, UTMOSv2 -0.09 [-0.17, -0.02], DNSMOS +0.028 against main, identical WER and CER on 54 prompts) but nobody has listened to it, so it is used only if no listed set meets the speed target, until it is approved (`equiv light on` or `CONFIG_ITOFS_APPROVE_LIGHT=y`). Male voice on this board: the light set, first chunk 168 ms, RTF 0.61, planned start 168 ms.
 > - **Caveats.** One board, one session; every boot was a reset (USB, software, watchdog); no cold power-on boot has been logged yet. A second ESP32-S3 board (measured by the authors) hangs in the full split because its 3.3 V supply collapses, and runs the row split at RTF about 0.84 with 24-frame chunks; that is the case the fallback exists for. Not measured: DAC output latency and any listening test. The 2 Nov runs played through the ES8388 speaker for stability only; no latency or audio-quality measurement was made. Also not measured: power draw, other supplies and temperatures. The prebuilt image is built with ESP-IDF 5.5.1 (the previous one with 5.5.5); two builds in different directories are byte-identical. Details: [`esp32/DUAL_CORE_POWER.md`](esp32/DUAL_CORE_POWER.md), [`esp32/BENCHMARKING.md`](esp32/BENCHMARKING.md).
 > - **Silent boot and the ES8388 audio shield.** The board boots silent. The default build outputs plain I2S (GPIO15/16/17) and never touches I2C or the master-clock pin; for the ESP_S3-AUDIN shield build with `CONFIG_ITOFS_AUDIO_ES8388=y` (I2C SDA GPIO14 / SCL GPIO47, I2S MCLK GPIO8 / BCLK GPIO3 / LRCK GPIO9 / DOUT GPIO46, verified by an I2C scan and by recordings); `volume <0-100>` sets the output (91 = 0 dB; 0 mutes the DAC for good). See [`esp32/README.md`](esp32/README.md).
 
@@ -153,12 +153,18 @@ Automatic metrics (mean over the prompts; Whisper large-v3 word error rate; high
 | Inflect Nano v2 (Owen Song) | 3.97 M | ESP32-P4, 3.5x slower than real time (third-party figure, not re-measured) | 3.08 | 4.41 | 3.40 | 1.1 |
 | TinyTTS | 1.6 M | ESP32-S3, 22.9x slower than real time (per its author, not re-measured) | 2.45 | 3.66 | 3.29 | 6.8 |
 | sanoTTS amy | 1.45 M | no (the MCU voice is a different 567 K one) | 2.80 | 3.96 | 3.18 | 1.2 |
+| sanoTTS kristin | 1.40 M | no (paper: not run on MCU) | 1.98 | 3.56 | 3.11 | 6.8 |
+| sanoTTS heart | 2.27 M | no published MCU run | 1.95 | 3.19 | 3.14 | 1.7 |
 | sanoTTS heart-nano | 0.29 M | MCU-sized, no published timing | 1.33 | 2.17 | 2.97 | 1.7 |
 | eSpeak NG (rules) | - | community ports | 1.74 | 2.14 | 2.76 | 0.3 |
+| Flite (cmu_us_slt) | - | community ports, not verified here | 1.55 | 2.59 | 2.59 | 1.8 |
 | *Larger models (CPU or GPU)* | | | | | | |
 | Inflect Micro v2 (Owen Song) | 9.36 M | no | 3.46 | 4.41 | 3.38 | 1.0 |
 | Kitten TTS nano | 14.0 M | no | 1.99 | 3.93 | 3.31 | 1.1 |
+| Kitten TTS micro 0.8 | 35.0 M | no | 1.78 | 3.97 | 3.25 | 0.8 |
+| Kitten TTS mini 0.8 | 73.2 M | no | 1.88 | 4.02 | 3.27 | 1.1 |
 | Piper amy low | 15.6 M | no | 3.42 | 4.44 | 3.28 | 0.7 |
+| Piper lessac low | 15.7 M | no | 3.39 | 4.41 | 3.35 | 1.2 |
 | Piper lessac medium | 15.7 M | no | 3.69 | 4.28 | 3.29 | 0.7 |
 | MeloTTS EN | 51.9 M | no | 3.03 | 3.72 | 3.01 | 3.2 |
 | Supertonic 2 | 65.5 M | no | 3.62 | 4.44 | 3.35 | 2.4 |
@@ -174,7 +180,7 @@ What this says, and no more: among the neural systems built for or run on a micr
 
 | | |
 |---|---|
-| Parameters | 3.34 M: acoustic front 1.62 M + vocoder 1.72 M (was 4.40 M with a 256-wide vocoder) |
+| Parameters | 3.34 M: acoustic front 1.62 M + vocoder 1.72 M (was 4.05 M as stored on the chip; 4.40 M as float) |
 | Chip weights | **3.81 MB** main set (`ito_female_esp32s3.bin`; was 4.89 MB): int8 mel head and vocoder; int16 pitch path. Fallback sets for the boot calibration: main-int4 3.20 MB (`_int4`), light 3.05 MB (`_light`) |
 | Flash | 379 KB app + three 4.5 MB weight partitions (main 3.81 MB, main-int4 3.20 MB, light 3.05 MB per voice) |
 | PSRAM / SRAM | peak 5.3 of 8 MB PSRAM (5372 KB female / 5380 KB male of 8192 KB) and internal SRAM 332 of 374 KB during the self-test, 354 of 374 KB after the boot benchmark (high-water mark), measured on the board; the I2S DMA buffers were not active in any run, so headroom for them is about 20 KB (the pre-board QEMU figures were peak 5.3 of 8 MB PSRAM, 320 of 379 KB internal SRAM) |
