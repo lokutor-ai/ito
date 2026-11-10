@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ito-tts"
-version = "3.0.0"
+version = "1.1.0"
 description = "Ito: natural-sounding streaming text-to-speech small enough for an ESP32-S3"
 readme = "README.md"
 license = { text = "GPL-3.0-only (code); model weights (downloaded separately) are CC-BY-NC-SA-4.0" }

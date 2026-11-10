@@ -3,7 +3,7 @@
     from ito import Ito
     wav = Ito.load().synthesize("Good morning! The coffee is ready.")   # float32, 24 kHz
 """
-__version__ = "3.0.0"
+__version__ = "1.1.0"
 __all__ = ["Ito", "Chain", "Front", "Vocoder"]
 
 
