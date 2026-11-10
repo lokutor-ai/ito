@@ -5,7 +5,7 @@
  *        -> nltk word_tokenize on the phoneme string -> StyleTTS 2 symbol table, leading 0
  *
  * Portable C99 (host and ESP-IDF). The espeak-ng data comes from one memory blob (tools/pack_data.py).
- * Copyright (C) 2026 Lokutor / Ito authors. GPLv3 or later, see ../../LICENSE; espeak-ng (src/espeak) is GPLv3, see espeak/COPYING.
+ * Copyright (C) 2026 Lokutor / Ito authors. GPLv3 or later, see ../../LICENSE; espeak-ng (src/espeak) is GPLv3 or later, see espeak/COPYING.
  * The symbol table is from StyleTTS 2 (MIT, (c) 2023 Aaron (Yinghao) Li). */
 #ifndef ITO_FRONTEND_H
 #define ITO_FRONTEND_H
