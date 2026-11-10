@@ -53,4 +53,4 @@ Two earlier Ito variants against the reference (teacher) model; one listener, fo
 The Ito audio here (and in `samples/`) is output of the Ito voice model and is shared under CC BY-NC-SA 4.0, with
 Lokutor's terms in [`models/TERMS.md`](../models/TERMS.md).
 
-A public listening test has been prepared; it has no responses yet and nothing from it is reported in this repository.
+As of 10 November 2026 a public listening test is prepared; no responses are in this repository.

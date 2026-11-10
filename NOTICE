@@ -5,7 +5,7 @@ Two licenses
 ------------
 - Source code (ito/, esp32/, eval/): GNU GPL v3 (LICENSE). Commercial licenses are available
   (COMMERCIAL.md).
-- Voice model weights (female voice: ito_female.pt, ito_female_esp32s3.bin; male voice: ito_male.pt, ito_male_esp32s3.bin; not in this repository, distributed through the gated
+- Voice model weights (female voice: ito_female.pt, ito_female_esp32s3{,_int4,_light}.bin; male voice: ito_male.pt, ito_male_esp32s3{,_int4,_light}.bin; not in this repository, distributed through the gated
   Hugging Face repository lokutor-ai/ito, see models/README.md) and the Ito audio in samples/ and results/:
   Creative Commons Attribution-NonCommercial-ShareAlike 4.0 (models/LICENSE-WEIGHTS,
   https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode), together with Lokutor's terms of use
