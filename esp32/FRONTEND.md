@@ -8,7 +8,7 @@ prints the ids), `textp <string>` (like `textq`, with an emulated playout clock:
 needs the usual weight partitions; sha256 `9ef9553900aaaeadb522dfe41fc2816aecf2ac41cf9c2a35eb76a40c41f19eff`, ESP-IDF v5.5.1, built twice to the same bytes). `ITOFS_AUTOTEST` builds a stand-alone test image (see "Stand-alone run").
 
 > **Status of the measurements.** Correctness (ids) was verified on the host and in Espressif QEMU, **and since 5 November 2026 on silicon**: every number in the
-> "On silicon" sections below was measured on one board (ESP32-S3 QFN56 rev v0.2, MAC f8:5b:1b:91:64:ac, 8 MB octal PSRAM, 16 MB flash; firmware = the commits named below, now on `main`,
+> "On silicon" sections below was measured on one board (ESP32-S3 QFN56 rev v0.2, board C, 8 MB octal PSRAM, 16 MB flash; firmware = the commits named below, now on `main`,
 > ESP-IDF v5.5.1, female voice; the commands are in `frontend/tools/` and the "Reproduce" section below; the raw logs are kept by the authors, not in this repository).
 > One board (not the board of the earlier measurements in `README.md`), one chip revision, USB powered; not a second board for the front end, not a cold power-up from an unplugged state (a physical unplug was impossible: see
 > "Stand-alone run" below for what was done instead and what it proves).
@@ -49,7 +49,7 @@ currency, units, abbreviations, acronyms, punctuation, contractions, names, misc
 | same, **on the chip firmware in QEMU** (`tools/qemu_run.sh`): corpus + multi + 2500 fuzz | 4,315 | 4,315 |
 
 Vs. an older phonemizer (<= 3.3.0 punctuation logic, emulated by `--legacy-punct`): 1401 / 1403; the 2 differ by one token each ("bᵻlˌoʊ" vs "bᵻlˈoʊ" stress
-mark; list bullet "a)" read as "ɐ" vs "ˈeɪ"). That is a difference between host phonemizer versions, not a port error; I did not synthesize those two (no on-chip
+mark; list bullet "a)" read as "ɐ" vs "ˈeɪ"). That is a difference between host phonemizer versions, not a port error; Those two were not synthesized on the chip (no on-chip
 mismatch exists to compare).
 Honest finding: the **stored demo 2 token array** in `main/demo_sentences.h` differs from what espeak-ng 1.52.0 (and therefore the host front end today)
 gives in two phonemes ("ɪŋ" vs "ɪn" in "in consequence", "ɪ" vs "ᵻ" in "curiosity"): it was made with an older espeak-ng. Demos 0 and 1 are identical.
@@ -75,7 +75,7 @@ The build matters: with an old `build_hw/sdkconfig` that lacks `CONFIG_SPIRAM_AL
 
 ## Measured on silicon (5 November 2026)
 
-Board: ESP32-S3 QFN56 rev v0.2, MAC f8:5b:1b:91:64:ac, 8 MB octal PSRAM, 16 MB flash (Boya), USB powered; firmware: commits 61027d5, b343656, 08e8bae and the documentation commit e55e205 (now on `main`), ESP-IDF v5.5.1, female voice,
+Board: ESP32-S3 QFN56 rev v0.2, board C (not the headline board A of `BENCHMARKING.md`), 8 MB octal PSRAM, 16 MB flash, USB powered; firmware: commits 61027d5, b343656, 08e8bae and the documentation commit e55e205 (now on `main`), ESP-IDF v5.5.1, female voice,
 full split (3 s supply test: 272-273 passes in 3.02 s, pass; bit-exact self-test passes in every boot), boot-chosen int4 set unless stated. Commands: "Reproduce" below; raw logs are kept by the authors.
 No sound was produced: `textq`, `textp` and the stand-alone mode never start I2S.
 

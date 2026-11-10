@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build the firmware with ESP-IDF 5.5 (IDF_PATH, default ~/esp/esp-idf): the hardware configuration (octal PSRAM, QIO
+# Build the firmware with ESP-IDF 5.5 (IDF_PATH, an ESP-IDF v5.5.1 checkout): the hardware configuration (octal PSRAM, QIO
 # flash, I2S on) and the QEMU configuration (quad PSRAM, DIO flash, I2S compiled out), then write
 # esp32/prebuilt/ito_app_frontend_merged.bin (bootloader + partition table + app; flash it at 0x0).
 #   esp32/tools/build_fw.sh

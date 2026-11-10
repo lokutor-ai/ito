@@ -9,7 +9,7 @@
 #   REF_SETS="/abs/a.bin /abs/b.bin"                       weights whose self-test PCM the firmware's dumps are compared with, in order of the dumps
 #                                                          (default: the first set only; the last entry repeats). GREF = golden reference of the voice.
 #
-# Needs ESP-IDF 5.5 (IDF_PATH, default ~/esp/esp-idf) and Espressif's QEMU >= 9.2.2 for esp32s3 (QEMU_BIN; older
+# Needs ESP-IDF 5.5 (IDF_PATH, an ESP-IDF v5.5.1 checkout) and Espressif's QEMU >= 9.2.2 for esp32s3 (QEMU_BIN; older
 # builds find no PSRAM). Timings printed under QEMU are emulator wall-clock times, NOT chip times.
 set -e
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
