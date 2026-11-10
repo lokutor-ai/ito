@@ -245,7 +245,7 @@ Totals: 0 hash differences in any run of any cell (checked by the firmware: `0 r
 
 #### 5. Not measured / caveats
 
-One board, one session; every boot except the cold one was a reset. First chunk time = phoneme ids to 125 ms of PCM computed and in memory (ids sent from the host, no front end; output stage and DAC latency not included). Underruns are the firmware's accounting against its playout clock at volume 0. No sound was played, no listening. The ES8388 microphone loopback was not exercised. The second board (full split hangs) is the authors' measurement, not repeated here.
+One board, one session; every boot was a reset; no cold power-on boot was run. First chunk time = phoneme ids to 125 ms of PCM computed and in memory (ids sent from the host, no front end; output stage and DAC latency not included). Underruns are the firmware's accounting against its playout clock at volume 0. No sound was played, no listening. The ES8388 microphone loopback was not exercised. The second board (full split hangs) is the authors' measurement, not repeated here.
 
 ### Chunk size, clocks, kernels and the row to full split gain
 
