@@ -1,5 +1,7 @@
 # Ito: natural-sounding streaming text-to-speech for a $5 chip
 
+**License:** code GPLv3 (commercial licenses available, see COMMERCIAL.md). The voice model files are **non-commercial**: CC BY-NC-SA 4.0 with Lokutor's terms (see models/LICENSE-WEIGHTS). The on-chip text front end includes espeak-ng (GPLv3 or later), which is not covered by Lokutor's commercial license. Commercial use: contact@lokutor.com.
+
 [![Ito demo: click to watch the video with sound](docs/demo.gif)](https://lokutor-ai.github.io/ito/)
 
 *Click the animation to watch the 50-second video **with sound** (the GIF is silent). Every voice in it is Ito's own output from the chip engine.*
